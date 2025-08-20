@@ -5,7 +5,7 @@ import os
 base = imp.load_source("base", os.path.join(os.path.dirname(__file__), "base.py"))
 
 FLUX_MODEL_PATH = '/raid/data_qianh/jcy/hugging/models/FLUX.1-dev'
-SD3_MODEL_PATH = "stabilityai/stable-diffusion-3.5-medium"
+SD3_MODEL_PATH = "/raid/data_qianh/jcy/hugging/models/stable-diffusion-3.5-medium"
 
 def compressibility():
     config = base.get_config()
@@ -358,7 +358,7 @@ def consistency_sd3_4gpu():
 
     # sd3.5 medium
     config.pretrained.model = SD3_MODEL_PATH
-    config.sample.num_steps = 10
+    config.sample.num_steps = 20
     config.sample.eval_num_steps = 40
     config.sample.guidance_scale = 4.5
 
@@ -388,7 +388,7 @@ def consistency_sd3_4gpu():
         "consistency_score": 1.0,
     }
     
-    config.prompt_fn = "general_ocr"
+    config.prompt_fn = "geneval"
 
     config.per_prompt_stat_tracking = True
     return config
@@ -486,8 +486,8 @@ def qwenvl_flux_8gpu():
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
-    config.sample.num_steps = 8
-    config.sample.eval_num_steps = 8
+    config.sample.num_steps = 20
+    config.sample.eval_num_steps = 20
     config.sample.guidance_scale = 3.5
 
     config.resolution = 1024
@@ -531,8 +531,8 @@ def consistency_flux_8gpu():
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
-    config.sample.num_steps = 12
-    config.sample.eval_num_steps = 12
+    config.sample.num_steps = 20
+    config.sample.eval_num_steps = 20
     config.sample.guidance_scale = 3.5
 
     config.resolution = 1024
