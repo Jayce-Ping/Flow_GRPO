@@ -64,19 +64,13 @@ class DistributedKRepeatSampler(Sampler):
         self.rank = rank              # Current replica rank
         self.seed = seed              # Random seed for synchronization
         
-        # Compute the number of unique samples needed per iteration
-        self.total_samples = self.num_replicas * self.batch_size
-        if self.total_samples % self.k == 0:
-           # k | n*b, which means all repetitions of one sample can be yielded in one iteration
-           self.m = self.total_samples // self.k  # Number of unique samples
-           self.min_iter = 1
-        else:
-            # k does not divide n*b, which means we need to yield some samples in multiple iterations
-            # Find the least common multiple (LCM) of k and n*b
-            lcm = math.lcm(self.k, self.total_samples)
-            self.m = lcm // self.k  # Number of unique samples
-            self.min_iter = lcm // self.total_samples
-            self.total_samples = lcm  # Adjust total samples to LCM for uniformity
+        # Compute the number of samples for each batch iteration
+        self.num_sample_per_iteration = self.num_replicas * self.batch_size
+        # Compute the lcm
+        lcm = math.lcm(self.k, self.num_sample_per_iteration)
+        # Compute the minimal iteration number to include k repetitions for all prompts.
+        self.m = lcm // self.k  # Number of unique samples
+        self.min_iter = lcm // self.num_sample_per_iteration  # Minimum iterations to yield all samples with k repetitions
 
         self.epoch = 0
 
@@ -128,7 +122,7 @@ if __name__ == "__main__":
         seed=42)
         for i in range(num_processes)
     ]
-    print(train_samplers[0].m, train_samplers[0].total_samples)
+    print(train_samplers[0].m, train_samplers[0].num_sample_per_iteration)
     counter = {}
 
     for epoch in range(12):
