@@ -5,11 +5,12 @@ import os
 base = imp.load_source("base", os.path.join(os.path.dirname(__file__), "base.py"))
 
 FLUX_MODEL_PATH = '/raid/data_qianh/jcy/hugging/models/FLUX.1-dev'
+SD3_MODEL_PATH = "stabilityai/stable-diffusion-3.5-medium"
 
 def compressibility():
     config = base.get_config()
 
-    config.pretrained.model = "stabilityai/stable-diffusion-3.5-medium"
+    config.pretrained.model = SD3_MODEL_PATH
     config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
 
     config.use_lora = True
@@ -29,13 +30,15 @@ def compressibility():
     config.per_prompt_stat_tracking = True
     return config
 
+# --------------------------------------------------------SD3------------------------------------------------------
+
 def general_ocr_sd3():
     gpu_number = 32
     config = compressibility()
     config.dataset = os.path.join(os.getcwd(), "dataset/ocr")
 
     # sd3.5 medium
-    config.pretrained.model = "stabilityai/stable-diffusion-3.5-medium"
+    config.pretrained.model = SD3_MODEL_PATH
     config.sample.num_steps = 10
     config.sample.eval_num_steps = 40
     config.sample.guidance_scale = 4.5
@@ -77,7 +80,7 @@ def geneval_sd3():
     config.dataset = os.path.join(os.getcwd(), "dataset/geneval")
 
     # sd3.5 medium
-    config.pretrained.model = "stabilityai/stable-diffusion-3.5-medium"
+    config.pretrained.model = SD3_MODEL_PATH
     config.sample.num_steps = 10
     config.sample.eval_num_steps = 40
     config.sample.guidance_scale = 4.5
@@ -115,7 +118,7 @@ def pickscore_sd3():
     config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
 
     # sd3.5 medium
-    config.pretrained.model = "stabilityai/stable-diffusion-3.5-medium"
+    config.pretrained.model = SD3_MODEL_PATH
     config.sample.num_steps = 10
     config.sample.eval_num_steps = 40
     config.sample.guidance_scale = 4.5
@@ -153,7 +156,7 @@ def clipscore_sd3():
     config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
 
     # sd3.5 medium
-    config.pretrained.model = "stabilityai/stable-diffusion-3.5-medium"
+    config.pretrained.model = SD3_MODEL_PATH
     config.sample.num_steps = 10
     config.sample.eval_num_steps = 40
     config.sample.guidance_scale = 4.5
@@ -191,7 +194,7 @@ def pickscore_sd3_s1():
     config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
 
     # sd3.5 medium
-    config.pretrained.model = "stabilityai/stable-diffusion-3.5-medium"
+    config.pretrained.model = SD3_MODEL_PATH
     config.sample.num_steps = 10
     config.sample.train_num_steps = 1
     config.sample.eval_num_steps = 40
@@ -233,7 +236,7 @@ def general_ocr_sd3_4gpu():
     config.dataset = os.path.join(os.getcwd(), "dataset/ocr")
 
     # sd3.5 medium
-    config.pretrained.model = "stabilityai/stable-diffusion-3.5-medium"
+    config.pretrained.model = SD3_MODEL_PATH
     config.sample.num_steps = 10
     config.sample.eval_num_steps = 40
     config.sample.guidance_scale = 4.5
@@ -274,7 +277,7 @@ def pickscore_sd3_4gpu():
     config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
 
     # sd3.5 medium
-    config.pretrained.model = "stabilityai/stable-diffusion-3.5-medium"
+    config.pretrained.model = SD3_MODEL_PATH
     config.sample.num_steps = 10
     config.sample.eval_num_steps = 40
     config.sample.guidance_scale = 4.5
@@ -312,7 +315,7 @@ def general_ocr_sd3_1gpu():
     config.dataset = os.path.join(os.getcwd(), "dataset/ocr")
 
     # sd3.5 medium
-    config.pretrained.model = "stabilityai/stable-diffusion-3.5-medium"
+    config.pretrained.model = SD3_MODEL_PATH
     config.sample.num_steps = 10
     config.sample.eval_num_steps = 40
     config.sample.guidance_scale = 4.5
@@ -345,6 +348,50 @@ def general_ocr_sd3_1gpu():
 
     config.per_prompt_stat_tracking = True
     return config
+
+
+def consistency_sd3_4gpu():
+    gpu_number = 4
+    config = compressibility()
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
+
+    # sd3.5 medium
+    config.pretrained.model = SD3_MODEL_PATH
+    config.sample.num_steps = 10
+    config.sample.eval_num_steps = 40
+    config.sample.guidance_scale = 4.5
+
+    config.resolution = 1024
+    config.sample.train_batch_size = 8
+    config.sample.num_image_per_prompt = 16
+    config.sample.num_batches_per_epoch = int(16/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
+    assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
+    config.sample.test_batch_size = 8
+
+    config.train.batch_size = config.sample.train_batch_size
+    config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch//2
+    config.train.num_inner_epochs = 1
+    config.train.timestep_fraction = 0.99
+    # kl loss
+    config.train.beta = 0.04
+    # Whether to use the std of all samples or the current group's.
+    config.sample.global_std = True
+    config.sample.same_latent = False
+    config.train.ema = True
+    # A large num_epochs is intentionally set here. Training will be manually stopped once sufficient
+    config.save_freq = 30 # epoch
+    config.eval_freq = 30
+    config.save_dir = 'logs/consistency/sd3.5-M'
+    config.reward_fn = {
+        "ocr": 1.0,
+    }
+    
+    config.prompt_fn = "general_ocr"
+
+    config.per_prompt_stat_tracking = True
+    return config
+
+# -----------------------------------------------------------Flux---------------------------------------------------------------
 
 def pickscore_flux():
     gpu_number=32
