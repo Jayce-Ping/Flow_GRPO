@@ -283,10 +283,10 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
     if config.use_sliding_window:
         scheduler = FlowMatchSlidingWindowScheduler(
             noise_level=config.sample.noise_level,
-            window_size=config.sample.window_size,
+            window_size=config.sliding_window.window_size,
             iters_per_group=config.sample.iters_per_group,
-            left_boundary=config.sample.left_boundary,
-            right_boundary=config.sample.right_boundary,
+            left_boundary=config.sliding_window.left_boundary,
+            right_boundary=config.sliding_window.right_boundary,
             num_train_timesteps=config.sample.num_steps,
             **pipeline.scheduler.config.__dict__,
         )
@@ -376,7 +376,10 @@ def main(_):
         config.run_name += "_" + unique_id
 
     # number of timesteps within each trajectory to train on
-    num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
+    if config.use_sliding_window:
+        num_train_timesteps = config.sample.num_steps - config.sliding_window.left_boundary
+    else:
+        num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
 
     accelerator_config = ProjectConfiguration(
         project_dir=os.path.join(config.logdir, config.run_name),
@@ -702,7 +705,7 @@ def main(_):
                 )
         samples["rewards"]["ori_avg"] = samples["rewards"]["avg"]
         # The purpose of repeating `adv` along the timestep dimension here is to make it easier to introduce timestep-dependent advantages later, such as adding a KL reward.
-        samples["rewards"]["avg"] = samples["rewards"]["avg"].unsqueeze(1).repeat(1, num_train_timesteps)
+        samples["rewards"]["avg"] = samples["rewards"]["avg"].unsqueeze(1).repeat(1, config.sample.num_steps)
         # gather rewards across processes
         gathered_rewards = {key: accelerator.gather(value) for key, value in samples["rewards"].items()}
         gathered_rewards = {key: value.cpu().numpy() for key, value in gathered_rewards.items()}
@@ -791,7 +794,7 @@ def main(_):
                 disable=not accelerator.is_local_main_process,
             ):
                 for j in tqdm(
-                    range(pipeline.scheduler.left_boundary, num_train_timesteps),
+                    range(pipeline.scheduler.left_boundary, pipeline.scheduler.left_boundary + num_train_timesteps), # from left_boundary to config.sample.num_steps
                     desc="Timestep",
                     position=1,
                     leave=False,

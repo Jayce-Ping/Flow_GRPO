@@ -482,8 +482,8 @@ def qwenvl_flux_8gpu():
 
     # Sliding Window Scheduler
     config.use_sliding_window = False
-    config.window_size = 4
-    config.left_boundary = 0
+    config.sliding_window.window_size = 4
+    config.sliding_window.left_boundary = 0
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
@@ -528,7 +528,8 @@ def consistency_flux_8gpu():
 
     # Sliding Window Scheduler
     config.use_sliding_window = False
-    config.window_size = 4
+    config.sliding_window.window_size = 4
+    config.sliding_window.left_boundary = 0
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
@@ -573,7 +574,8 @@ def consistency_flux_4gpu():
 
     # Sliding Window Scheduler
     config.use_sliding_window = False
-    config.window_size = 4
+    config.sliding_window.window_size = 4
+    config.sliding_window.left_boundary = 0
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
