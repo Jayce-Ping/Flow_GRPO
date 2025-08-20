@@ -364,9 +364,10 @@ def consistency_sd3_4gpu():
 
     config.resolution = 1024
     config.max_sequence_length = 512
-    config.sample.train_batch_size = 8
-    config.sample.num_image_per_prompt = 16
+    config.sample.train_batch_size = 6
+    config.sample.num_image_per_prompt = 24
     config.sample.num_batches_per_epoch = int(16/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
+    # 16 / (4 * 6 / 24)
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
     config.sample.test_batch_size = 8
 
