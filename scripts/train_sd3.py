@@ -284,7 +284,7 @@ def main(_):
     )
     if accelerator.is_main_process:
         wandb.init(
-            project="flow_grpo",
+            project="FlowGRPO-SD3",
         )
         # accelerator.init_trackers(
         #     project_name="flow-grpo",

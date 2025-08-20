@@ -395,7 +395,7 @@ def main(_):
     )
     if accelerator.is_main_process:
         wandb.init(
-            project="FlowGRPO",
+            project="FlowGRPO-Flux",
             # mode="disabled"
         )
         # accelerator.init_trackers(
