@@ -193,7 +193,7 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
     last_batch_prompt_ids = tokenizers[0](
         prompts,
         padding="max_length",
-        max_length=256,
+        max_length=config.max_sequence_length,
         truncation=True,
         return_tensors="pt",
     ).input_ids.to(accelerator.device)
@@ -221,7 +221,7 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
             sampled_prompts = [last_batch_prompts_gather[index] for index in sample_indices]
             sampled_rewards = [{k: last_batch_rewards_gather[k][index] for k in last_batch_rewards_gather} for index in sample_indices]
             for key, value in all_rewards.items():
-                print(key, value.shape)
+                print(key, value.mean())
             wandb.log(
                 {
                     "eval_images": [
