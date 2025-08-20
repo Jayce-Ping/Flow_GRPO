@@ -1,35 +1,39 @@
-from collections import defaultdict
 import contextlib
-import os
 import datetime
-from concurrent import futures
-import time
-import json
 import hashlib
+import json
+import os
+import random
+import tempfile
+import time
+from collections import defaultdict
+from concurrent import futures
+from functools import partial
+
+import numpy as np
+import torch
+import tqdm
+import wandb
 from absl import app, flags
 from accelerate import Accelerator
-from ml_collections import config_flags
-from accelerate.utils import set_seed, ProjectConfiguration
 from accelerate.logging import get_logger
+from accelerate.utils import ProjectConfiguration, set_seed
 from diffusers import StableDiffusion3Pipeline
 from diffusers.utils.torch_utils import is_compiled_module
-import numpy as np
+from ml_collections import config_flags
+from peft import LoraConfig, PeftModel, get_peft_model, set_peft_model_state_dict
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset, Sampler
+
 import flow_grpo.prompts
 import flow_grpo.rewards
-from flow_grpo.stat_tracking import PerPromptStatTracker
+from flow_grpo.datasets.prompt_dataset import GenevalPromptDataset, TextPromptDataset
+from flow_grpo.datasets.sampler import DistributedKRepeatSampler
 from flow_grpo.diffusers_patch.sd3_pipeline_with_logprob import pipeline_with_logprob
 from flow_grpo.diffusers_patch.sd3_sde_with_logprob import denoising_step_with_logprob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_sd3 import encode_prompt
-import torch
-import wandb
-from functools import partial
-import tqdm
-import tempfile
-from PIL import Image
-from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftModel
-import random
-from torch.utils.data import Dataset, DataLoader, Sampler
 from flow_grpo.ema import EMAModuleWrapper
+from flow_grpo.stat_tracking import PerPromptStatTracker
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -38,88 +42,6 @@ FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", "config/base.py", "Training configuration.")
 
 logger = get_logger(__name__)
-
-class TextPromptDataset(Dataset):
-    def __init__(self, dataset, split='train'):
-        self.file_path = os.path.join(dataset, f'{split}.txt')
-        with open(self.file_path, 'r') as f:
-            self.prompts = [line.strip() for line in f.readlines()]
-        
-    def __len__(self):
-        return len(self.prompts)
-    
-    def __getitem__(self, idx):
-        return {"prompt": self.prompts[idx], "metadata": {}}
-
-    @staticmethod
-    def collate_fn(examples):
-        prompts = [example["prompt"] for example in examples]
-        metadatas = [example["metadata"] for example in examples]
-        return prompts, metadatas
-
-class GenevalPromptDataset(Dataset):
-    def __init__(self, dataset, split='train'):
-        self.file_path = os.path.join(dataset, f'{split}_metadata.jsonl')
-        with open(self.file_path, 'r', encoding='utf-8') as f:
-            self.metadatas = [json.loads(line) for line in f]
-            self.prompts = [item['prompt'] for item in self.metadatas]
-        
-    def __len__(self):
-        return len(self.prompts)
-    
-    def __getitem__(self, idx):
-        return {"prompt": self.prompts[idx], "metadata": self.metadatas[idx]}
-
-    @staticmethod
-    def collate_fn(examples):
-        prompts = [example["prompt"] for example in examples]
-        metadatas = [example["metadata"] for example in examples]
-        return prompts, metadatas
-
-class DistributedKRepeatSampler(Sampler):
-    def __init__(self, dataset, batch_size, k, num_replicas, rank, seed=0):
-        self.dataset = dataset
-        self.batch_size = batch_size  # Batch size per replica
-        self.k = k                    # Number of repetitions per sample
-        self.num_replicas = num_replicas  # Total number of replicas
-        self.rank = rank              # Current replica rank
-        self.seed = seed              # Random seed for synchronization
-        
-        # Compute the number of unique samples needed per iteration
-        self.total_samples = self.num_replicas * self.batch_size
-        assert self.total_samples % self.k == 0, f"k can not divide n*b, k{k}-num_replicas{num_replicas}-batch_size{batch_size}"
-        self.m = self.total_samples // self.k  # Number of unique samples
-        self.epoch = 0
-
-    def __iter__(self):
-        while True:
-            # Generate a deterministic random sequence to ensure all replicas are synchronized
-            g = torch.Generator()
-            g.manual_seed(self.seed + self.epoch)
-            
-            # Randomly select m unique samples
-            indices = torch.randperm(len(self.dataset), generator=g)[:self.m].tolist()
-            
-            # Repeat each sample k times to generate n*b total samples
-            repeated_indices = [idx for idx in indices for _ in range(self.k)]
-            
-            # Shuffle to ensure uniform distribution
-            shuffled_indices = torch.randperm(len(repeated_indices), generator=g).tolist()
-            shuffled_samples = [repeated_indices[i] for i in shuffled_indices]
-            
-            # Split samples to each replica
-            per_card_samples = []
-            for i in range(self.num_replicas):
-                start = i * self.batch_size
-                end = start + self.batch_size
-                per_card_samples.append(shuffled_samples[start:end])
-            
-            # Return current replica's sample indices
-            yield per_card_samples[self.rank]
-    
-    def set_epoch(self, epoch):
-        self.epoch = epoch  # Used to synchronize random state across epochs
-
 
 def compute_text_embeddings(prompt, text_encoders, tokenizers, max_sequence_length, device):
     with torch.no_grad():
@@ -472,8 +394,8 @@ def main(_):
     )
 
     # prepare prompt and reward fn
-    reward_fn = getattr(flow_grpo.rewards, 'multi_score')(accelerator.device, config.reward_fn)
-    eval_reward_fn = getattr(flow_grpo.rewards, 'multi_score')(accelerator.device, config.reward_fn)
+    reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
+    eval_reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
 
     if config.prompt_fn == "general_ocr":
         train_dataset = TextPromptDataset(config.dataset, 'train')
