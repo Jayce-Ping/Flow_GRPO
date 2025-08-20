@@ -1,6 +1,7 @@
 import ml_collections
 import imp
 import os
+import math
 
 base = imp.load_source("base", os.path.join(os.path.dirname(__file__), "base.py"))
 
@@ -12,7 +13,7 @@ def compressibility():
 
     config.pretrained.model = SD3_MODEL_PATH
     config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
-    config.max_sequence_length = 256
+    config.max_sequence_length = 512
 
     config.use_lora = True
     config.use_sliding_window = False
@@ -365,9 +366,13 @@ def consistency_sd3_4gpu():
     config.resolution = 1024
     config.max_sequence_length = 512
     config.sample.train_batch_size = 2
-    config.sample.num_image_per_prompt = 16
-    config.sample.num_batches_per_epoch = int(16/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
-    # 16 / (4 * 2 / 16)
+    config.sample.num_image_per_prompt = 24
+
+    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch
+    # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
+    config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
+    config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
+
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
     config.sample.test_batch_size = 8
 
@@ -410,7 +415,12 @@ def pickscore_flux():
     config.resolution = 512
     config.sample.train_batch_size = 3
     config.sample.num_image_per_prompt = 24
-    config.sample.num_batches_per_epoch = int(48/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
+
+    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch
+    # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
+    config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
+    config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
+
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
     config.sample.test_batch_size = 16 # This bs is a special design, the test set has a total of 2048, to make gpu_num*bs*n as close as possible to 2048, because when the number of samples cannot be divided evenly by the number of cards, multi-card will fill the last batch to ensure each card has the same number of samples, affecting gradient synchronization.
 
@@ -449,7 +459,12 @@ def pickscore_flux_8gpu():
     config.resolution = 512
     config.sample.train_batch_size = 3
     config.sample.num_image_per_prompt = 24
-    config.sample.num_batches_per_epoch = int(48/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
+    
+    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch
+    # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
+    config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
+    config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
+
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
     config.sample.test_batch_size = 16 # This bs is a special design, the test set has a total of 2048, to make gpu_num*bs*n as close as possible to 2048, because when the number of samples cannot be divided evenly by the number of cards, multi-card will fill the last batch to ensure each card has the same number of samples, affecting gradient synchronization.
 
@@ -494,9 +509,13 @@ def qwenvl_flux_8gpu():
     config.resolution = 1024
     config.sample.train_batch_size = 1
     config.sample.num_image_per_prompt = 24
-    config.sample.num_batches_per_epoch = int(48/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
-    # 48 / (8 * 1 / 24)
-    assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
+
+    config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
+    # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
+    config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
+    config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
+
+    assert config.sample.num_batches_per_epoch % 2 == 0, f"Please set config.sample.num_batches_per_epoch {config.sample.num_batches_per_epoch} to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
     config.sample.test_batch_size = 8
 
     config.train.batch_size = config.sample.train_batch_size
@@ -540,11 +559,14 @@ def consistency_flux_8gpu():
     config.resolution = 1024
     config.max_sequence_length = 512
     config.sample.train_batch_size = 1
-    config.sample.num_image_per_prompt = 8
-    config.sample.num_batches_per_epoch = int(48/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
-    # 48 / (8 * 1 / 24)
-    assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
-    config.sample.test_batch_size = 8
+    config.sample.num_image_per_prompt = 24
+
+    config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
+    # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
+    config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
+    config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
+
+    assert config.sample.num_batches_per_epoch % 2 == 0, f"Please set config.sample.num_batches_per_epoch {config.sample.num_batches_per_epoch} to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
 
     config.train.batch_size = config.sample.train_batch_size
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // 2
@@ -586,9 +608,13 @@ def consistency_flux_4gpu():
     config.resolution = 1024
     config.max_sequence_length = 512
     config.sample.train_batch_size = 1
-    config.sample.num_image_per_prompt = 16
-    config.sample.num_batches_per_epoch = int(32/(gpu_number*config.sample.train_batch_size/config.sample.num_image_per_prompt))
-    # 32 / (4 * 1 / 16) = 128
+    config.sample.num_image_per_prompt = 24
+
+    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch
+    # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
+    config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
+    config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
+
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
     config.sample.test_batch_size = 8
 
