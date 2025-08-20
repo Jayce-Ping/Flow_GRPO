@@ -140,7 +140,7 @@ def compute_log_prob(transformer, pipeline, sample, j, embeds, pooled_embeds, co
 def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerator, global_step, reward_fn, executor, autocast, num_train_timesteps, ema, transformer_trainable_parameters):
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
-    neg_prompt_embed, neg_pooled_prompt_embed = compute_text_embeddings([""], text_encoders, tokenizers, max_sequence_length=128, device=accelerator.device)
+    neg_prompt_embed, neg_pooled_prompt_embed = compute_text_embeddings([""], text_encoders, tokenizers, max_sequence_length=config.max_sequence_length, device=accelerator.device)
 
     sample_neg_prompt_embeds = neg_prompt_embed.repeat(config.sample.test_batch_size, 1, 1)
     sample_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(config.sample.test_batch_size, 1)
@@ -158,7 +158,7 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
             prompts, 
             text_encoders, 
             tokenizers, 
-            max_sequence_length=128, 
+            max_sequence_length=config.max_sequence_length, 
             device=accelerator.device
         )
         # The last batch may not be full batch_size
@@ -460,7 +460,7 @@ def main(_):
         raise NotImplementedError("Only general_ocr is supported with dataset")
 
 
-    neg_prompt_embed, neg_pooled_prompt_embed = compute_text_embeddings([""], text_encoders, tokenizers, max_sequence_length=128, device=accelerator.device)
+    neg_prompt_embed, neg_pooled_prompt_embed = compute_text_embeddings([""], text_encoders, tokenizers, max_sequence_length=config.max_sequence_length, device=accelerator.device)
 
     sample_neg_prompt_embeds = neg_prompt_embed.repeat(config.sample.train_batch_size, 1, 1)
     train_neg_prompt_embeds = neg_prompt_embed.repeat(config.train.batch_size, 1, 1)
@@ -545,13 +545,13 @@ def main(_):
                 prompts, 
                 text_encoders, 
                 tokenizers, 
-                max_sequence_length=128, 
+                max_sequence_length=config.max_sequence_length,
                 device=accelerator.device
             )
             prompt_ids = tokenizers[0](
                 prompts,
                 padding="max_length",
-                max_length=256,
+                max_length=config.max_sequence_length,
                 truncation=True,
                 return_tensors="pt",
             ).input_ids.to(accelerator.device)

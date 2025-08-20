@@ -180,7 +180,7 @@ def eval(pipeline,
             prompts, 
             text_encoders, 
             tokenizers, 
-            max_sequence_length=128, 
+            max_sequence_length=config.max_sequence_length, 
             device=accelerator.device
         )
         with autocast():
@@ -588,13 +588,13 @@ def main(_):
                 prompts, 
                 text_encoders, 
                 tokenizers, 
-                max_sequence_length=128,
+                max_sequence_length=config.max_sequence_length,
                 device=accelerator.device
             )
             prompt_ids = tokenizers[0](
                 prompts,
                 padding="max_length",
-                max_length=256,
+                max_length=config.max_sequence_length,
                 truncation=True,
                 return_tensors="pt",
             ).input_ids.to(accelerator.device)
