@@ -280,13 +280,12 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
         low_cpu_mem_usage=False
     )
 
-    if config.use_sliding_window:
+    if config.sample.use_sliding_window:
         scheduler = FlowMatchSlidingWindowScheduler(
             noise_level=config.sample.noise_level,
-            window_size=config.sliding_window.window_size,
+            window_size=config.sample.window_size,
             iters_per_group=config.sample.iters_per_group,
-            left_boundary=config.sliding_window.left_boundary,
-            right_boundary=config.sliding_window.right_boundary,
+            left_boundary=config.sample.left_boundary,
             num_train_timesteps=config.sample.num_steps,
             **pipeline.scheduler.config.__dict__,
         )
@@ -376,8 +375,8 @@ def main(_):
         config.run_name += "_" + unique_id
 
     # number of timesteps within each trajectory to train on
-    if config.use_sliding_window:
-        num_train_timesteps = config.sample.num_steps - config.sliding_window.left_boundary
+    if config.sample.use_sliding_window:
+        num_train_timesteps = config.sample.num_steps - config.sample.left_boundary 
     else:
         num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
 
