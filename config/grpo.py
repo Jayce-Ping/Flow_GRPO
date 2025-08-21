@@ -368,7 +368,7 @@ def consistency_sd3_4gpu():
     config.sample.train_batch_size = 2
     config.sample.num_image_per_prompt = 24
 
-    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch
     # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
     config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
     config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
@@ -526,7 +526,7 @@ def qwenvl_flux_8gpu():
     config.sample.global_std = True
     config.sample.same_latent = False
     config.train.ema = True
-    config.sample.noise_level = 0.7
+    config.sample.noise_level = 0.9
     config.save_freq = 30 # epoch
     config.eval_freq = 30 # -1 for no eval applied
     config.save_dir = 'logs/qwen/flux-8gpu'
@@ -559,9 +559,9 @@ def consistency_flux_8gpu():
     config.resolution = 1024
     config.max_sequence_length = 512
     config.sample.train_batch_size = 1
-    config.sample.num_image_per_prompt = 24
+    config.sample.num_image_per_prompt = 48
 
-    config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 18 # Number of unique prompts used in each epoch
     # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
     config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
     config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
@@ -576,7 +576,7 @@ def consistency_flux_8gpu():
     config.sample.global_std = True
     config.sample.same_latent = False
     config.train.ema = True
-    config.sample.noise_level = 0.7
+    config.sample.noise_level = 0.9
     config.save_freq = 30 # epoch
     config.eval_freq = 30 # -1 for no eval applied
     config.save_dir = 'logs/consistency/flux-8gpu'
@@ -601,14 +601,14 @@ def consistency_flux_4gpu():
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
-    config.sample.num_steps = 12
-    config.sample.eval_num_steps = 12
+    config.sample.num_steps = 10
+    config.sample.eval_num_steps = 20
     config.sample.guidance_scale = 3.5
 
     config.resolution = 1024
     config.max_sequence_length = 512
     config.sample.train_batch_size = 1
-    config.sample.num_image_per_prompt = 24
+    config.sample.num_image_per_prompt = 32
 
     config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch
     # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
@@ -626,7 +626,7 @@ def consistency_flux_4gpu():
     config.sample.global_std = True
     config.sample.same_latent = False
     config.train.ema = True
-    config.sample.noise_level = 0.7
+    config.sample.noise_level = 0.9
     config.save_freq = 30 # epoch
     config.eval_freq = 30 # -1 for no eval applied
     config.save_dir = 'logs/consistency/flux-8gpu'
