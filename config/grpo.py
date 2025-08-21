@@ -561,7 +561,7 @@ def consistency_flux_8gpu():
     config.sample.train_batch_size = 1
     config.sample.num_image_per_prompt = 32
 
-    config.sample.unique_sample_num_per_epoch = 12 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 40 # Number of unique prompts used in each epoch
     # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
     config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
     config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
@@ -587,7 +587,7 @@ def consistency_flux_8gpu():
     
     config.prompt_fn = "geneval"
 
-    config.train.lora_path = 'logs/consistency/flux-4gpu/checkpoints/checkpoint-60/lora'
+    # config.train.lora_path = 'logs/consistency/flux-4gpu/checkpoints/checkpoint-60/lora'
 
     config.per_prompt_stat_tracking = True
     return config
