@@ -590,7 +590,7 @@ def consistency_flux_8gpu():
     return config
 
 def consistency_flux_4gpu():
-    gpu_number=4
+    gpu_number = 4
     config = compressibility()
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
 
@@ -629,6 +629,57 @@ def consistency_flux_4gpu():
     config.sample.noise_level = 0.9
     config.save_freq = 30 # epoch
     config.eval_freq = 30 # -1 for no eval applied
+    config.save_dir = 'logs/consistency/flux-8gpu'
+    config.reward_fn = {
+        "consistency_score": 1.0,
+    }
+    
+    config.prompt_fn = "geneval"
+
+    config.per_prompt_stat_tracking = True
+    return config
+
+
+def consistency_flux_7gpu():
+    gpu_number = 7
+    config = compressibility()
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
+
+    # Sliding Window Scheduler
+    config.use_sliding_window = False
+    config.sliding_window.window_size = 4
+    config.sliding_window.left_boundary = 0
+
+    # flux
+    config.pretrained.model = FLUX_MODEL_PATH
+    config.sample.num_steps = 10
+    config.sample.eval_num_steps = 20
+    config.sample.guidance_scale = 3.5
+
+    config.resolution = 1024
+    config.max_sequence_length = 512
+    config.sample.train_batch_size = 1
+    config.sample.num_image_per_prompt = 48
+
+    config.sample.unique_sample_num_per_epoch = 14 # Number of unique prompts used in each epoch
+    # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
+    config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
+    config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
+
+    assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
+    config.sample.test_batch_size = 8
+
+    config.train.batch_size = config.sample.train_batch_size
+    config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // 2
+    config.train.num_inner_epochs = 1
+    config.train.timestep_fraction = 0.99
+    config.train.beta = 0
+    config.sample.global_std = True
+    config.sample.same_latent = False
+    config.train.ema = True
+    config.sample.noise_level = 0.9
+    config.save_freq = 15 # epoch
+    config.eval_freq = 15 # -1 for no eval applied
     config.save_dir = 'logs/consistency/flux-8gpu'
     config.reward_fn = {
         "consistency_score": 1.0,
