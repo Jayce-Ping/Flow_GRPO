@@ -399,6 +399,7 @@ def main(_):
     if accelerator.is_main_process:
         wandb.init(
             project="FlowGRPO-Flux",
+            config=config.to_dict(),
             # mode="disabled"
         )
         # accelerator.init_trackers(
