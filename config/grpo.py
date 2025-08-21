@@ -559,7 +559,7 @@ def consistency_flux_8gpu():
     config.resolution = 1024
     config.max_sequence_length = 512
     config.sample.train_batch_size = 1
-    config.sample.num_image_per_prompt = 48
+    config.sample.num_image_per_prompt = 32
 
     config.sample.unique_sample_num_per_epoch = 18 # Number of unique prompts used in each epoch
     # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
@@ -608,7 +608,7 @@ def consistency_flux_4gpu():
     config.resolution = 1024
     config.max_sequence_length = 512
     config.sample.train_batch_size = 1
-    config.sample.num_image_per_prompt = 32
+    config.sample.num_image_per_prompt = 16
 
     config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch
     # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
@@ -659,7 +659,7 @@ def consistency_flux_7gpu():
     config.resolution = 1024
     config.max_sequence_length = 512
     config.sample.train_batch_size = 1
-    config.sample.num_image_per_prompt = 48
+    config.sample.num_image_per_prompt = 24
 
     config.sample.unique_sample_num_per_epoch = 14 # Number of unique prompts used in each epoch
     # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
