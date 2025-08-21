@@ -224,7 +224,7 @@ def eval(pipeline,
     all_rewards = {key: np.concatenate(value) for key, value in all_rewards.items()}
     if accelerator.is_main_process:
         with tempfile.TemporaryDirectory() as tmpdir:
-            num_samples = min(15, len(last_batch_images_gather))
+            num_samples = min(12, len(last_batch_images_gather))
             # sample_indices = random.sample(range(len(images)), num_samples)
             sample_indices = range(num_samples)
             for idx, index in enumerate(sample_indices):
@@ -634,6 +634,8 @@ def main(_):
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, only_strict=True)
             # yield to to make sure reward computation starts
             time.sleep(0)
+            # rewards.add_done_callback(lambda f: f.exception() and print("[reward_fn] exception:", f.exception()))
+
 
             samples.append(
                 {

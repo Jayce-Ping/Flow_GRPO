@@ -125,9 +125,8 @@ def consistency_score(device):
             images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
             images = images.transpose(0, 2, 3, 1)  # NCHW -> NHWC
             images = [Image.fromarray(image) for image in images]
-
+        
         scores = asyncio.run(scorer(images, prompts, metadatas))
-
         return scores, {}
 
     return _fn

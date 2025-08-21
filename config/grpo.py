@@ -644,7 +644,7 @@ def consistency_flux_4gpu():
 
 
 def consistency_flux_7gpu():
-    gpu_number = 7 # Use one gpu to deploy vllm for consistency scoring
+    gpu_number = 7 # Save one gpu to deploy vllm for consistency scoring
     config = compressibility()
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
 
@@ -655,7 +655,7 @@ def consistency_flux_7gpu():
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
-    config.sample.num_steps = 10
+    config.sample.num_steps = 20
     config.sample.eval_num_steps = 20
     config.sample.guidance_scale = 3.5
 
@@ -664,7 +664,7 @@ def consistency_flux_7gpu():
     config.sample.train_batch_size = 1
     config.sample.num_image_per_prompt = 24
 
-    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 21 # Number of unique prompts used in each epoch
     # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
     config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
     config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
@@ -683,7 +683,7 @@ def consistency_flux_7gpu():
     config.sample.noise_level = 0.9
     config.save_freq = 15 # epoch
     config.eval_freq = 15 # -1 for no eval applied
-    config.save_dir = 'logs/consistency/flux-8gpu'
+    config.save_dir = 'logs/consistency/flux-7gpu'
     config.reward_fn = {
         "consistency_score": 1.0,
     }
