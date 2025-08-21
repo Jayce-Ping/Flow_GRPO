@@ -117,7 +117,7 @@ def consistency_score(device):
         base_url='http://127.0.0.1:8000/v1',
         model='QwenVL2.5-7B-Instruct',
         criteria_path='dataset/T2IS/prompt_consistency_criterion.json',
-        max_concurrent=12
+        max_concurrent=6, # 6 for 8 gpus, 12 for 4 gpus.
     )
 
     def _fn(images, prompts, metadatas):
