@@ -644,7 +644,7 @@ def consistency_flux_4gpu():
 
 
 def consistency_flux_7gpu():
-    gpu_number = 7
+    gpu_number = 7 # Use one gpu to deploy vllm for consistency scoring
     config = compressibility()
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
 

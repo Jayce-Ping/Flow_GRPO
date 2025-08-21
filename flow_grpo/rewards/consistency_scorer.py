@@ -159,7 +159,7 @@ class ConsistencyScorer:
             prompt : str,
             image : Image.Image,
             criteria_text : str,
-            top_logprobs: int = 100
+            top_logprobs: int = 20
         ) -> list[float]:
         if self.async_mode:
             return await self._async_compute_image_consistency(prompt, image, criteria_text, top_logprobs)
@@ -171,7 +171,7 @@ class ConsistencyScorer:
             prompt : str,
             image : Image.Image,
             criteria_text : str,
-            top_logprobs: int = 100,
+            top_logprobs: int = 20,
             max_retries : int = 5,
             timeout : float = 60.0
         ) -> list[float]:
@@ -229,7 +229,7 @@ class ConsistencyScorer:
             prompt : str,
             image : Image.Image,
             criteria_text : str,
-            top_logprobs: int = 100
+            top_logprobs: int = 20
         ) -> list[float]:
         """
         Compute the consistency score of a image, for a given criterion.
