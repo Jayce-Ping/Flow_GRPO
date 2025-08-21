@@ -243,7 +243,7 @@ def eval(pipeline,
                     "eval_images": [
                         wandb.Image(
                             os.path.join(tmpdir, f"{idx}.jpg"),
-                            caption=f"{prompt:.1000} | " + " | ".join(f"{k}: {v:.2f}" for k, v in reward.items() if v != -10),
+                            caption=" | ".join(f"{k}: {v:.2f} | " + f"{prompt:.1000}" for k, v in reward.items() if v != -10),
                         )
                         for idx, (prompt, reward) in enumerate(zip(sampled_prompts, sampled_rewards))
                     ],
@@ -697,7 +697,7 @@ def main(_):
                         "images": [
                             wandb.Image(
                                 os.path.join(tmpdir, f"{idx}.jpg"),
-                                caption=f"{prompt:.100} | avg: {avg_reward:.2f}",
+                                caption=f"avg: {avg_reward:.2f} | {prompt:.100}",
                             )
                             for idx, (prompt, avg_reward) in enumerate(zip(sampled_prompts, sampled_rewards))
                         ],
