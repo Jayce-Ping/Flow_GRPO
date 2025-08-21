@@ -664,13 +664,13 @@ def consistency_flux_7gpu():
     config.sample.train_batch_size = 1
     config.sample.num_image_per_prompt = 24
 
-    config.sample.unique_sample_num_per_epoch = 14 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch
     # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
     config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
     config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
 
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
-    config.sample.test_batch_size = 8
+    config.sample.test_batch_size = 10
 
     config.train.batch_size = config.sample.train_batch_size
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // 2
