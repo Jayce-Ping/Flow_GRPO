@@ -202,7 +202,7 @@ def eval(pipeline,
         time.sleep(0)
         # all_futures.append(future)
         rewards, reward_metadata = future.result()
-        for key, value in all_rewards.items():
+        for key, value in rewards.items():
             rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
             all_rewards[key] = rewards_gather
     
