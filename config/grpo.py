@@ -613,7 +613,7 @@ def consistency_flux_4gpu():
     config.sample.train_batch_size = 1
     config.sample.num_image_per_prompt = 16
 
-    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 24 # Number of unique prompts used in each epoch
     # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
     config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
     config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
@@ -630,8 +630,8 @@ def consistency_flux_4gpu():
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
-    config.save_freq = 20 # epoch
-    config.eval_freq = 20 # -1 for no eval applied
+    config.save_freq = 24 # epoch
+    config.eval_freq = 24 # -1 for no eval applied
     config.save_dir = 'logs/consistency/flux-4gpu'
     config.reward_fn = {
         "consistency_score": 1.0,

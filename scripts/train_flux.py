@@ -201,7 +201,7 @@ def eval(pipeline,
         # yield to to make sure reward computation starts
         time.sleep(0)
         # all_futures.append(future)
-        rewards, reward_metadata = rewards.result()
+        rewards, reward_metadata = future.result()
         for key, value in all_rewards.items():
             rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
             all_rewards[key] = rewards_gather
@@ -649,8 +649,14 @@ def main(_):
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, only_strict=True)
             # yield to to make sure reward computation starts
             time.sleep(0)
-            # rewards.add_done_callback(lambda f: f.exception() and print("[reward_fn] exception:", f.exception()))
 
+            # Wait for reward computation directly
+            rewards, rewards_metadata = rewards.result()
+
+            rewards = {
+                key: torch.as_tensor(value, device=accelerator.device).float()
+                for key, value in rewards.items()
+            }
 
             samples.append(
                 {
@@ -667,18 +673,18 @@ def main(_):
             )
 
         # wait for all rewards to be computed
-        for sample in tqdm(
-            samples,
-            desc="Waiting for rewards",
-            disable=not accelerator.is_local_main_process,
-            position=0,
-        ):
-            rewards, reward_metadata = sample["rewards"].result()
-            # accelerator.print(reward_metadata)
-            sample["rewards"] = {
-                key: torch.as_tensor(value, device=accelerator.device).float()
-                for key, value in rewards.items()
-            }
+        # for sample in tqdm(
+        #     samples,
+        #     desc="Waiting for rewards",
+        #     disable=not accelerator.is_local_main_process,
+        #     position=0,
+        # ):
+        #     rewards, reward_metadata = sample["rewards"].result()
+        #     # accelerator.print(reward_metadata)
+        #     sample["rewards"] = {
+        #         key: torch.as_tensor(value, device=accelerator.device).float()
+        #         for key, value in rewards.items()
+        #     }
 
         # collate samples into dict where each entry has shape (num_batches_per_epoch * sample.batch_size, ...)
         samples = {
