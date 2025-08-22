@@ -1,6 +1,7 @@
 import os
 import re
 import json
+from socket import timeout
 from typing import List, Tuple, Union
 from io import BytesIO
 import base64
@@ -8,6 +9,7 @@ import logging
 import asyncio
 from itertools import combinations
 import math
+import time
 
 import torch
 import numpy as np
@@ -57,6 +59,9 @@ def extract_grid_info(prompt) -> tuple[int, int]:
 
 
 def get_score_from_completion(completion : openai.ChatCompletion) -> float:
+    if completion is None:
+        return 0.0
+
     logprobs = completion.choices[0].logprobs
     if logprobs:
         # Use logprobs to compute, score = P('yes') / (P('yes') + P('no'))
@@ -90,12 +95,16 @@ class ConsistencyScorer:
             criteria_path='prompt_consistency_criterion.json',
             async_mode=True,
             max_concurrent=12,  # 2x2 grid has 6 pair of images to compare. 12 for at most 2 batches at once.
+            max_retries=10,
+            timeout=60
         ):
         self.openai_api_key = api_key
         self.openai_base_url = base_url
         self.model = model
         self.async_mode = async_mode
         self.max_concurrent = max_concurrent
+        self.max_retries = max_retries
+        self.timeout = timeout
 
         if async_mode:
             self.client = AsyncOpenAI(
@@ -172,9 +181,7 @@ class ConsistencyScorer:
             prompt : str,
             image : Image.Image,
             criteria_text : str,
-            top_logprobs: int = 20,
-            max_retries : int = 5,
-            timeout : float = 60.0
+            top_logprobs: int = 20
         ) -> list[float]:
         """
         Async version of compute_image_consistency with concurrency control.
@@ -191,7 +198,7 @@ class ConsistencyScorer:
                     ]
                 }
             ]
-            for attempt in range(max_retries):
+            for attempt in range(self.max_retries):
                 try:
                     completion = await self.client.chat.completions.create(
                         model=self.model,
@@ -200,12 +207,12 @@ class ConsistencyScorer:
                         max_completion_tokens=1,
                         logprobs=True,
                         top_logprobs=top_logprobs,
-                        timeout=timeout
+                        timeout=self.timeout
                     )
                     return completion
                 except Exception as e:
-                    print(f"API error on attempt {attempt+1}/{max_retries}: {e}")
-                    if attempt < max_retries - 1:
+                    print(f"API error on attempt {attempt+1}/{self.max_retries}: {e}")
+                    if attempt < self.max_retries - 1:
                         await asyncio.sleep(2 ** attempt)
                     else:
                         return None
@@ -251,14 +258,24 @@ class ConsistencyScorer:
                 }
             ]
 
-            completion = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.0, # Deterministic result,
-                max_completion_tokens=1,
-                logprobs=True,
-                top_logprobs=top_logprobs
-            )
+            for attempt in range(self.max_retries):
+                try:
+                    completion = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        temperature=0.0, # Deterministic result, no use for logprobs, actually.
+                        max_completion_tokens=1,
+                        logprobs=True,
+                        top_logprobs=top_logprobs,
+                        timeout=self.timeout
+                    )
+                    return completion
+                except Exception as e:
+                    print(f"API error on attempt {attempt+1}/{self.max_retries}: {e}")
+                    if attempt < self.max_retries - 1:
+                        time.sleep(2 ** attempt)
+                    else:
+                        return None
 
             completions.append(completion)
 
