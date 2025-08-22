@@ -5,11 +5,10 @@ from diffusers import FlowMatchEulerDiscreteScheduler
 class FlowMatchSlidingWindowScheduler(FlowMatchEulerDiscreteScheduler):
     def __init__(
         self,
-        noise_level : float = 0.7,
+        noise_level : float = 0.9,
         window_size: int = 1000,
         iters_per_group: int = 25,
         left_boundary : int = 0,
-        right_boundary : Optional[int] = None,
         sample_strategy: str = "progressive",
         prog_overlap_step: int = 1,
         roll_back: bool = False,
@@ -20,7 +19,6 @@ class FlowMatchSlidingWindowScheduler(FlowMatchEulerDiscreteScheduler):
         self.noise_level = noise_level
         self.iters_per_group = iters_per_group
         self._left_boundary = left_boundary
-        self._right_boundary = right_boundary if right_boundary is not None else self.config.num_train_timesteps - 1
         self.sample_strategy = sample_strategy
         self.prog_overlap_step = prog_overlap_step
         self.roll_back = roll_back
@@ -28,7 +26,6 @@ class FlowMatchSlidingWindowScheduler(FlowMatchEulerDiscreteScheduler):
         assert self.noise_level >= 0 and self.noise_level <= 1, "Noise level must be between 0 and 1."
         assert self._window_size > 0, "Window size must be greater than 0."
         assert self._left_boundary >= 0, "Left boundary must be non-negative."
-        assert self._right_boundary >= self._left_boundary, "Right boundary must be greater than or equal to left boundary."
         assert self.prog_overlap_step < self._window_size, "Progressive overlap step must be less than window size."
         assert self.sample_strategy in ["progressive", "random"], f"Sample strategy must be one of ['progressive', 'random']. {sample_strategy} is not supported."
 
@@ -53,10 +50,7 @@ class FlowMatchSlidingWindowScheduler(FlowMatchEulerDiscreteScheduler):
 
     @property
     def right_boundary(self):
-        if self._right_boundary > len(self.timesteps):
-            self._right_boundary = len(self.timesteps)
-
-        return self._right_boundary
+        return self.left_boundary + self.window_size
 
     def update_iteration(self, seed=None):
         self.cur_iter_in_group += 1
@@ -77,14 +71,10 @@ class FlowMatchSlidingWindowScheduler(FlowMatchEulerDiscreteScheduler):
             self.cur_timestep = torch.randint(0, len(self.timesteps) - self.window_size + 1, (1,), generator=generator).item()
 
     def get_window_timesteps(self) -> torch.Tensor:
-        start = self.cur_timestep
-        end = min(self.cur_timestep + self.window_size, self._right_boundary)
-        return self.timesteps[start:end]
+        return self.timesteps[self.left_boundary:self.right_boundary]
 
     def get_window_sigmas(self) -> torch.Tensor:
-        start = self.cur_timestep
-        end = min(self.cur_timestep + self.window_size, self._right_boundary)
-        return self.sigmas[start:end]
+        return self.sigmas[self.left_boundary:self.right_boundary]
 
     def get_noise_levels(self) -> torch.Tensor:
         """ Returns noise levels on all timesteps, where noise level is non-zero only within the current window. """
@@ -98,9 +88,7 @@ class FlowMatchSlidingWindowScheduler(FlowMatchEulerDiscreteScheduler):
             Return the noise level for a specific timestep.
         """
         time_step_index = self.index_for_timestep(time_step)
-        window_start = self.cur_timestep
-        window_end = min(self.cur_timestep + self.window_size, self._right_boundary)
-        if window_start <= time_step_index < window_end:
+        if self.left_boundary <= time_step_index < self.right_boundary:
             return self.noise_level
 
         return 0.0
