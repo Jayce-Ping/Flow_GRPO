@@ -3,6 +3,12 @@ import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 
 class FlowMatchSlidingWindowScheduler(FlowMatchEulerDiscreteScheduler):
+    """
+        A scheduler with noise level provided only within the given window.
+        The window is set by `window_size` and `left_boundary`.
+        For example, given `window_size=2` and `left_boundary=3`,
+        the noise window is [3, 4], and `right_boundary=5` is not included in the window.
+    """
     def __init__(
         self,
         noise_level : float = 0.9,
