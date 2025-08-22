@@ -299,9 +299,7 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
         scheduler = FlowMatchSlidingWindowScheduler(
             noise_level=config.sample.noise_level,
             window_size=config.sample.window_size,
-            iters_per_group=config.sample.iters_per_group,
             left_boundary=config.sample.left_boundary,
-            num_train_timesteps=config.sample.num_steps,
             **pipeline.scheduler.config.__dict__,
         )
     else:
@@ -391,7 +389,7 @@ def main(_):
 
     # number of timesteps within each trajectory to train on
     if config.sample.use_sliding_window:
-        num_train_timesteps = config.sample.num_steps - config.sample.left_boundary 
+        num_train_timesteps = config.sample.window_size 
     else:
         num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
 
@@ -584,7 +582,7 @@ def main(_):
     while True:
         #################### EVAL ####################
         pipeline.transformer.eval()
-        if epoch % config.eval_freq == 0:
+        if config.eval_freq > 0 and epoch % config.eval_freq == 0:
             eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerator, global_step, eval_reward_fn, executor, autocast, num_train_timesteps, ema, transformer_trainable_parameters)
         if epoch % config.save_freq == 0 and accelerator.is_main_process:
             save_ckpt(config.save_dir, transformer, global_step, accelerator, ema, transformer_trainable_parameters, config)

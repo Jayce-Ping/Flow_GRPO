@@ -146,11 +146,10 @@ def pipeline_with_logprob(
 
     # 7. Denoising loop
     pipeline.scheduler.set_begin_index(0)
-    scheduler = pipeline.scheduler
     with pipeline.progress_bar(total=num_inference_steps) as progress_bar:
         for i, t in enumerate(timesteps):
             pipeline._current_timestep = t
-            if i == scheduler.left_boundary:
+            if i == pipeline.scheduler.left_boundary:
                 all_latents.append(latents)
 
             # Get noise_level. If not given in the arguments, use the sliding window scheduler's method to retrieve it.
@@ -186,7 +185,7 @@ def pipeline_with_logprob(
             if latents.dtype != latents_dtype:
                 latents = latents.to(latents_dtype)
 
-            if pipeline.scheduler.left_boundary <= t < pipeline.scheduler.right_boundary:
+            if pipeline.scheduler.left_boundary <= i < pipeline.scheduler.right_boundary:
                 all_latents.append(latents)
                 all_log_probs.append(log_prob)
     
@@ -197,10 +196,10 @@ def pipeline_with_logprob(
     latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
     latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
     latents = latents.to(dtype=pipeline.vae.dtype)
-    image = pipeline.vae.decode(latents, return_dict=False)[0]
-    image = pipeline.image_processor.postprocess(image, output_type=output_type)
+    images = pipeline.vae.decode(latents, return_dict=False)[0]
+    images = pipeline.image_processor.postprocess(images, output_type=output_type)
 
     # Offload all models
     pipeline.maybe_free_model_hooks()
 
-    return image, all_latents, latent_image_ids, text_ids, all_log_probs
+    return images, all_latents, latent_image_ids, text_ids, all_log_probs
