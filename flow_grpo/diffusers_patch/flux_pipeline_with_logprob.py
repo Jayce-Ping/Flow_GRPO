@@ -112,6 +112,7 @@ def pipeline_with_logprob(
         generator,
         latents,
     )
+    latents = latents.float()
     sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
     if hasattr(pipeline.scheduler.config, "use_flow_sigmas") and pipeline.scheduler.config.use_flow_sigmas:
         sigmas = None
@@ -155,13 +156,6 @@ def pipeline_with_logprob(
             pipeline._current_timestep = t
             # Get noise_level. If not given in the arguments, use the sliding window scheduler's method to retrieve it.
             current_noise_level = noise_level if noise_level is not None else pipeline.scheduler.get_noise_level_for_timestep(t)
-            # TODO, for each batch and each timestep, provide different random generator
-            # if generator:
-            #     # Generate random integers as seeds. Is it still random?
-            #     noise_seeds = [torch.randint(0, 2**32, (batch_size,), generator=g) for g in generator]
-            #     noise_gens = [torch.Generator(device=device).manual_seed(i) for i in noise_seeds]
-            # else:
-            #     noise_gens = None
 
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
             timestep = t.expand(latents.shape[0]).to(latents.dtype)
@@ -178,8 +172,8 @@ def pipeline_with_logprob(
                 return_dict=False,
             )[0]
 
-            noise_pred = noise_pred.to(prompt_embeds.dtype)
-            latents_dtype = latents.dtype
+            # noise_pred = noise_pred.to(prompt_embeds.dtype)
+            # latents_dtype = latents.dtype
 
             latents, log_prob, prev_latents_mean, std_dev_t = denoising_step_with_logprob(
                 pipeline.scheduler,
@@ -187,11 +181,10 @@ def pipeline_with_logprob(
                 t.unsqueeze(0).repeat(latents.shape[0]),
                 latents.float(),
                 noise_level=current_noise_level,
-                prev_sample=None,
-                # generator=noise_gens # Add different generator for each step, a solution is to use given generator to generate new random generators.
+                prev_sample=None
             )
-            if latents.dtype != latents_dtype:
-                latents = latents.to(latents_dtype)
+            # if latents.dtype != latents_dtype:
+            #     latents = latents.to(latents_dtype)
             all_latents.append(latents)
             all_log_probs.append(log_prob)
             # call the callback, if provided
