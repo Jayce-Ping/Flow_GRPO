@@ -630,14 +630,16 @@ def consistency_flux_4gpu():
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
-    config.save_freq = 30 # epoch
-    config.eval_freq = 30 # -1 for no eval applied
+    config.save_freq = 20 # epoch
+    config.eval_freq = 20 # -1 for no eval applied
     config.save_dir = 'logs/consistency/flux-4gpu'
     config.reward_fn = {
         "consistency_score": 1.0,
     }
     
     config.prompt_fn = "geneval"
+
+    config.train.lora_path = 'logs/consistency/flux-4gpu/checkpoints/8-21-checkpoint-60/lora'
 
     config.per_prompt_stat_tracking = True
     return config
@@ -670,7 +672,7 @@ def consistency_flux_7gpu():
     config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
 
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
-    config.sample.test_batch_size = 10
+    config.sample.test_batch_size = 8
 
     config.train.batch_size = config.sample.train_batch_size
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // 2
