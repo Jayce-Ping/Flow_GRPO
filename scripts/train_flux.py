@@ -200,24 +200,26 @@ def eval(pipeline,
         future = executor.submit(reward_fn, images, prompts, prompt_metadata, only_strict=False)
         # yield to to make sure reward computation starts
         time.sleep(0)
-        all_futures.append(future)
-
-    for future in tqdm(
-        all_futures,
-        desc='Waiting for rewards',
-        disable=not accelerator.is_local_main_process,
-        position=0
-    ):
-        rewards, reward_metadata = future.result()
+        # all_futures.append(future)
+        rewards, reward_metadata = rewards.result()
 
         for key, value in rewards.items():
-            # rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
-            # all_rewards[key].append(rewards_gather)
-            all_rewards[key].append(rewards)
+            rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
+            all_rewards[key].append(rewards_gather)
+
+    # for future in tqdm(
+    #     all_futures,
+    #     desc='Waiting for rewards',
+    #     disable=not accelerator.is_local_main_process,
+    #     position=0
+    # ):
+    #     rewards, reward_metadata = future.result()
+    #     for key, value in rewards.items():
+    #         all_rewards[key].append(rewards)
     
-    for key, value in all_rewards.items():
-        value_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
-        all_rewards[key] = value_gather
+    # for key, value in all_rewards.items():
+    #     value_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
+    #     all_rewards[key] = value_gather
 
     last_batch_images_gather = accelerator.gather(torch.as_tensor(images, device=accelerator.device)).cpu().numpy()
     last_batch_prompt_ids = tokenizers[0](
