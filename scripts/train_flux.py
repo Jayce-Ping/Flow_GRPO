@@ -204,7 +204,7 @@ def eval(pipeline,
         rewards, reward_metadata = future.result()
         for key, value in rewards.items():
             rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
-            all_rewards[key] = rewards_gather
+            all_rewards[key].append(rewards_gather)
     
     # for future in tqdm(
     #     all_futures,
@@ -638,12 +638,12 @@ def main(_):
                         generator=generator
                 )
 
-            latents = torch.stack(latents, dim=1)  # (batch_size, num_steps + 1, 16, 96, 96)
-            log_probs = torch.stack(log_probs, dim=1)  # shape after stack (batch_size, num_steps)
+            latents = torch.stack(latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
+            log_probs = torch.stack(log_probs, dim=1)  # shape after stack (batch_size, window_size)
 
-            timesteps = pipeline.scheduler.timesteps.repeat(
+            timesteps = pipeline.scheduler.get_window_timesteps().repeat(
                 config.sample.train_batch_size, 1
-            )  # (batch_size, num_steps)
+            )  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, only_strict=True)
@@ -788,7 +788,7 @@ def main(_):
 
 
         # A assertion to ensure the number of timesteps is consistent
-        assert num_timesteps == config.sample.num_steps
+        assert num_timesteps == config.sample.window_size
 
         #################### TRAINING ####################
         for inner_epoch in range(config.train.num_inner_epochs):
@@ -817,7 +817,7 @@ def main(_):
                 disable=not accelerator.is_local_main_process,
             ):
                 for j in tqdm(
-                    range(pipeline.scheduler.left_boundary, pipeline.scheduler.left_boundary + num_train_timesteps), # from left_boundary to config.sample.num_steps
+                    range(num_timesteps), # only inside the window
                     desc="Timestep",
                     position=1,
                     leave=False,

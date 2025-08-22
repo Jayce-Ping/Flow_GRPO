@@ -141,27 +141,20 @@ def pipeline_with_logprob(
         guidance = None
     
     # 6. Prepare image embeddings
-    all_latents = [latents]
+    all_latents = []
     all_log_probs = []
 
     # 7. Denoising loop
     pipeline.scheduler.set_begin_index(0)
+    scheduler = pipeline.scheduler
     with pipeline.progress_bar(total=num_inference_steps) as progress_bar:
         for i, t in enumerate(timesteps):
-            if pipeline.interrupt:
-                continue
-
-            
             pipeline._current_timestep = t
+            if i == scheduler.left_boundary:
+                all_latents.append(latents)
+
             # Get noise_level. If not given in the arguments, use the sliding window scheduler's method to retrieve it.
             current_noise_level = noise_level if noise_level is not None else pipeline.scheduler.get_noise_level_for_timestep(t)
-            # TODO, for each batch and each timestep, provide different random generator
-            # if generator:
-            #     # Generate random integers as seeds. Is it still random?
-            #     noise_seeds = [torch.randint(0, 2**32, (batch_size,), generator=g) for g in generator]
-            #     noise_gens = [torch.Generator(device=device).manual_seed(i) for i in noise_seeds]
-            # else:
-            #     noise_gens = None
 
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
             timestep = t.expand(latents.shape[0]).to(latents.dtype)
@@ -192,8 +185,11 @@ def pipeline_with_logprob(
             )
             if latents.dtype != latents_dtype:
                 latents = latents.to(latents_dtype)
-            all_latents.append(latents)
-            all_log_probs.append(log_prob)
+
+            if pipeline.scheduler.left_boundary <= t < pipeline.scheduler.right_boundary:
+                all_latents.append(latents)
+                all_log_probs.append(log_prob)
+    
             # call the callback, if provided
             if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % pipeline.scheduler.order == 0):
                 progress_bar.update()

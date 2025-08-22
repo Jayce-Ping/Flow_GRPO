@@ -598,13 +598,13 @@ def consistency_flux_4gpu():
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
 
     # Sliding Window Scheduler
-    config.sample.use_sliding_window = False
+    config.sample.use_sliding_window = True
     config.sample.window_size = 4
-    config.sample.left_boundary = 0
+    config.sample.left_boundary = 2
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
-    config.sample.num_steps = 10
+    config.sample.num_steps = 20
     config.sample.eval_num_steps = 20
     config.sample.guidance_scale = 3.5
 
@@ -639,7 +639,7 @@ def consistency_flux_4gpu():
     
     config.prompt_fn = "geneval"
 
-    config.train.lora_path = 'logs/consistency/flux-4gpu/checkpoints/8-21-checkpoint-60/lora'
+    # config.train.lora_path = 'logs/consistency/flux-4gpu/checkpoints/8-21-checkpoint-60/lora'
 
     config.per_prompt_stat_tracking = True
     return config
@@ -651,9 +651,9 @@ def consistency_flux_7gpu():
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
 
     # Sliding Window Scheduler
-    config.sample.use_sliding_window = False
+    config.sample.use_sliding_window = True
     config.sample.window_size = 4
-    config.sample.left_boundary = 0
+    config.sample.left_boundary = 2
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
