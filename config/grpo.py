@@ -664,7 +664,7 @@ def consistency_flux_7gpu():
     config.sample.train_batch_size = 1
     config.sample.num_image_per_prompt = 24
 
-    config.sample.unique_sample_num_per_epoch = 49 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 21 # Number of unique prompts used in each epoch
     # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
     config.sample.unique_sample_num_per_batch = gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt
     config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)

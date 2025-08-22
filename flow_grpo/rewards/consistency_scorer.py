@@ -63,11 +63,11 @@ def get_score_from_completion(completion : openai.ChatCompletion) -> float:
         # score = 1 / (1 + exp(logprob('no') -  logprob('yes')))
         # Same formular for logits as well. Since the sum term will cancel out.
         # Use uppercase only here.
-        token_logprobs = {t.token.replace(" ", ""): t.logprob for t in logprobs.content[0].top_logprobs}
+        token_logprobs = {t.token: t.logprob for t in logprobs.content[0].top_logprobs}
         yes_logprob = token_logprobs.get('Yes', float('-inf'))
         no_logprob = token_logprobs.get('No', float('-inf'))
 
-        if yes_logprob == float('-inf') or no_logprob == float('-inf'):
+        if yes_logprob == float('-inf') and no_logprob == float('-inf'):
             score = 0.0 # 0.0
         else:
             diff = torch.tensor(yes_logprob - no_logprob, dtype=torch.float64)
