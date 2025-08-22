@@ -68,6 +68,7 @@ def get_score_from_completion(completion : openai.ChatCompletion) -> float:
         no_logprob = token_logprobs.get('No', float('-inf'))
 
         if yes_logprob == float('-inf') and no_logprob == float('-inf'):
+            # When inf - inf encountered, give 0.0 score.
             score = 0.0 # 0.0
         else:
             diff = torch.tensor(yes_logprob - no_logprob, dtype=torch.float64)
