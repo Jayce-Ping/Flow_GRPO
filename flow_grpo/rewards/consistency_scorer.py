@@ -206,7 +206,7 @@ class ConsistencyScorer:
                 except Exception as e:
                     print(f"API error on attempt {attempt+1}/{max_retries}: {e}")
                     if attempt < max_retries - 1:
-                        await asyncio.sleep(attempt)
+                        await asyncio.sleep(2 ** attempt)
                     else:
                         return None
 
