@@ -62,6 +62,7 @@ def general_ocr_sd3():
     config.train.beta = 0.04
     # Whether to use the std of all samples or the current group's.
     config.sample.global_std = True
+    config.sample.use_history = False
     # Whether to use the same noise for the same prompt
     config.sample.same_latent = False
     config.train.ema = True
@@ -102,6 +103,7 @@ def geneval_sd3():
     config.train.timestep_fraction = 0.99
     config.train.beta = 0.04
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.train.ema = True
     config.save_freq = 60 # epoch
@@ -140,6 +142,7 @@ def pickscore_sd3():
     config.train.timestep_fraction = 0.99
     config.train.beta = 0.01
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.train.ema = True
     config.save_freq = 60 # epoch
@@ -178,6 +181,7 @@ def clipscore_sd3():
     config.train.timestep_fraction = 0.99
     config.train.beta = 0.02
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = True
     config.train.ema = True
     config.save_freq = 60 # epoch
@@ -219,6 +223,7 @@ def pickscore_sd3_s1():
     config.train.clip_range = 1e-4
     config.train.beta = 0
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.noise_level = 5
     config.train.ema = True
     config.save_freq = 30 # epoch
@@ -260,6 +265,7 @@ def general_ocr_sd3_4gpu():
     config.train.beta = 0.04
     # Whether to use the std of all samples or the current group's.
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.train.ema = True
     # A large num_epochs is intentionally set here. Training will be manually stopped once sufficient
@@ -299,6 +305,7 @@ def pickscore_sd3_4gpu():
     config.train.timestep_fraction = 0.99
     config.train.beta = 0.01
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.train.ema = True
     config.save_freq = 60 # epoch
@@ -339,6 +346,7 @@ def general_ocr_sd3_1gpu():
     config.train.beta = 0.04
     # Whether to use the std of all samples or the current group's.
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.train.ema = True
     config.save_freq = 60 # epoch
@@ -386,6 +394,7 @@ def consistency_sd3_4gpu():
     config.train.beta = 0.04
     # Whether to use the std of all samples or the current group's.
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.train.ema = True
     # A large num_epochs is intentionally set here. Training will be manually stopped once sufficient
@@ -432,6 +441,7 @@ def pickscore_flux_8gpu():
     config.train.timestep_fraction = 0.99
     config.train.beta = 0
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
@@ -482,6 +492,7 @@ def qwenvl_flux_8gpu():
     config.train.timestep_fraction = 0.99
     config.train.beta = 0
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
@@ -551,6 +562,7 @@ def consistency_flux_8gpu():
     config.train.beta = 0
     config.train.ema = True
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.noise_level = 0.9
     config.save_freq = 20 # epoch
@@ -621,6 +633,7 @@ def consistency_flux_4gpu():
     config.train.beta = 0
     config.train.ema = True
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.noise_level = 0.9
     config.save_freq = 20 # epoch
@@ -690,6 +703,7 @@ def consistency_flux_7gpu():
     config.train.timestep_fraction = 0.99
     config.train.beta = 0
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
@@ -729,6 +743,7 @@ def counting_flux_kontext():
     config.train.timestep_fraction = 0.99
     config.train.beta = 0
     config.sample.global_std = True
+    config.sample.use_history = False
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9

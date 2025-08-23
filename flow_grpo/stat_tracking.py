@@ -1,41 +1,66 @@
+from operator import truediv
+from pty import STDIN_FILENO
+from typing import List
 import numpy as np
-from collections import deque
 import torch
 
 class PerPromptStatTracker:
-    def __init__(self, global_std=False):
+    def __init__(self, global_std=True, use_history=False):
         self.global_std = global_std
+        self.use_history = use_history
         self.stats = {}
         self.history_prompts = set()
 
-    def update(self, prompts, rewards, type='grpo'):
+    def update(self, prompts : List[str], rewards : List[float], type : str = 'grpo'):
         prompts = np.array(prompts)
         rewards = np.array(rewards, dtype=np.float64)
         unique = np.unique(prompts)
-        advantages = np.empty_like(rewards)*0.0
+        advantages = np.empty_like(rewards) * 0.0
+
+        # Group rewards by prompt
         for prompt in unique:
+            # Get rewards for this prompt
             prompt_rewards = rewards[prompts == prompt]
+            # Add rewards to self.stats
             if prompt not in self.stats:
                 self.stats[prompt] = []
-            self.stats[prompt].extend(prompt_rewards)
+
+            self.stats[prompt] = np.concatenate([self.stats[prompt], prompt_rewards])
             self.history_prompts.add(hash(prompt))  # Add hash of prompt to history_prompts
+
+        # Compute mean and std for each sample
         for prompt in unique:
-            self.stats[prompt] = np.stack(self.stats[prompt])
-            prompt_rewards = rewards[prompts == prompt]  # Fix: Recalculate prompt_rewards for each prompt
-            mean = np.mean(self.stats[prompt], axis=0, keepdims=True)
-            if self.global_std:
-                std = np.std(rewards, axis=0, keepdims=True) + 1e-4  # Use global std of all rewards
+            prompt_rewards = rewards[prompts == prompt]
+            # Compute mean and std
+            if self.use_history:
+                # 1. Use all its history when `use_history=True`
+                mean = np.mean(self.stats[prompt], axis=0)
+                if self.global_std:
+                    # Global std across all history
+                    std = np.std(np.concatenate(list(self.stats.values())), axis=0) + 1e-4
+                else:
+                    # Local std across all history, for this prompt only
+                    std = np.std(self.stats[prompt], axis=0) + 1e-4
             else:
-                std = np.std(self.stats[prompt], axis=0, keepdims=True) + 1e-4
-            if type=='grpo':
+                # 2. Use only info in this update.
+                mean = np.mean(prompt_rewards, axis=0)
+                if self.global_std:
+                    # Global std across this update info
+                    std = np.std(rewards, axis=0) + 1e-4
+                else:
+                    # Local std for this prompt only
+                    std = np.std(prompt_rewards, axis=0) + 1e-4
+
+            # Compute advantages with different algorithm
+            if type == 'grpo':
                 advantages[prompts == prompt] = (prompt_rewards - mean) / std
-            elif type=='rwr':
+            elif type == 'rwr':
                 # advantages[prompts == prompt] = (prompt_rewards - mean) / std
                 advantages[prompts == prompt] = prompt_rewards
                 # advantages[prompts == prompt] = torch.softmax(torch.tensor(prompt_rewards), dim=0).numpy()
-            elif type=='sft':
+            elif type == 'sft':
                 advantages[prompts == prompt] = (torch.tensor(prompt_rewards) == torch.max(torch.tensor(prompt_rewards))).float().numpy()
-            elif type=='dpo':
+            elif type == 'dpo':
                 # Get the advantages of the current prompt
                 prompt_advantages = torch.tensor(prompt_rewards)
                 # Find the indices of the maximum and minimum values
@@ -64,6 +89,14 @@ class PerPromptStatTracker:
 
 def main():
     tracker = PerPromptStatTracker()
+
+    prompts = ['a', 'b', 'a', 'c', 'b', 'a']
+    rewards = [1, 2, -1, 4, 2, 1]
+    advantages = tracker.update(prompts, rewards)
+    print("Advantages:", advantages)
+    avg_group_size, history_prompts = tracker.get_stats()
+    print("Average Group Size:", avg_group_size)
+    print("History Prompts:", history_prompts)
     prompts = ['a', 'b', 'a', 'c', 'b', 'a']
     rewards = [1, 2, 3, 4, 5, 6]
     advantages = tracker.update(prompts, rewards)

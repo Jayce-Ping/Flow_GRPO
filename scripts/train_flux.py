@@ -505,7 +505,7 @@ def main(_):
         config.per_prompt_stat_tracking = False
     # Initialize stat tracker
     if config.per_prompt_stat_tracking:
-        stat_tracker = PerPromptStatTracker(config.sample.global_std)
+        stat_tracker = PerPromptStatTracker(config.sample.global_std, config.sample.use_history)
 
     # For some reason, autocast is necessary for non-lora training but for lora training it isn't necessary and it uses more memory
     autocast = contextlib.nullcontext if config.use_lora else accelerator.autocast
@@ -743,6 +743,8 @@ def main(_):
                     },
                     step=global_step,
                 )
+            # !!! Notice here, after every advantage calculation, the tracker is cleared so that no history is saved.
+            # So comment the following clear code if `config.sample.use_history=True` is set
             stat_tracker.clear()
         else:
             advantages = (gathered_rewards['avg'] - gathered_rewards['avg'].mean()) / (gathered_rewards['avg'].std() + 1e-4)
