@@ -137,13 +137,13 @@ def compute_log_prob(transformer, pipeline, sample, j, embeds, pooled_embeds, co
 
     return prev_sample, log_prob, prev_sample_mean, std_dev_t
 
-def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerator, global_step, reward_fn, executor, autocast, num_train_timesteps, ema, transformer_trainable_parameters):
+def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerator, global_step, reward_fn, executor, autocast, ema, transformer_trainable_parameters):
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
     neg_prompt_embed, neg_pooled_prompt_embed = compute_text_embeddings([""], text_encoders, tokenizers, max_sequence_length=config.max_sequence_length, device=accelerator.device)
 
-    sample_neg_prompt_embeds = neg_prompt_embed.repeat(config.sample.test_batch_size, 1, 1)
-    sample_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(config.sample.test_batch_size, 1)
+    sample_neg_prompt_embeds = neg_prompt_embed.repeat(config.test_batch_size, 1, 1)
+    sample_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(config.test_batch_size, 1)
 
     # test_dataloader = itertools.islice(test_dataloader, 2)
     all_rewards = defaultdict(list)
@@ -425,7 +425,7 @@ def main(_):
         # Create a regular DataLoader
         test_dataloader = DataLoader(
             test_dataset,
-            batch_size=config.sample.test_batch_size,
+            batch_size=config.test_batch_size,
             collate_fn=TextPromptDataset.collate_fn,
             shuffle=False,
             num_workers=8,
@@ -454,7 +454,7 @@ def main(_):
         )
         test_dataloader = DataLoader(
             test_dataset,
-            batch_size=config.sample.test_batch_size,
+            batch_size=config.test_batch_size,
             collate_fn=GenevalPromptDataset.collate_fn,
             shuffle=False,
             num_workers=8,
@@ -527,7 +527,7 @@ def main(_):
         #################### EVAL ####################
         pipeline.transformer.eval()
         if epoch % config.eval_freq == 0:
-            eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerator, global_step, eval_reward_fn, executor, autocast, num_train_timesteps, ema, transformer_trainable_parameters)
+            eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerator, global_step, eval_reward_fn, executor, autocast, ema, transformer_trainable_parameters)
         if epoch % config.save_freq == 0 and epoch > 0 and accelerator.is_main_process:
             save_ckpt(config.save_dir, transformer, global_step, accelerator, ema, transformer_trainable_parameters, config)
 
