@@ -478,6 +478,7 @@ def main(_):
         dataset=train_dataset,
         batch_size=config.sample.train_batch_size,
         k=config.sample.num_image_per_prompt,
+        m=config.sample.unique_sample_num_per_epoch,
         num_replicas=accelerator.num_processes,
         rank=accelerator.process_index,
         seed=42
@@ -495,7 +496,7 @@ def main(_):
     # Create a regular DataLoader
     test_dataloader = DataLoader(
         test_dataset,
-        batch_size=config.sample.test_batch_size,
+        batch_size=config.test_batch_size,
         collate_fn=collate_fn,
         shuffle=False,
         num_workers=8,
@@ -565,6 +566,7 @@ def main(_):
 
         #################### SAMPLING ####################
         pipeline.transformer.eval()
+        train_sampler.set_epoch(epoch)
         samples = []
         prompts = []
         for i in tqdm(
@@ -573,7 +575,7 @@ def main(_):
             disable=not accelerator.is_local_main_process,
             position=0,
         ):
-            train_sampler.set_epoch(epoch * config.sample.num_batches_per_epoch + i)
+            # train_sampler.set_epoch(epoch * config.sample.num_batches_per_epoch + i)
             prompts, prompt_metadata = next(train_iter)
 
             prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
