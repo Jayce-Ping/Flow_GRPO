@@ -465,11 +465,11 @@ def main(_):
     if config.prompt_fn == "general_ocr":
         train_dataset = TextPromptDataset(config.dataset, 'train')
         test_dataset = TextPromptDataset(config.dataset, 'test')
-        collect_fn = TextPromptDataset.collate_fn
+        collate_fn = TextPromptDataset.collate_fn
     elif config.prompt_fn == "geneval":
         train_dataset = GenevalPromptDataset(config.dataset, 'train')
         test_dataset = GenevalPromptDataset(config.dataset, 'test')
-        collect_fn = GenevalPromptDataset.collate_fn
+        collate_fn = GenevalPromptDataset.collate_fn
     else:
         raise NotImplementedError("Specify `prompt_fn` in ['general_ocr', 'geneval']")
 
@@ -488,7 +488,7 @@ def main(_):
         train_dataset,
         batch_sampler=train_sampler,
         num_workers=1,
-        collate_fn=TextPromptDataset.collate_fn,
+        collate_fn=collate_fn,
         # persistent_workers=True
     )
 
@@ -496,7 +496,7 @@ def main(_):
     test_dataloader = DataLoader(
         test_dataset,
         batch_size=config.sample.test_batch_size,
-        collate_fn=TextPromptDataset.collate_fn,
+        collate_fn=collate_fn,
         shuffle=False,
         num_workers=8,
     )
