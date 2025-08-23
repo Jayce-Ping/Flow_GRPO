@@ -405,8 +405,9 @@ def main(_):
         # Create an infinite-loop DataLoader
         train_sampler = DistributedKRepeatSampler( 
             dataset=train_dataset,
-            batch_size=config.sample.train_batch_size,
+            batch_size=config.sample.batch_size,
             k=config.sample.num_image_per_prompt,
+            m=config.sample.unique_sample_num_per_epoch,
             num_replicas=accelerator.num_processes,
             rank=accelerator.process_index,
             seed=42
@@ -436,8 +437,9 @@ def main(_):
 
         train_sampler = DistributedKRepeatSampler( 
             dataset=train_dataset,
-            batch_size=config.sample.train_batch_size,
+            batch_size=config.sample.batch_size,
             k=config.sample.num_image_per_prompt,
+            m=config.sample.unique_sample_num_per_epoch,
             num_replicas=accelerator.num_processes,
             rank=accelerator.process_index,
             seed=42
@@ -463,9 +465,9 @@ def main(_):
 
     neg_prompt_embed, neg_pooled_prompt_embed = compute_text_embeddings([""], text_encoders, tokenizers, max_sequence_length=config.max_sequence_length, device=accelerator.device)
 
-    sample_neg_prompt_embeds = neg_prompt_embed.repeat(config.sample.train_batch_size, 1, 1)
+    sample_neg_prompt_embeds = neg_prompt_embed.repeat(config.sample.batch_size, 1, 1)
     train_neg_prompt_embeds = neg_prompt_embed.repeat(config.train.batch_size, 1, 1)
-    sample_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(config.sample.train_batch_size, 1)
+    sample_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(config.sample.batch_size, 1)
     train_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(config.train.batch_size, 1)
 
     if config.sample.num_image_per_prompt == 1:
@@ -488,7 +490,7 @@ def main(_):
 
     # Train!
     samples_per_epoch = (
-        config.sample.train_batch_size
+        config.sample.batch_size
         * accelerator.num_processes
         * config.sample.num_batches_per_epoch
     )
@@ -499,7 +501,7 @@ def main(_):
     )
 
     logger.info("***** Running training *****")
-    logger.info(f"  Sample batch size per device = {config.sample.train_batch_size}")
+    logger.info(f"  Sample batch size per device = {config.sample.batch_size}")
     logger.info(f"  Train batch size per device = {config.train.batch_size}")
     logger.info(
         f"  Gradient Accumulation steps = {config.train.gradient_accumulation_steps}"
@@ -513,8 +515,8 @@ def main(_):
         f"  Number of gradient updates per inner epoch = {samples_per_epoch // total_train_batch_size}"
     )
     logger.info(f"  Number of inner epochs = {config.train.num_inner_epochs}")
-    # assert config.sample.train_batch_size >= config.train.batch_size
-    # assert config.sample.train_batch_size % config.train.batch_size == 0
+    # assert config.sample.batch_size >= config.train.batch_size
+    # assert config.sample.batch_size % config.train.batch_size == 0
     # assert samples_per_epoch % total_train_batch_size == 0
 
     epoch = 0
@@ -531,6 +533,7 @@ def main(_):
 
         #################### SAMPLING ####################
         pipeline.transformer.eval()
+        train_sampler.set_epoch(epoch)
         samples = []
         prompts = []
         for i in tqdm(
@@ -539,7 +542,7 @@ def main(_):
             disable=not accelerator.is_local_main_process,
             position=0,
         ):
-            train_sampler.set_epoch(epoch * config.sample.num_batches_per_epoch + i)
+            # train_sampler.set_epoch(epoch * config.sample.num_batches_per_epoch + i)
             prompts, prompt_metadata = next(train_iter)
 
             prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
@@ -585,7 +588,7 @@ def main(_):
             log_probs = torch.stack(log_probs, dim=1)  # shape after stack (batch_size, num_steps)
 
             timesteps = pipeline.scheduler.timesteps.repeat(
-                config.sample.train_batch_size, 1
+                config.sample.batch_size, 1
             )  # (batch_size, num_steps)
 
             # compute rewards asynchronously
@@ -748,7 +751,7 @@ def main(_):
         total_batch_size, num_timesteps = samples["timesteps"].shape
         # assert (
         #     total_batch_size
-        #     == config.sample.train_batch_size * config.sample.num_batches_per_epoch
+        #     == config.sample.batch_size * config.sample.num_batches_per_epoch
         # )
         assert num_timesteps == config.sample.num_steps
 
