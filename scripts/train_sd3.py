@@ -410,7 +410,7 @@ def main(_):
             m=config.sample.unique_sample_num_per_epoch,
             num_replicas=accelerator.num_processes,
             rank=accelerator.process_index,
-            seed=42
+            seed=config.seed
         )
 
         # Create a DataLoader; note that shuffling is not needed here because it’s controlled by the Sampler.
