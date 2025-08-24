@@ -459,7 +459,7 @@ def main(_):
         config.per_prompt_stat_tracking = False
     # Initialize stat tracker
     if config.per_prompt_stat_tracking:
-        stat_tracker = PerPromptStatTracker(config.sample.global_std)
+        stat_tracker = PerPromptStatTracker(config.sample.global_std, config.sample.use_history)
 
     # for some reason, autocast is necessary for non-lora training but for lora training it isn't necessary and it uses
     # more memory
