@@ -124,7 +124,9 @@ def compute_log_prob(transformer, pipeline, sample, j, embeds, pooled_embeds, co
             pooled_projections=pooled_embeds,
             return_dict=False,
         )[0]
-    
+
+    noise_level = pipeline.scheduler.get_noise_level_for_timestep(sample["timesteps"][0, j]) # All noise level across some timestep are equal
+
     # compute the log prob of next_latents given latents under the current model
     prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
         pipeline.scheduler,
@@ -132,7 +134,7 @@ def compute_log_prob(transformer, pipeline, sample, j, embeds, pooled_embeds, co
         sample["timesteps"][:, j],
         sample["latents"][:, j].float(),
         prev_sample=sample["next_latents"][:, j].float(),
-        noise_level=config.sample.noise_level,
+        noise_level=noise_level
     )
 
     return prev_sample, log_prob, prev_sample_mean, std_dev_t
@@ -254,50 +256,8 @@ def save_ckpt(save_dir, transformer, global_step, accelerator, ema, transformer_
         if config.train.ema:
             ema.copy_temp_to(transformer_trainable_parameters)
 
-def main(_):
-    # basic Accelerate and logging setup
-    config = FLAGS.config
 
-    unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
-    if not config.run_name:
-        config.run_name = unique_id
-    else:
-        config.run_name += "_" + unique_id
-
-    # number of timesteps within each trajectory to train on
-    num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
-
-    accelerator_config = ProjectConfiguration(
-        project_dir=os.path.join(config.logdir, config.run_name),
-        automatic_checkpoint_naming=True,
-        total_limit=config.num_checkpoint_limit,
-    )
-
-    accelerator = Accelerator(
-        # log_with="wandb",
-        mixed_precision=config.mixed_precision,
-        project_config=accelerator_config,
-        # we always accumulate gradients across timesteps; we want config.train.gradient_accumulation_steps to be the
-        # number of *samples* we accumulate across, so we need to multiply by the number of training timesteps to get
-        # the total number of optimizer steps to accumulate across.
-        gradient_accumulation_steps=config.train.gradient_accumulation_steps * num_train_timesteps,
-    )
-    if accelerator.is_main_process:
-        wandb.init(
-            project="FlowGRPO-SD3",
-            config=config.to_dict()
-        )
-        # accelerator.init_trackers(
-        #     project_name="flow-grpo",
-        #     config=config.to_dict(),
-        #     init_kwargs={"wandb": {"name": config.run_name}},
-        # )
-    logger.info(f"\n{config}")
-
-    # set seed (device_specific is very important to get different prompts on different devices)
-    set_seed(config.seed, device_specific=True)
-
-    # load scheduler, tokenizer and models.
+def load_pipeline(config, accelerator):
     pipeline = StableDiffusion3Pipeline.from_pretrained(
         config.pretrained.model
     )
@@ -362,7 +322,57 @@ def main(_):
             pipeline.transformer.set_adapter("default")
         else:
             pipeline.transformer = get_peft_model(pipeline.transformer, transformer_lora_config)
-    
+
+    return pipeline, text_encoders, tokenizers
+
+def main(_):
+    # basic Accelerate and logging setup
+    config = FLAGS.config
+
+    unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
+    if not config.run_name:
+        config.run_name = unique_id
+    else:
+        config.run_name += "_" + unique_id
+
+    # number of timesteps within each trajectory to train on
+    if config.sample.use_sliding_window:
+        num_train_timesteps = config.sample.window_size 
+    else:
+        num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
+
+    accelerator_config = ProjectConfiguration(
+        project_dir=os.path.join(config.logdir, config.run_name),
+        automatic_checkpoint_naming=True,
+        total_limit=config.num_checkpoint_limit,
+    )
+
+    accelerator = Accelerator(
+        # log_with="wandb",
+        mixed_precision=config.mixed_precision,
+        project_config=accelerator_config,
+        # we always accumulate gradients across timesteps; we want config.train.gradient_accumulation_steps to be the
+        # number of *samples* we accumulate across, so we need to multiply by the number of training timesteps to get
+        # the total number of optimizer steps to accumulate across.
+        gradient_accumulation_steps=config.train.gradient_accumulation_steps * num_train_timesteps,
+    )
+    if accelerator.is_main_process:
+        wandb.init(
+            project="FlowGRPO-SD3",
+            config=config.to_dict()
+        )
+        # accelerator.init_trackers(
+        #     project_name="flow-grpo",
+        #     config=config.to_dict(),
+        #     init_kwargs={"wandb": {"name": config.run_name}},
+        # )
+    logger.info(f"\n{config}")
+
+    # set seed (device_specific is very important to get different prompts on different devices)
+    set_seed(config.seed, device_specific=True)
+    # ------------------------------------------Load pipeline--------------------------------------
+    # load scheduler, tokenizer and models.
+    pipeline, text_encoders, tokenizers = load_pipeline(config, accelerator)
     transformer = pipeline.transformer
     transformer_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
     # This ema setting affects the previous 20 × 8 = 160 steps on average.
@@ -393,7 +403,7 @@ def main(_):
         weight_decay=config.train.adam_weight_decay,
         eps=config.train.adam_epsilon,
     )
-
+    # ------------------------------------------Reward--------------------------------------------
     # prepare prompt and reward fn
     reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
     eval_reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
@@ -401,67 +411,42 @@ def main(_):
     if config.prompt_fn == "general_ocr":
         train_dataset = TextPromptDataset(config.dataset, 'train')
         test_dataset = TextPromptDataset(config.dataset, 'test')
-
-        # Create an infinite-loop DataLoader
-        train_sampler = DistributedKRepeatSampler( 
-            dataset=train_dataset,
-            batch_size=config.sample.batch_size,
-            k=config.sample.num_image_per_prompt,
-            m=config.sample.unique_sample_num_per_epoch,
-            num_replicas=accelerator.num_processes,
-            rank=accelerator.process_index,
-            seed=config.seed
-        )
-
-        # Create a DataLoader; note that shuffling is not needed here because it’s controlled by the Sampler.
-        train_dataloader = DataLoader(
-            train_dataset,
-            batch_sampler=train_sampler,
-            num_workers=1,
-            collate_fn=TextPromptDataset.collate_fn,
-            # persistent_workers=True
-        )
-
-        # Create a regular DataLoader
-        test_dataloader = DataLoader(
-            test_dataset,
-            batch_size=config.test_batch_size,
-            collate_fn=TextPromptDataset.collate_fn,
-            shuffle=False,
-            num_workers=8,
-        )
-    
+        collate_fn = TextPromptDataset.collate_fn
     elif config.prompt_fn == "geneval":
         train_dataset = GenevalPromptDataset(config.dataset, 'train')
         test_dataset = GenevalPromptDataset(config.dataset, 'test')
-
-        train_sampler = DistributedKRepeatSampler( 
-            dataset=train_dataset,
-            batch_size=config.sample.batch_size,
-            k=config.sample.num_image_per_prompt,
-            m=config.sample.unique_sample_num_per_epoch,
-            num_replicas=accelerator.num_processes,
-            rank=accelerator.process_index,
-            seed=42
-        )
-
-        train_dataloader = DataLoader(
-            train_dataset,
-            batch_sampler=train_sampler,
-            num_workers=1,
-            collate_fn=GenevalPromptDataset.collate_fn,
-            # persistent_workers=True
-        )
-        test_dataloader = DataLoader(
-            test_dataset,
-            batch_size=config.test_batch_size,
-            collate_fn=GenevalPromptDataset.collate_fn,
-            shuffle=False,
-            num_workers=8,
-        )
+        collate_fn = GenevalPromptDataset.collate_fn
     else:
-        raise NotImplementedError("Only general_ocr is supported with dataset")
+        raise NotImplementedError("Specify `prompt_fn` in ['general_ocr', 'geneval']")
 
+    # Create an infinite-loop DataLoader
+    train_sampler = DistributedKRepeatSampler( 
+        dataset=train_dataset,
+        batch_size=config.sample.batch_size,
+        k=config.sample.num_image_per_prompt,
+        m=config.sample.unique_sample_num_per_epoch,
+        num_replicas=accelerator.num_processes,
+        rank=accelerator.process_index,
+        seed=config.seed
+    )
+
+    # Create a DataLoader; note that shuffling is not needed here because it’s controlled by the Sampler.
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_sampler=train_sampler,
+        num_workers=1,
+        collate_fn=collate_fn,
+        # persistent_workers=True
+    )
+
+    # Create a regular DataLoader
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=config.test_batch_size,
+        collate_fn=collate_fn,
+        shuffle=False,
+        num_workers=8,
+    )
 
     neg_prompt_embed, neg_pooled_prompt_embed = compute_text_embeddings([""], text_encoders, tokenizers, max_sequence_length=config.max_sequence_length, device=accelerator.device)
 
@@ -472,7 +457,7 @@ def main(_):
 
     if config.sample.num_image_per_prompt == 1:
         config.per_prompt_stat_tracking = False
-    # initialize stat tracker
+    # Initialize stat tracker
     if config.per_prompt_stat_tracking:
         stat_tracker = PerPromptStatTracker(config.sample.global_std)
 
@@ -542,7 +527,6 @@ def main(_):
             disable=not accelerator.is_local_main_process,
             position=0,
         ):
-            # train_sampler.set_epoch(epoch * config.sample.num_batches_per_epoch + i)
             prompts, prompt_metadata = next(train_iter)
 
             prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
@@ -567,7 +551,7 @@ def main(_):
                 generator = None
             with autocast():
                 with torch.no_grad():
-                    images, latents, log_probs = pipeline_with_logprob(
+                    images, all_latents, all_log_probs = pipeline_with_logprob(
                         pipeline,
                         prompt_embeds=prompt_embeds,
                         pooled_prompt_embeds=pooled_prompt_embeds,
@@ -582,50 +566,53 @@ def main(_):
                         generator=generator
                 )
 
-            latents = torch.stack(
-                latents, dim=1
-            )  # (batch_size, num_steps + 1, 16, 96, 96)
-            log_probs = torch.stack(log_probs, dim=1)  # shape after stack (batch_size, num_steps)
+            all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
+            all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
 
-            timesteps = pipeline.scheduler.timesteps.repeat(
-                config.sample.batch_size, 1
-            )  # (batch_size, num_steps)
+            timesteps = pipeline.scheduler.get_window_timesteps().repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, only_strict=True)
             # yield to to make sure reward computation starts
             time.sleep(0)
 
+            # Async computation may cause issue, wait for result and block main process for safety.
+            rewards, reward_metadatas = rewards.result()
+
+            rewards = {
+                key: torch.as_tensor(value, device=accelerator.device).float()
+                for key, value in rewards.items()
+            }
             samples.append(
                 {
                     "prompt_ids": prompt_ids,
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
                     "timesteps": timesteps,
-                    "latents": latents[
+                    "latents": all_latents[
                         :, :-1
                     ],  # each entry is the latent before timestep t
-                    "next_latents": latents[
+                    "next_latents": all_latents[
                         :, 1:
                     ],  # each entry is the latent after timestep t
-                    "log_probs": log_probs,
+                    "log_probs": all_log_probs,
                     "rewards": rewards,
                 }
             )
 
-        # wait for all rewards to be computed
-        for sample in tqdm(
-            samples,
-            desc="Waiting for rewards",
-            disable=not accelerator.is_local_main_process,
-            position=0,
-        ):
-            rewards, reward_metadata = sample["rewards"].result()
-            # accelerator.print(reward_metadata)
-            sample["rewards"] = {
-                key: torch.as_tensor(value, device=accelerator.device).float()
-                for key, value in rewards.items()
-            }
+        # # wait for all rewards to be computed
+        # for sample in tqdm(
+        #     samples,
+        #     desc="Waiting for rewards",
+        #     disable=not accelerator.is_local_main_process,
+        #     position=0,
+        # ):
+        #     rewards, reward_metadata = sample["rewards"].result()
+        #     # accelerator.print(reward_metadata)
+        #     sample["rewards"] = {
+        #         key: torch.as_tensor(value, device=accelerator.device).float()
+        #         for key, value in rewards.items()
+        #     }
 
         # collate samples into dict where each entry has shape (num_batches_per_epoch * sample.batch_size, ...)
         samples = {
@@ -753,7 +740,7 @@ def main(_):
         #     total_batch_size
         #     == config.sample.batch_size * config.sample.num_batches_per_epoch
         # )
-        assert num_timesteps == config.sample.num_steps
+        assert num_timesteps == config.sample.window_size
 
         #################### TRAINING ####################
         for inner_epoch in range(config.train.num_inner_epochs):
@@ -793,9 +780,9 @@ def main(_):
                     embeds = sample["prompt_embeds"]
                     pooled_embeds = sample["pooled_prompt_embeds"]
 
-                train_timesteps = [step_index  for step_index in range(num_train_timesteps)]
+                train_timesteps = [step_index for step_index in range(num_train_timesteps)]
                 for j in tqdm(
-                    train_timesteps,
+                    train_timesteps, # Train only inside the window
                     desc="Timestep",
                     position=1,
                     leave=False,

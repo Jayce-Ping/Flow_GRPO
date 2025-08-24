@@ -601,7 +601,7 @@ def main(_):
                 generator = None
             with autocast():
                 with torch.no_grad():
-                    images, latents, image_ids, text_ids, log_probs = pipeline_with_logprob(
+                    images, all_latents, image_ids, text_ids, all_log_probs = pipeline_with_logprob(
                         pipeline,
                         prompt_embeds=prompt_embeds,
                         pooled_prompt_embeds=pooled_prompt_embeds,
@@ -613,12 +613,10 @@ def main(_):
                         generator=generator
                 )
 
-            latents = torch.stack(latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
-            log_probs = torch.stack(log_probs, dim=1)  # shape after stack (batch_size, window_size)
+            all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
+            all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
 
-            timesteps = pipeline.scheduler.get_window_timesteps().repeat(
-                config.sample.batch_size, 1
-            )  # (batch_size, window_size)
+            timesteps = pipeline.scheduler.get_window_timesteps().repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, only_strict=True)
@@ -640,9 +638,9 @@ def main(_):
                     "pooled_prompt_embeds": pooled_prompt_embeds,
                     "image_ids": image_ids.unsqueeze(0).repeat(len(prompt_ids),1,1),
                     "timesteps": timesteps,
-                    "latents": latents[:, :-1],  # each entry is the latent before timestep t
-                    "next_latents": latents[:, 1:],  # each entry is the latent after timestep t
-                    "log_probs": log_probs,
+                    "latents": all_latents[:, :-1],  # each entry is the latent before timestep t
+                    "next_latents": all_latents[:, 1:],  # each entry is the latent after timestep t
+                    "log_probs": all_log_probs,
                     "rewards": rewards,
                 }
             )
@@ -673,6 +671,7 @@ def main(_):
         }
 
         if epoch % 10 == 0 and accelerator.is_main_process:
+            # Here `images` is from the last sampling batch. So number of images is equal to `config.sample.batch_size`
             # this is a hack to force wandb to log the images as JPEGs instead of PNGs
             with tempfile.TemporaryDirectory() as tmpdir:
                 num_samples = min(15, len(images))
