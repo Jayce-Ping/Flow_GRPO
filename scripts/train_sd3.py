@@ -30,7 +30,7 @@ import flow_grpo.rewards.rewards
 from flow_grpo.datasets.prompt_dataset import GenevalPromptDataset, TextPromptDataset
 from flow_grpo.datasets.sampler import DistributedKRepeatSampler
 from flow_grpo.diffusers_patch.sd3_pipeline_with_logprob import pipeline_with_logprob
-from flow_grpo.diffusers_patch.sd3_sde_with_logprob import denoising_step_with_logprob
+from flow_grpo.diffusers_patch.denoising_step_with_logprob import denoising_sde_step_with_logprob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_sd3 import encode_prompt
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
@@ -126,7 +126,7 @@ def compute_log_prob(transformer, pipeline, sample, j, embeds, pooled_embeds, co
         )[0]
     
     # compute the log prob of next_latents given latents under the current model
-    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_step_with_logprob(
+    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
         pipeline.scheduler,
         noise_pred.float(),
         sample["timesteps"][:, j],

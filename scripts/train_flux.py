@@ -30,7 +30,7 @@ from torch.utils.data import Dataset, DataLoader, Sampler
 import flow_grpo.prompts
 import flow_grpo.rewards.rewards
 from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import pipeline_with_logprob
-from flow_grpo.diffusers_patch.sd3_sde_with_logprob import denoising_step_with_logprob
+from flow_grpo.diffusers_patch.denoising_step_with_logprob import denoising_sde_step_with_logprob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
@@ -139,7 +139,7 @@ def compute_log_prob(
     
     # compute the log prob of next_latents given latents under the current model
     # Here, use determistic denoising for normal diffusion process.
-    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_step_with_logprob(
+    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
         pipeline.scheduler,
         model_pred.float(),
         sample["timesteps"][:, j],

@@ -5,7 +5,7 @@
 from typing import Any, Dict, List, Optional, Union
 import torch
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
-from .sd3_sde_with_logprob import denoising_step_with_logprob
+from .denoising_step_with_logprob import denoising_sde_step_with_logprob
 
 @torch.no_grad()
 def pipeline_with_logprob(
@@ -158,7 +158,7 @@ def pipeline_with_logprob(
                 
             latents_dtype = latents.dtype
 
-            latents, log_prob, prev_latents_mean, std_dev_t = denoising_step_with_logprob(
+            latents, log_prob, prev_latents_mean, std_dev_t = denoising_sde_step_with_logprob(
                 self.scheduler, 
                 noise_pred.float(), 
                 t.unsqueeze(0), 

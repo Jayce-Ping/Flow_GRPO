@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union, Callable
 import torch
 import numpy as np
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
-from .sd3_sde_with_logprob import denoising_step_with_logprob
+from .denoising_step_with_logprob import denoising_sde_step_with_logprob
 
 def calculate_shift(
     image_seq_len,
@@ -173,7 +173,7 @@ def pipeline_with_logprob(
             noise_pred = noise_pred.to(prompt_embeds.dtype)
             latents_dtype = latents.dtype
 
-            latents, log_prob, prev_latents_mean, std_dev_t = denoising_step_with_logprob(
+            latents, log_prob, prev_latents_mean, std_dev_t = denoising_sde_step_with_logprob(
                 pipeline.scheduler,
                 noise_pred.float(),
                 t.unsqueeze(0).repeat(latents.shape[0]),

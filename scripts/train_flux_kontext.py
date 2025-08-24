@@ -18,7 +18,7 @@ import flow_grpo.prompts
 import flow_grpo.rewards
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.diffusers_patch.flux_kontext_pipeline_with_logprob import pipeline_with_logprob
-from flow_grpo.diffusers_patch.sd3_sde_with_logprob import denoising_step_with_logprob
+from flow_grpo.diffusers_patch.denoising_step_with_logprob import denoising_sde_step_with_logprob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
 import torch
 import wandb
@@ -197,7 +197,7 @@ def compute_log_prob(transformer, pipeline, sample, j, config):
     )[0]
     model_pred = model_pred[:, : sample["latents"][:, j].size(1)]
     # compute the log prob of next_latents given latents under the current model
-    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_step_with_logprob(
+    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
         pipeline.scheduler,
         model_pred.float(),
         sample["timesteps"][:, j],

@@ -9,7 +9,7 @@ from diffusers.utils.torch_utils import randn_tensor
 # from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from ..scheduler import FlowMatchSlidingWindowScheduler
 
-def denoising_step_with_logprob(
+def denoising_sde_step_with_logprob(
     self: FlowMatchSlidingWindowScheduler,
     model_output: torch.FloatTensor,
     timestep: Union[list[float], torch.FloatTensor],
