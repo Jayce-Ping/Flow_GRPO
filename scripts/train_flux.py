@@ -152,18 +152,19 @@ def compute_log_prob(
 
     return prev_sample, log_prob, prev_sample_mean, std_dev_t
 
-def eval(pipeline,
-         test_dataloader,
+def eval(pipeline : FluxPipeline,
+         test_dataloader : DataLoader,
          text_encoders,
          tokenizers,
-         config,
+         config : Namespace,
          accelerator,
          global_step,
          reward_fn,
          executor,
          autocast,
          ema,
-         transformer_trainable_parameters
+         transformer_trainable_parameters,
+         log_sample_num : int = 64
     ):
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
@@ -171,6 +172,7 @@ def eval(pipeline,
     # test_dataloader = itertools.islice(test_dataloader, 2)
     all_rewards = defaultdict(list)
     all_futures = []
+    log_data = []
     for test_batch in tqdm(
             test_dataloader,
             desc="Eval: ",
@@ -179,10 +181,10 @@ def eval(pipeline,
         ):
         prompts, prompt_metadata = test_batch
         prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
-            prompts, 
-            text_encoders, 
-            tokenizers, 
-            max_sequence_length=config.max_sequence_length, 
+            prompts,
+            text_encoders,
+            tokenizers,
+            max_sequence_length=config.max_sequence_length,
             device=accelerator.device
         )
         with autocast():
@@ -204,9 +206,14 @@ def eval(pipeline,
         # all_futures.append(future)
         rewards, reward_metadata = future.result()
         for key, value in rewards.items():
-            rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
-            all_rewards[key].append(rewards_gather)
-    
+            all_rewards[key].append(value)
+        
+        if len(log_data) < log_sample_num // accelerator.num_processes:
+            # Get 1/4 data from this batch for log
+            sample_indices = range(0, len(images), max(1, len(images) // 4))
+            for idx in sample_indices:
+                log_data.append((images[idx].cpu().numpy(), prompts[idx], rewards[idx]))
+
     # for future in tqdm(
     #     all_futures,
     #     desc='Waiting for rewards',
@@ -217,51 +224,48 @@ def eval(pipeline,
     #     for key, value in rewards.items():
     #         all_rewards[key].append(value)
 
-    # for key, value in all_rewards.items():
-    #     rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
-    #     all_rewards[key] = rewards_gather
+    for key, value in all_rewards.items():
+        rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
+        all_rewards[key] = np.concatenate(rewards_gather)
 
-    last_batch_images_gather = accelerator.gather(torch.as_tensor(images, device=accelerator.device)).cpu().numpy()
-    last_batch_prompt_ids = tokenizers[0](
+    # Gather log_data from all processes
+    images, prompts, rewards = zip(*log_data)
+    gathered_images = accelerator.gather(torch.as_tensor(images, device=accelerator.device)).cpu().numpy()
+    prompt_ids = tokenizers[1](
         prompts,
         padding="max_length",
         max_length=config.max_sequence_length,
         truncation=True,
         return_tensors="pt",
     ).input_ids.to(accelerator.device)
-    last_batch_prompt_ids_gather = accelerator.gather(last_batch_prompt_ids).cpu().numpy()
-    last_batch_prompts_gather = pipeline.tokenizer.batch_decode(
-        last_batch_prompt_ids_gather, skip_special_tokens=True
+    gathered_prompt_ids = accelerator.gather(prompt_ids).cpu().numpy()
+    gathered_prompts = tokenizers[1].batch_decode(
+        gathered_prompt_ids, skip_special_tokens=True
     )
-    last_batch_rewards_gather = {}
+    gathered_rewards = {}
     for key, value in rewards.items():
-        last_batch_rewards_gather[key] = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
+        gathered_rewards[key] = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
 
-    all_rewards = {key: np.concatenate(value) for key, value in all_rewards.items()}
     if accelerator.is_main_process:
         with tempfile.TemporaryDirectory() as tmpdir:
-            num_samples = min(12, len(last_batch_images_gather))
-            # sample_indices = random.sample(range(len(images)), num_samples)
-            sample_indices = range(num_samples)
-            for idx, index in enumerate(sample_indices):
-                image = last_batch_images_gather[index]
+            for idx, index in enumerate(gathered_images):
+                image = gathered_images[index]
                 pil = Image.fromarray(
                     (image.transpose(1, 2, 0) * 255).astype(np.uint8)
                 )
                 pil = pil.resize((config.resolution, config.resolution))
                 pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
-            sampled_prompts = [last_batch_prompts_gather[index] for index in sample_indices]
-            sampled_rewards = [{k: last_batch_rewards_gather[k][index] for k in last_batch_rewards_gather} for index in sample_indices]
             for key, value in all_rewards.items():
                 print(key, value.mean())
+
             wandb.log(
                 {
                     "eval_images": [
                         wandb.Image(
                             os.path.join(tmpdir, f"{idx}.jpg"),
-                            caption=" | ".join(f"{k}: {v:.2f} | " + f"{prompt:.1000}" for k, v in reward.items() if v != -10),
+                            caption=" | ".join(f"{k}: {v:.2f} | " + f"{prompt:.100}" for k, v in reward.items() if v != -10),
                         )
-                        for idx, (prompt, reward) in enumerate(zip(sampled_prompts, sampled_rewards))
+                        for idx, (prompt, reward) in enumerate(zip(gathered_prompts, gathered_rewards))
                     ],
                     **{f"eval_reward_{key}": np.mean(value[value != -10]) for key, value in all_rewards.items()},
                 },
@@ -635,7 +639,7 @@ def main(_):
                 max_sequence_length=config.max_sequence_length,
                 device=accelerator.device
             )
-            prompt_ids = tokenizers[0](
+            prompt_ids = tokenizers[1](
                 prompts,
                 padding="max_length",
                 max_length=config.max_sequence_length,
@@ -692,7 +696,7 @@ def main(_):
                     "latents": all_latents[:, :-1],  # each entry is the latent before timestep t
                     "next_latents": all_latents[:, 1:],  # each entry is the latent after timestep t
                     "log_probs": all_log_probs,
-                    "rewards": rewards,
+                    "rewards": rewards
                 }
             )
 
@@ -722,34 +726,34 @@ def main(_):
         }
 
         # Upload some images to wandb
-        if epoch % 10 == 0 and accelerator.is_main_process:
-            # Here `images` is from the last sampling batch. So number of images is equal to `config.sample.batch_size`
-            # this is a hack to force wandb to log the images as JPEGs instead of PNGs
-            with tempfile.TemporaryDirectory() as tmpdir:
-                num_samples = min(15, len(images))
-                sample_indices = random.sample(range(len(images)), num_samples)
+        # if epoch % 10 == 0 and accelerator.is_main_process:
+        #     # Here `images` is from the last sampling batch. So number of images is equal to `config.sample.batch_size`
+        #     # this is a hack to force wandb to log the images as JPEGs instead of PNGs
+        #     with tempfile.TemporaryDirectory() as tmpdir:
+        #         num_samples = min(15, len(images))
+        #         sample_indices = random.sample(range(len(images)), num_samples)
 
-                for idx, i in enumerate(sample_indices):
-                    image = images[i]
-                    pil = Image.fromarray((image.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
-                    pil = pil.resize((config.resolution, config.resolution))
-                    pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
+        #         for idx, i in enumerate(sample_indices):
+        #             image = images[i]
+        #             pil = Image.fromarray((image.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
+        #             pil = pil.resize((config.resolution, config.resolution))
+        #             pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
 
-                sampled_prompts = [prompts[i] for i in sample_indices]
-                sampled_rewards = [rewards['avg'][i] for i in sample_indices]
+        #         sampled_prompts = [prompts[i] for i in sample_indices]
+        #         sampled_rewards = [rewards['avg'][i] for i in sample_indices]
 
-                wandb.log(
-                    {
-                        "images": [
-                            wandb.Image(
-                                os.path.join(tmpdir, f"{idx}.jpg"),
-                                caption=f"avg: {avg_reward:.2f} | {prompt:.100}",
-                            )
-                            for idx, (prompt, avg_reward) in enumerate(zip(sampled_prompts, sampled_rewards))
-                        ],
-                    },
-                    step=global_step,
-                )
+        #         wandb.log(
+        #             {
+        #                 "images": [
+        #                     wandb.Image(
+        #                         os.path.join(tmpdir, f"{idx}.jpg"),
+        #                         caption=f"avg: {avg_reward:.2f} | {prompt:.100}",
+        #                     )
+        #                     for idx, (prompt, avg_reward) in enumerate(zip(sampled_prompts, sampled_rewards))
+        #                 ],
+        #             },
+        #             step=global_step,
+        #         )
 
         samples["rewards"]["ori_avg"] = samples["rewards"]["avg"]
 
@@ -775,7 +779,7 @@ def main(_):
         if config.per_prompt_stat_tracking:
             # gather the prompts across processes
             prompt_ids = accelerator.gather(samples["prompt_ids"]).cpu().numpy()
-            prompts = pipeline.tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
+            prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
             advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
             if accelerator.is_local_main_process:
                 print("len(prompts)", len(prompts))
