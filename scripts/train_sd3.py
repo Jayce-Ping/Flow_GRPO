@@ -34,6 +34,7 @@ from flow_grpo.diffusers_patch.denoising_step_with_logprob import denoising_sde_
 from flow_grpo.diffusers_patch.train_dreambooth_lora_sd3 import encode_prompt
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
+from flow_grpo.scheduler import FlowMatchSlidingWindowScheduler
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -261,6 +262,22 @@ def load_pipeline(config, accelerator):
     pipeline = StableDiffusion3Pipeline.from_pretrained(
         config.pretrained.model
     )
+
+    if config.sample.use_sliding_window:
+        scheduler = FlowMatchSlidingWindowScheduler(
+            noise_level=config.sample.noise_level,
+            window_size=config.sample.window_size,
+            left_boundary=config.sample.left_boundary,
+            **pipeline.scheduler.config.__dict__,
+        )
+    else:
+        scheduler = FlowMatchSlidingWindowScheduler(
+            noise_level=config.sample.noise_level,
+        )
+
+    # Overwrite the original scheduler
+    pipeline.scheduler = scheduler
+
     # freeze parameters of models to save more memory
     pipeline.vae.requires_grad_(False)
     pipeline.text_encoder.requires_grad_(False)

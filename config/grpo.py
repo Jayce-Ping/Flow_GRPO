@@ -1,4 +1,3 @@
-from flow_grpo.datasets.sampler import train_batch_size
 import ml_collections
 import imp
 import os
@@ -362,6 +361,54 @@ def general_ocr_sd3_1gpu():
     return config
 
 
+def consistency_sd3_2gpu():
+    gpu_number = 2
+    config = compressibility()
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
+
+    # sd3.5 medium
+    config.pretrained.model = SD3_MODEL_PATH
+    config.sample.num_steps = 20
+    config.sample.eval_num_steps = 20
+    config.sample.guidance_scale = 4.5
+
+    config.resolution = 1024
+    config.max_sequence_length = 512
+    config.sample.batch_size = 1
+    config.sample.num_image_per_prompt = 24
+
+    config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
+    # Number of unique samples per batch (gathing batches from all devices as one), a float number, maybe less than 1
+    config.sample.unique_sample_num_per_batch = gpu_number * config.sample.batch_size / config.sample.num_image_per_prompt
+    config.sample.num_batches_per_epoch = int(config.sample.unique_sample_num_per_epoch / config.sample.unique_sample_num_per_batch)
+
+    assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
+    config.test_batch_size = 8
+
+    config.train.batch_size = config.sample.batch_size
+    config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch//2
+    config.train.num_inner_epochs = 1
+    config.train.timestep_fraction = 0.99
+    # kl loss
+    config.train.beta = 0.04
+    # Whether to use the std of all samples or the current group's.
+    config.sample.global_std = True
+    config.sample.use_history = False
+    config.sample.same_latent = False
+    config.train.ema = True
+    # A large num_epochs is intentionally set here. Training will be manually stopped once sufficient
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10
+    config.save_dir = 'logs/consistency/sd3.5-M'
+    config.reward_fn = {
+        "consistency_score": 1.0,
+    }
+    
+    config.prompt_fn = "geneval"
+
+    config.per_prompt_stat_tracking = True
+    return config
+
 def consistency_sd3_4gpu():
     gpu_number = 4
     config = compressibility()
@@ -532,7 +579,7 @@ def consistency_flux_8gpu():
     config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
-        gpu_number * train_batch_size
+        gpu_number * config.sample.batch_size
     ) # Total number of sample on all processes, to make sure all unique prompts are includede at least `num_image_per_prompt` times.
 
     # Update number of unique prompt per epoch and check balance
@@ -549,7 +596,7 @@ def consistency_flux_8gpu():
         """
 
 
-    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * train_batch_size))
+    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
 
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
 
@@ -603,7 +650,7 @@ def consistency_flux_4gpu():
     config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
-        gpu_number * train_batch_size
+        gpu_number * config.sample.batch_size
     ) # Total number of sample on all processes, to make sure all unique prompts are includede at least `num_image_per_prompt` times.
 
     # Update number of unique prompt per epoch and check balance
@@ -620,7 +667,7 @@ def consistency_flux_4gpu():
         """
 
 
-    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * train_batch_size))
+    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
 
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
 
@@ -675,7 +722,7 @@ def consistency_flux_7gpu():
     config.sample.unique_sample_num_per_epoch = 35 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
-        gpu_number * train_batch_size
+        gpu_number * config.sample.batch_size
     ) # Total number of sample on all processes, to make sure all unique prompts are includede at least `num_image_per_prompt` times.
 
     # Update number of unique prompt per epoch and check balance
@@ -692,7 +739,7 @@ def consistency_flux_7gpu():
         """
 
 
-    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * train_batch_size))
+    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
 
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
 
