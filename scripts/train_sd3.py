@@ -25,7 +25,6 @@ from peft import LoraConfig, PeftModel, get_peft_model, set_peft_model_state_dic
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Sampler
 
-# import flow_grpo.prompts
 import flow_grpo.rewards.rewards
 from flow_grpo.datasets.prompt_dataset import GenevalPromptDataset, TextPromptDataset
 from flow_grpo.datasets.sampler import DistributedKRepeatSampler
