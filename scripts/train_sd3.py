@@ -343,32 +343,29 @@ def load_pipeline(config, accelerator):
     return pipeline, text_encoders, tokenizers
 
 
-def get_resume_info(project_name, run_id):
+def set_resume_info(config):
     """
         Resume wandb training log
     """
-    resume_info = {
-        'global_step': 0,
-        'epoch': 0,
-        'run_id': run_id
-    }
+    project_name = config.project_name
+    run_id = config.resume_from_id
     # Get history
     api_run = wandb.Api().run(f"{project_name}/{run_id}")
     history = api_run.history()
     if not history.empty:
-        resume_info['global_step'] = int(history['_step'].iloc[-1])
-        resume_info['epoch'] = int(history['epoch'].iloc[-1])
-        logger.info(f"Auto-resuming from step {resume_info['global_step']}, epoch {resume_info['epoch']}")
+        config.resume_from_step = int(history['_step'].iloc[-1])
+        config.resume_from_epoch = int(history['epoch'].iloc[-1])
+        logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
     else:
         logger.info("No previous history found, starting from beginning")
+        config.resume_from_step = 0
+        config.resume_from_epoch = 0
 
-    return resume_info
+    config.run_name = api_run.name
+    config.run_id = api_run.id
+
 
 def set_wandb(config):
-    # Start wandb log
-    if not config.project_name:
-        config.project_name = 'FlowGRPO-SD3'
-
     # Resume training
     if config.resume_from_id:
         run_id = config.resume_from_id
@@ -378,11 +375,6 @@ def set_wandb(config):
             id=run_id,
             resume='must'
         )
-        resume_info = get_resume_info(config.project_name, run_id)
-        config.run_name = wandb_run.name
-        config.run_id = wandb_run.id
-        config.resume_from_step = resume_info['global_step']
-        config.resume_from_epoch = resume_info['epoch']
     else:
         unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
         if not config.run_name:
@@ -393,13 +385,12 @@ def set_wandb(config):
         wandb_run = wandb.init(
             project=config.project_name,
             config=config.to_dict()
-        )        
+        )
         config.run_name = wandb_run.name
         config.run_id = wandb_run.id
-        config.resume_from_step = 0
-        config.resume_from_epoch = 0
 
     return wandb_run
+
 
 def main(_):
     # basic Accelerate and logging setup
@@ -426,8 +417,16 @@ def main(_):
         # the total number of optimizer steps to accumulate across.
         gradient_accumulation_steps=config.train.gradient_accumulation_steps * num_train_timesteps,
     )
+    if not config.project_name:
+        config.project_name = 'FlowGRPO-SD3'
+
+    if config.resume_from_id:
+        # Fetch resume info
+        set_resume_info(config)
+
     if accelerator.is_main_process:
-        wandb_run = set_wandb()
+        # Initialize wandb
+        wandb_run = set_wandb(config)
 
     logger.info(f"\n{config}")
 
@@ -568,7 +567,7 @@ def main(_):
     # assert samples_per_epoch % total_train_batch_size == 0
 
     if config.resume_from_id:
-        global_step = config.resume_from_step
+        global_step = config.resume_from_step + 1 # Add 1 to start from the next step
         epoch = config.resume_from_epoch
     else:
         global_step = 0

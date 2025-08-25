@@ -8,7 +8,6 @@ import os
 import random
 import tempfile
 import time
-from temp import project_name
 import torch
 import tqdm
 import wandb
@@ -29,7 +28,6 @@ from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftMode
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
-import flow_grpo.prompts
 import flow_grpo.rewards.rewards
 from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import pipeline_with_logprob
 from flow_grpo.diffusers_patch.denoising_step_with_logprob import denoising_sde_step_with_logprob
@@ -401,8 +399,7 @@ def set_resume_info(config):
         config.resume_from_epoch = 0
 
     config.run_name = api_run.name
-
-
+    config.run_id = api_run.id
 
 def set_wandb(config):
     # Resume training
@@ -424,11 +421,9 @@ def set_wandb(config):
         wandb_run = wandb.init(
             project=config.project_name,
             config=config.to_dict()
-        )        
+        )
         config.run_name = wandb_run.name
         config.run_id = wandb_run.id
-        config.resume_from_step = 0
-        config.resume_from_epoch = 0
 
     return wandb_run
 
@@ -466,9 +461,13 @@ def main(_):
         config.project_name = 'FlowGRPO-Flux'
 
     if config.resume_from_id:
+        # Fetch resume info
         set_resume_info(config)
 
-    # TODO
+    if accelerator.is_main_process:
+        # Initialize wandb
+        wandb_run = set_wandb(config)
+    
 
     logger.info(f"\n{config}")
 
@@ -603,7 +602,7 @@ def main(_):
     # assert samples_per_epoch % total_train_batch_size == 0
 
     if config.resume_from_id:
-        global_step = config.resume_from_step
+        global_step = config.resume_from_step + 1 # Add 1 to start from the next step
         epoch = config.resume_from_epoch
     else:
         global_step = 0

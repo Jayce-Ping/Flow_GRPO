@@ -37,7 +37,7 @@ def compressibility():
     config.resume_from_id = None
     config.resume_from_step = None
     config.resume_from_epoch = None
-    config.project_name = 'FlowGRPO'
+    config.project_name = None
     return config
 
 # --------------------------------------------------------SD3------------------------------------------------------
@@ -412,6 +412,7 @@ def consistency_sd3_2gpu():
     }
     
     config.prompt_fn = "geneval"
+    config.resume_from_id = 'i9x38m4z'
 
     config.per_prompt_stat_tracking = True
     return config
