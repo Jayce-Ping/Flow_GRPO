@@ -134,8 +134,8 @@ def compute_log_prob(
         guidance=guidance,
         pooled_projections=sample["pooled_prompt_embeds"],
         encoder_hidden_states=sample["prompt_embeds"],
-        txt_ids= torch.zeros(sample["prompt_embeds"].shape[1], 3).to(device=device, dtype=dtype),
-        img_ids=sample["image_ids"][0],
+        txt_ids=torch.zeros(sample["prompt_embeds"].shape[1], 3).to(device=device, dtype=dtype),
+        img_ids=sample["image_ids"][j],
         return_dict=False,
     )[0]
     
@@ -626,13 +626,12 @@ def main(_):
             disable=not accelerator.is_local_main_process,
             position=0,
         ):
-            # train_sampler.set_epoch(epoch * config.sample.num_batches_per_epoch + i)
             prompts, prompt_metadata = next(train_iter)
 
             prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
-                prompts, 
-                text_encoders, 
-                tokenizers, 
+                prompts,
+                text_encoders,
+                tokenizers,
                 max_sequence_length=config.max_sequence_length,
                 device=accelerator.device
             )
@@ -649,7 +648,7 @@ def main(_):
                 # Same seed for same prompt
                 generator = create_generator(prompts, base_seed=epoch*10000+i)
             else:
-                # Same initial latent seed
+                # Different initial latent seed
                 generator = None
             with autocast():
                 with torch.no_grad():
@@ -722,6 +721,7 @@ def main(_):
             for k in samples[0].keys()
         }
 
+        # Upload some images to wandb
         if epoch % 10 == 0 and accelerator.is_main_process:
             # Here `images` is from the last sampling batch. So number of images is equal to `config.sample.batch_size`
             # this is a hack to force wandb to log the images as JPEGs instead of PNGs
@@ -731,9 +731,7 @@ def main(_):
 
                 for idx, i in enumerate(sample_indices):
                     image = images[i]
-                    pil = Image.fromarray(
-                        (image.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
-                    )
+                    pil = Image.fromarray((image.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
                     pil = pil.resize((config.resolution, config.resolution))
                     pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
 
@@ -752,12 +750,17 @@ def main(_):
                     },
                     step=global_step,
                 )
+
         samples["rewards"]["ori_avg"] = samples["rewards"]["avg"]
-        # The purpose of repeating `adv` along the timestep dimension here is to make it easier to introduce timestep-dependent advantages later, such as adding a KL reward.
-        samples["rewards"]["avg"] = samples["rewards"]["avg"].unsqueeze(1).repeat(1, config.sample.num_steps)
+
+        # The purpose of repeating `avg` along the timestep dimension here is to make it easier to introduce timestep-dependent advantages later, such as adding a KL reward.
+        # Now the rewards/advanatages is only one-dimensional to save mem.
+        # samples["rewards"]["avg"] = samples["rewards"]["avg"].unsqueeze(1).repeat(1, num_train_timesteps)
+
         # gather rewards across processes
         gathered_rewards = {key: accelerator.gather(value) for key, value in samples["rewards"].items()}
         gathered_rewards = {key: value.cpu().numpy() for key, value in gathered_rewards.items()}
+
         # log rewards and images
         if accelerator.is_main_process:
             wandb.log(
@@ -772,9 +775,7 @@ def main(_):
         if config.per_prompt_stat_tracking:
             # gather the prompts across processes
             prompt_ids = accelerator.gather(samples["prompt_ids"]).cpu().numpy()
-            prompts = pipeline.tokenizer.batch_decode(
-                prompt_ids, skip_special_tokens=True
-            )
+            prompts = pipeline.tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
             advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
             if accelerator.is_local_main_process:
                 print("len(prompts)", len(prompts))
@@ -803,7 +804,7 @@ def main(_):
         # ungather advantages; we only need to keep the entries corresponding to the samples on this process
         advantages = torch.as_tensor(advantages)
         samples["advantages"] = (
-            advantages.reshape(accelerator.num_processes, -1, advantages.shape[-1])[accelerator.process_index]
+            advantages.reshape(accelerator.num_processes, -1, *advantages.shape[1:])[accelerator.process_index]
             .to(accelerator.device)
         )
         if accelerator.is_local_main_process:
@@ -814,9 +815,8 @@ def main(_):
 
         total_batch_size, num_timesteps = samples["timesteps"].shape
 
-
         # A assertion to ensure the number of timesteps is consistent
-        assert num_timesteps == config.sample.window_size
+        assert num_timesteps == num_train_timesteps
 
         #################### TRAINING ####################
         for inner_epoch in range(config.train.num_inner_epochs):
@@ -826,7 +826,7 @@ def main(_):
 
             # rebatch for training
             samples_batched = {
-                k: v.reshape(-1, total_batch_size//config.sample.num_batches_per_epoch, *v.shape[1:])
+                k: v.reshape(-1, total_batch_size // config.sample.num_batches_per_epoch, *v.shape[1:])
                 for k, v in samples.items()
             }
 
@@ -838,6 +838,7 @@ def main(_):
             # train
             pipeline.transformer.train()
             info = defaultdict(list)
+
             for i, sample in tqdm(
                 list(enumerate(samples_batched)),
                 desc=f"Epoch {epoch}.{inner_epoch}: training",
@@ -845,7 +846,7 @@ def main(_):
                 disable=not accelerator.is_local_main_process,
             ):
                 for j in tqdm(
-                    range(num_timesteps), # only inside the window
+                    range(num_train_timesteps),
                     desc="Timestep",
                     position=1,
                     leave=False,
@@ -862,10 +863,11 @@ def main(_):
 
                         # grpo logic
                         advantages = torch.clamp(
-                            sample["advantages"][:, j],
+                            sample["advantages"],
                             -config.train.adv_clip_max,
                             config.train.adv_clip_max,
                         )
+
                         ratio = torch.exp(log_prob - sample["log_probs"][:, j])
                         # print("ratio", ratio)
                         unclipped_loss = -advantages * ratio

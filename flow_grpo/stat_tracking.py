@@ -11,7 +11,13 @@ class PerPromptStatTracker:
         self.stats = {}
         self.history_prompts = set()
 
-    def update(self, prompts : List[str], rewards : List[float], type : str = 'grpo'):
+    def update(self, prompts : List[str], rewards : torch.Tensor, type : str = 'grpo'):
+        """
+            Add `prompts` and corresponding `rewards` to the tracker and return advantages.
+
+            rewards can be a tensor with extract timestep dimension for each prompt, of shape (prompt_num, timestep_num). Or just a one-dimensional array
+            The return `advantage` keeps the same dimension as `rewards`.
+        """
         prompts = np.array(prompts)
         rewards = np.array(rewards, dtype=np.float64)
         unique = np.unique(prompts)
@@ -23,9 +29,10 @@ class PerPromptStatTracker:
             prompt_rewards = rewards[prompts == prompt]
             # Add rewards to self.stats
             if prompt not in self.stats:
-                self.stats[prompt] = []
+                self.stats[prompt] = prompt_rewards
+            else:
+                self.stats[prompt] = np.concatenate([self.stats[prompt], prompt_rewards])
 
-            self.stats[prompt] = np.concatenate([self.stats[prompt], prompt_rewards])
             self.history_prompts.add(hash(prompt))  # Add hash of prompt to history_prompts
 
         # Compute mean and std for each sample
@@ -34,22 +41,22 @@ class PerPromptStatTracker:
             # Compute mean and std
             if self.use_history:
                 # 1. Use all its history when `use_history=True`
-                mean = np.mean(self.stats[prompt], axis=0)
+                mean = np.mean(self.stats[prompt], axis=0, keepdims=True)
                 if self.global_std:
                     # Global std across all history
-                    std = np.std(np.concatenate(list(self.stats.values())), axis=0) + 1e-4
+                    std = np.std(np.concatenate(list(self.stats.values())), axis=0, keepdims=True) + 1e-4
                 else:
                     # Local std across all history, for this prompt only
-                    std = np.std(self.stats[prompt], axis=0) + 1e-4
+                    std = np.std(self.stats[prompt], axis=0, keepdims=True) + 1e-4
             else:
                 # 2. Use only info in this update.
-                mean = np.mean(prompt_rewards, axis=0)
+                mean = np.mean(prompt_rewards, axis=0, keepdims=True)
                 if self.global_std:
                     # Global std across this update info
-                    std = np.std(rewards, axis=0) + 1e-4
+                    std = np.std(rewards, axis=0, keepdims=True) + 1e-4
                 else:
                     # Local std for this prompt only
-                    std = np.std(prompt_rewards, axis=0) + 1e-4
+                    std = np.std(prompt_rewards, axis=0, keepdims=True) + 1e-4
 
             # Compute advantages with different algorithm
             if type == 'grpo':

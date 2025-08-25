@@ -30,7 +30,6 @@ def pipeline_with_logprob(
     num_inference_steps: int = 28,
     sigmas: Optional[List[float]] = None,
     guidance_scale: float = 3.5,
-    num_images_per_prompt: Optional[int] = 1,
     generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
     latents: Optional[torch.FloatTensor] = None,
     prompt_embeds: Optional[torch.FloatTensor] = None,
@@ -95,7 +94,6 @@ def pipeline_with_logprob(
         prompt_embeds=prompt_embeds,
         pooled_prompt_embeds=pooled_prompt_embeds,
         device=device,
-        num_images_per_prompt=num_images_per_prompt,
         max_sequence_length=max_sequence_length,
         lora_scale=lora_scale,
     )
@@ -103,7 +101,7 @@ def pipeline_with_logprob(
     # 4. Prepare latent variables
     num_channels_latents = pipeline.transformer.config.in_channels // 4
     latents, latent_image_ids = pipeline.prepare_latents(
-        batch_size * num_images_per_prompt,
+        batch_size,
         num_channels_latents,
         height,
         width,

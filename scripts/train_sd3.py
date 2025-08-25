@@ -723,11 +723,15 @@ def main(_):
                     step=global_step,
                 )
         samples["rewards"]["ori_avg"] = samples["rewards"]["avg"]
-        # The purpose of repeating `adv` along the timestep dimension here is to make it easier to introduce timestep-dependent advantages later, such as adding a KL reward.
-        samples["rewards"]["avg"] = samples["rewards"]["avg"].unsqueeze(1).repeat(1, num_train_timesteps)
+
+        # The purpose of repeating `avg` along the timestep dimension here is to make it easier to introduce timestep-dependent advantages later, such as adding a KL reward.
+        # Now the rewards/advanatages is only one-dimensional to save mem.
+        # samples["rewards"]["avg"] = samples["rewards"]["avg"].unsqueeze(1).repeat(1, num_train_timesteps)
+
         # gather rewards across processes
         gathered_rewards = {key: accelerator.gather(value) for key, value in samples["rewards"].items()}
         gathered_rewards = {key: value.cpu().numpy() for key, value in gathered_rewards.items()}
+
         # log rewards and images
         if accelerator.is_main_process:
             wandb.log(
@@ -771,7 +775,7 @@ def main(_):
         # ungather advantages; we only need to keep the entries corresponding to the samples on this process
         advantages = torch.as_tensor(advantages)
         samples["advantages"] = (
-            advantages.reshape(accelerator.num_processes, -1, advantages.shape[-1])[accelerator.process_index]
+            advantages.reshape(accelerator.num_processes, -1, *advantages.shape[1:])[accelerator.process_index]
             .to(accelerator.device)
         )
         if accelerator.is_local_main_process:
@@ -808,7 +812,7 @@ def main(_):
         #     total_batch_size
         #     == config.sample.batch_size * config.sample.num_batches_per_epoch
         # )
-        assert num_timesteps == config.sample.window_size
+        assert num_timesteps == num_train_timesteps
 
         #################### TRAINING ####################
         for inner_epoch in range(config.train.num_inner_epochs):
@@ -848,9 +852,8 @@ def main(_):
                     embeds = sample["prompt_embeds"]
                     pooled_embeds = sample["pooled_prompt_embeds"]
 
-                train_timesteps = [step_index for step_index in range(num_train_timesteps)]
                 for j in tqdm(
-                    train_timesteps, # Train only inside the window
+                    range(num_train_timesteps), # Train only inside the window
                     desc="Timestep",
                     position=1,
                     leave=False,
@@ -866,7 +869,7 @@ def main(_):
 
                         # grpo logic
                         advantages = torch.clamp(
-                            sample["advantages"][:, j],
+                            sample["advantages"],
                             -config.train.adv_clip_max,
                             config.train.adv_clip_max,
                         )
