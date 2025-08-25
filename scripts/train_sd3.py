@@ -367,7 +367,7 @@ def get_resume_info(project_name, run_id):
 def set_wandb(config):
     # Start wandb log
     if not config.project_name:
-        config.project_name = 'FlowGRPO-Flux'
+        config.project_name = 'FlowGRPO-SD3'
 
     # Resume training
     if config.resume_from_id:
