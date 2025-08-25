@@ -2,11 +2,13 @@ import contextlib
 import datetime
 import hashlib
 import json
+from tokenize import cookie_re
 import numpy as np
 import os
 import random
 import tempfile
 import time
+from temp import project_name
 import torch
 import tqdm
 import wandb
@@ -376,15 +378,68 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
 
     return pipeline, text_encoders, tokenizers
 
+def get_resume_info(project_name, run_id):
+    """
+        Resume wandb training log
+    """
+    resume_info = {
+        'global_step': 0,
+        'epoch': 0,
+        'run_id': run_id
+    }
+    # Get history
+    api_run = wandb.Api().run(f"{project_name}/{run_id}")
+    history = api_run.history()
+    if not history.empty:
+        resume_info['global_step'] = int(history['_step'].iloc[-1])
+        resume_info['epoch'] = int(history['epoch'].iloc[-1])
+        logger.info(f"Auto-resuming from step {resume_info['global_step']}, epoch {resume_info['epoch']}")
+    else:
+        logger.info("No previous history found, starting from beginning")
+
+    return resume_info
+
+def set_wandb(config):
+    # Start wandb log
+    if not config.project_name:
+        config.project_name = 'FlowGRPO-Flux'
+
+    # Resume training
+    if config.resume_from_id:
+        run_id = config.resume_from_id
+        wandb_run = wandb.init(
+            project=config.project_name,
+            config=config.to_dict(),
+            id=run_id,
+            resume='must'
+        )
+        resume_info = get_resume_info(config.project_name, run_id)
+        config.run_name = wandb_run.name
+        config.run_id = wandb_run.id
+        config.resume_from_step = resume_info['global_step']
+        config.resume_from_epoch = resume_info['epoch']
+    else:
+        unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
+        if not config.run_name:
+            config.run_name = unique_id
+        else:
+            config.run_name += "_" + unique_id
+
+        wandb_run = wandb.init(
+            project=config.project_name,
+            config=config.to_dict()
+        )        
+        config.run_name = wandb_run.name
+        config.run_id = wandb_run.id
+        config.resume_from_step = 0
+        config.resume_from_epoch = 0
+
+    return wandb_run
+
+
 def main(_):
     # basic Accelerate and logging setup
     config = FLAGS.config
-
-    unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
-    if not config.run_name:
-        config.run_name = unique_id
-    else:
-        config.run_name += "_" + unique_id
 
     # number of timesteps within each trajectory to train on
     if config.sample.use_sliding_window:
@@ -408,16 +463,8 @@ def main(_):
         gradient_accumulation_steps=config.train.gradient_accumulation_steps * num_train_timesteps,
     )
     if accelerator.is_main_process:
-        wandb.init(
-            project="FlowGRPO-Flux",
-            config=config.to_dict(),
-            # mode="disabled"
-        )
-        # accelerator.init_trackers(
-        #     project_name="flow-grpo",
-        #     config=config.to_dict(),
-        #     init_kwargs={"wandb": {"name": config.run_name}},
-        # )
+        wandb_run = set_wandb()
+
     logger.info(f"\n{config}")
 
     # set seed (device_specific is very important to get different prompts on different devices)
@@ -551,8 +598,13 @@ def main(_):
     # assert config.sample.batch_size % config.train.batch_size == 0
     # assert samples_per_epoch % total_train_batch_size == 0
 
-    epoch = 0
-    global_step = 0
+    if config.resume_from_id:
+        global_step = config.resume_from_step
+        epoch = config.resume_from_epoch
+    else:
+        global_step = 0
+        epoch = 0
+    
     train_iter = iter(train_dataloader)
 
     while True:
@@ -883,12 +935,13 @@ def main(_):
                             wandb.log(info, step=global_step)
                         global_step += 1
                         info = defaultdict(list)
+
                 if config.train.ema:
                     ema.step(transformer_trainable_parameters, global_step)
             # make sure we did an optimization step at the end of the inner epoch
             # assert accelerator.sync_gradients
         
-        epoch+=1
+        epoch += 1
         
 if __name__ == "__main__":
     app.run(main)

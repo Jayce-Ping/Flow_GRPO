@@ -1,41 +1,32 @@
-import json
-import re
+import wandb
 
+# ---- 配置信息 ----
+run_id = "d04p82m0"
+entity_name = "315229706-xi-an-jiaotong-university-"
+project_name = "FlowGRPO"
 
-def extract_grid_info(prompt) -> tuple[int, int]:
-    # Grid can be represented as int x int, or int ⨉ int. ⨉ has unicode \u2a09
-    match = re.findall(r'(\d+)\s*[x⨉]\s*(\d+)', prompt)
-    if len(match) == 0:
-        return (1, 1)
+# ---- 恢复运行 ----
+run = wandb.init(
+    entity=entity_name,
+    project=project_name,
+    id=run_id,
+    resume="must"   # 强制 resume
+)
 
-    return (int(match[0][0]), int(match[0][1]))
+print("Run name:", run.name)
+print("Run id:", run.id)
 
+# ---- 用 API 获取历史 ----
+api = wandb.Api()
+api_run = api.run(f"{entity_name}/{project_name}/{run_id}")
 
-    
-prompt_file_path = 'dataset/T2IS/prompt.json'
+history = api_run.history()   # pandas.DataFrame
+print("History head:\n", history.head())
 
+# ---- 取最后一个 step ----
+resume_info = {}
+if not history.empty:
+    last_step = history.index.max()   # history 的 index 默认是 step
+    resume_info['global_step'] = int(last_step)
 
-
-data = json.load(open(prompt_file_path))
-
-
-# Group data by its grid form
-groups = {}
-for item in data:
-    grid_info = extract_grid_info(item['prompt'])
-    if grid_info not in groups:
-        groups[grid_info] = []
-    
-    groups[grid_info].append(item)
-
-
-square_2x2 = groups[(2,2)]
-
-with open('dataset/T2IS/train_metadata.jsonl', 'w') as f:
-    for item in square_2x2:
-        f.write(json.dumps(item) + '\n')
-
-
-with open('dataset/T2IS/test_metadata.jsonl', 'w') as f:
-    for item in square_2x2:
-        f.write(json.dumps(item) + '\n')
+print("Resume info:", resume_info)
