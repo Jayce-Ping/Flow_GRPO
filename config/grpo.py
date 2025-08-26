@@ -592,7 +592,7 @@ def consistency_flux_4gpu():
 
     # Sliding Window Scheduler
     config.sample.use_sliding_window = True
-    config.sample.window_size = 4
+    config.sample.window_size = 2
     config.sample.left_boundary = 2
 
     # flux
@@ -606,7 +606,7 @@ def consistency_flux_4gpu():
 
     config.sample.batch_size = 1
     config.sample.num_image_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 30 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -642,8 +642,8 @@ def consistency_flux_4gpu():
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.noise_level = 0.9
-    config.save_freq = 20 # epoch
-    config.eval_freq = 20 # 0 for no eval applied
+    config.save_freq = 15 # epoch
+    config.eval_freq = 15 # 0 for no eval applied
     config.save_dir = 'logs/consistency/flux-4gpu'
     config.reward_fn = {
         "consistency_score": 1.0,
@@ -666,8 +666,8 @@ def consistency_flux_7gpu():
 
     # Sliding Window Scheduler
     config.sample.use_sliding_window = True
-    config.sample.window_size = 4
-    config.sample.left_boundary = 2
+    config.sample.window_size = 2
+    config.sample.left_boundary = 1
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
