@@ -1,9 +1,10 @@
 import ml_collections
-import imp
 import os
 import math
+import base
 
-base = imp.load_source("base", os.path.join(os.path.dirname(__file__), "base.py"))
+# import imp
+# base = imp.load_source("base", os.path.join(os.path.dirname(__file__), "base.py"))
 
 FLUX_MODEL_PATH = '/raid/data_qianh/jcy/hugging/models/FLUX.1-dev'
 SD3_MODEL_PATH = "/raid/data_qianh/jcy/hugging/models/stable-diffusion-3.5-medium"

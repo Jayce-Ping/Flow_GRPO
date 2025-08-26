@@ -1,32 +1,61 @@
 import wandb
+import datetime
+import ml_collections
+def set_resume_info(config):
+    """
+        Resume wandb training log
+    """
+    project_name = config.project_name
+    run_id = config.resume_from_id
+    # Get history
+    api_run = wandb.Api().run(f"{project_name}/{run_id}")
+    history = api_run.history()
+    if not history.empty:
+        config.resume_from_step = int(history['_step'].iloc[-1])
+        config.resume_from_epoch = int(history['epoch'].iloc[-1])
+        print(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
+    else:
+        print("No previous history found, starting from beginning")
+        config.resume_from_step = 0
+        config.resume_from_epoch = 0
 
-# ---- 配置信息 ----
-run_id = "d04p82m0"
-entity_name = "315229706-xi-an-jiaotong-university-"
-project_name = "FlowGRPO"
+    config.run_name = api_run.name
+    config.run_id = api_run.id
 
-# ---- 恢复运行 ----
-run = wandb.init(
-    entity=entity_name,
-    project=project_name,
-    id=run_id,
-    resume="must"   # 强制 resume
-)
+def set_wandb(config):
+    # Resume training
+    if config.resume_from_id:
+        run_id = config.resume_from_id
+        print("Resuming")
+        wandb_run = wandb.init(
+            project=config.project_name,
+            config=config.to_dict(),
+            id=run_id,
+            resume='must'
+        )
+        print("Resuming done")
+    else:
+        print("Start from beginning")
+        unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
+        if not config.run_name:
+            config.run_name = unique_id
+        else:
+            config.run_name += "_" + unique_id
 
-print("Run name:", run.name)
-print("Run id:", run.id)
+        wandb_run = wandb.init(
+            project=config.project_name,
+            config=config.to_dict()
+        )
+        config.run_name = wandb_run.name
+        config.run_id = wandb_run.id
+        print("Init done")
 
-# ---- 用 API 获取历史 ----
-api = wandb.Api()
-api_run = api.run(f"{entity_name}/{project_name}/{run_id}")
+    return wandb_run
 
-history = api_run.history()   # pandas.DataFrame
-print("History head:\n", history.head())
 
-# ---- 取最后一个 step ----
-resume_info = {}
-if not history.empty:
-    last_step = history.index.max()   # history 的 index 默认是 step
-    resume_info['global_step'] = int(last_step)
+config = ml_collections.ConfigDict()
 
-print("Resume info:", resume_info)
+config.resume_from_id = 'd04p82m0'
+config.project_name = 'FlowGRPO'
+set_resume_info(config)
+set_wandb(config)
