@@ -1,10 +1,12 @@
 import ml_collections
 import os
 import math
-import base
+from importlib.util import spec_from_file_location, module_from_spec
 
-# import imp
-# base = imp.load_source("base", os.path.join(os.path.dirname(__file__), "base.py"))
+spec = spec_from_file_location('base', os.path.join(os.path.dirname(__file__), "base.py"))
+base = module_from_spec(spec)
+spec.loader.exec_module(base)
+
 
 FLUX_MODEL_PATH = '/raid/data_qianh/jcy/hugging/models/FLUX.1-dev'
 SD3_MODEL_PATH = "/raid/data_qianh/jcy/hugging/models/stable-diffusion-3.5-medium"
@@ -593,7 +595,7 @@ def consistency_flux_4gpu():
     # Sliding Window Scheduler
     config.sample.use_sliding_window = True
     config.sample.window_size = 2
-    config.sample.left_boundary = 2
+    config.sample.left_boundary = 1
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
@@ -644,7 +646,7 @@ def consistency_flux_4gpu():
     config.sample.noise_level = 0.9
     config.save_freq = 15 # epoch
     config.eval_freq = 15 # 0 for no eval applied
-    config.save_dir = 'logs/consistency/flux-4gpu'
+    config.save_dir = 'logs/consistency/flux-4gpu-half-train'
     config.reward_fn = {
         "consistency_score": 1.0,
     }

@@ -161,7 +161,7 @@ def eval(pipeline : FluxPipeline,
          autocast,
          ema,
          transformer_trainable_parameters,
-         log_sample_num : int = 150
+         log_sample_num : int = 120
     ):
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
@@ -169,7 +169,11 @@ def eval(pipeline : FluxPipeline,
     # test_dataloader = itertools.islice(test_dataloader, 2)
     all_rewards = defaultdict(list)
     all_futures = []
-    log_data = []
+    log_data = {
+        'images': [],
+        'prompts': [],
+        'rewards': {}
+    }
     for test_batch in tqdm(
             test_dataloader,
             desc="Eval: ",
@@ -206,9 +210,15 @@ def eval(pipeline : FluxPipeline,
             all_rewards[key].append(value)
         
         if len(log_data) < log_sample_num // accelerator.num_processes:
-            # Get all data from this batch for log
-            for idx in range(len(images)):
-                log_data.append((images[idx].cpu().numpy(), prompts[idx], rewards[idx]))
+            # Get data from this batch for log
+            sample_indices = list(range(0, len(images), len(images) // 2))
+            log_data['images'].extend([images[idx] for idx in sample_indices])
+            log_data['prompts'].extend([prompts[idx] for idx in sample_indices])
+            for key, value in rewards.items():
+                if key not in log_data['rewards']:
+                    log_data['rewards'] = []
+                
+                log_data['rewards'][key].extend(value)
 
     # for future in tqdm(
     #     all_futures,
@@ -224,11 +234,10 @@ def eval(pipeline : FluxPipeline,
         rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
         all_rewards[key] = np.concatenate(rewards_gather)
 
-    # Gather log_data from all processes
-    images, prompts, rewards = zip(*log_data)
-    gathered_images = accelerator.gather(torch.as_tensor(images, device=accelerator.device)).cpu().numpy()
+    # Gather log_data from all processes       
+    gathered_images = accelerator.gather(torch.as_tensor(log_data['images'], device=accelerator.device)).cpu().numpy()
     prompt_ids = tokenizers[1](
-        prompts,
+        log_data['prompts'],
         padding="max_length",
         max_length=config.max_sequence_length,
         truncation=True,
@@ -239,7 +248,7 @@ def eval(pipeline : FluxPipeline,
         gathered_prompt_ids, skip_special_tokens=True
     )
     gathered_rewards = {}
-    for key, value in rewards.items():
+    for key, value in log_data['rewards'].items():
         gathered_rewards[key] = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
 
     if accelerator.is_main_process:

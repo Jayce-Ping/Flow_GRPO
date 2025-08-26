@@ -1,9 +1,8 @@
 import ml_collections
 import os
-import base
 
-# import imp
-# base = imp.load_source("base", os.path.join(os.path.dirname(__file__), "base.py"))
+import imp
+base = imp.load_source("base", os.path.join(os.path.dirname(__file__), "base.py"))
 
 def compressibility():
     config = base.get_config()
