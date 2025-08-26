@@ -209,14 +209,14 @@ def eval(pipeline : FluxPipeline,
         for key, value in rewards.items():
             all_rewards[key].append(value)
         
-        if len(log_data) < log_sample_num // accelerator.num_processes:
+        if len(log_data['images']) < log_sample_num // accelerator.num_processes:
             # Get data from this batch for log
-            sample_indices = list(range(0, len(images), len(images) // 2))
+            sample_indices = list(range(0, len(images), 2))
             log_data['images'].extend([images[idx] for idx in sample_indices])
             log_data['prompts'].extend([prompts[idx] for idx in sample_indices])
             for key, value in rewards.items():
                 if key not in log_data['rewards']:
-                    log_data['rewards'] = []
+                    log_data['rewards'][key] = []
                 
                 log_data['rewards'][key].extend(value)
 
@@ -234,7 +234,9 @@ def eval(pipeline : FluxPipeline,
         rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
         all_rewards[key] = np.concatenate(rewards_gather)
 
-    # Gather log_data from all processes       
+    log_data['images'] = torch.stack(log_data['images'], dim=0)
+
+    # Gather log_data from all processes
     gathered_images = accelerator.gather(torch.as_tensor(log_data['images'], device=accelerator.device)).cpu().numpy()
     prompt_ids = tokenizers[1](
         log_data['prompts'],
@@ -251,28 +253,34 @@ def eval(pipeline : FluxPipeline,
     for key, value in log_data['rewards'].items():
         gathered_rewards[key] = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
 
+    # gathered_rewards = {'r1': [1,2,3], 'r2': [4,5,6]}
+    # ->
+    # gathered_rewards = [{'r1':1, 'r2':4}, {'r1':2, 'r2':5}, {'r1':3, 'r2':6}]
+    gathered_rewards = [
+        {k: v for k, v in zip(gathered_rewards.keys(), value)}
+        for value in list(zip(*gathered_rewards.values()))
+    ]
     if accelerator.is_main_process:
         with tempfile.TemporaryDirectory() as tmpdir:
-            for idx, index in enumerate(gathered_images):
-                image = gathered_images[index]
+            for idx, image in enumerate(gathered_images):
                 pil = Image.fromarray(
                     (image.transpose(1, 2, 0) * 255).astype(np.uint8)
                 )
                 pil = pil.resize((config.resolution, config.resolution))
                 pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
             for key, value in all_rewards.items():
-                print(key, value.mean())
+                print(key, np.mean(value))
 
             wandb.log(
                 {
                     "eval_images": [
                         wandb.Image(
                             os.path.join(tmpdir, f"{idx}.jpg"),
-                            caption=" | ".join(f"{k}: {v:.2f} | " + f"{prompt:.100}" for k, v in reward.items() if v != -10),
+                            caption=" | ".join(f"{k}: {v:.2f} | " + f"{prompt:.100}" for k, v in reward.items()),
                         )
                         for idx, (prompt, reward) in enumerate(zip(gathered_prompts, gathered_rewards))
                     ],
-                    **{f"eval_reward_{key}": np.mean(value[value != -10]) for key, value in all_rewards.items()},
+                    **{f"eval_reward_{key}": np.mean(value) for key, value in all_rewards.items()},
                 },
                 step=global_step,
             )
