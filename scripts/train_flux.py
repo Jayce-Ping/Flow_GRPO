@@ -257,8 +257,8 @@ def eval(pipeline : FluxPipeline,
     # ->
     # gathered_rewards = [{'r1':1, 'r2':4}, {'r1':2, 'r2':5}, {'r1':3, 'r2':6}]
     gathered_rewards = [
-        {k: v for k, v in zip(gathered_rewards.keys(), value)}
-        for value in list(zip(*gathered_rewards.values()))
+        dict(zip(gathered_rewards.keys(), value))
+        for value in zip(*gathered_rewards.values())
     ]
     if accelerator.is_main_process:
         with tempfile.TemporaryDirectory() as tmpdir:

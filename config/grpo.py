@@ -657,6 +657,7 @@ def consistency_flux_4gpu():
 
     # config.train.lora_path = 'logs/consistency/flux-4gpu/checkpoints/8-21-checkpoint-60/lora'
     config.project_name = 'FlowGRPO-Flux'
+    config.resume_from_id = 'avpl5kom'
 
     return config
 
