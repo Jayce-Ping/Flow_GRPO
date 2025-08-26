@@ -161,7 +161,7 @@ def eval(pipeline : FluxPipeline,
          autocast,
          ema,
          transformer_trainable_parameters,
-         log_sample_num : int = 64
+         log_sample_num : int = 150
     ):
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
@@ -206,9 +206,8 @@ def eval(pipeline : FluxPipeline,
             all_rewards[key].append(value)
         
         if len(log_data) < log_sample_num // accelerator.num_processes:
-            # Get 1/4 data from this batch for log
-            sample_indices = range(0, len(images), max(1, len(images) // 4))
-            for idx in sample_indices:
+            # Get all data from this batch for log
+            for idx in range(len(images)):
                 log_data.append((images[idx].cpu().numpy(), prompts[idx], rewards[idx]))
 
     # for future in tqdm(
