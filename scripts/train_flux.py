@@ -739,36 +739,6 @@ def main(_):
             for k in samples[0].keys()
         }
 
-        # Upload some images to wandb
-        # if epoch % 10 == 0 and accelerator.is_main_process:
-        #     # Here `images` is from the last sampling batch. So number of images is equal to `config.sample.batch_size`
-        #     # this is a hack to force wandb to log the images as JPEGs instead of PNGs
-        #     with tempfile.TemporaryDirectory() as tmpdir:
-        #         num_samples = min(15, len(images))
-        #         sample_indices = random.sample(range(len(images)), num_samples)
-
-        #         for idx, i in enumerate(sample_indices):
-        #             image = images[i]
-        #             pil = Image.fromarray((image.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
-        #             pil = pil.resize((config.resolution, config.resolution))
-        #             pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
-
-        #         sampled_prompts = [prompts[i] for i in sample_indices]
-        #         sampled_rewards = [rewards['avg'][i] for i in sample_indices]
-
-        #         wandb.log(
-        #             {
-        #                 "images": [
-        #                     wandb.Image(
-        #                         os.path.join(tmpdir, f"{idx}.jpg"),
-        #                         caption=f"avg: {avg_reward:.2f} | {prompt:.100}",
-        #                     )
-        #                     for idx, (prompt, avg_reward) in enumerate(zip(sampled_prompts, sampled_rewards))
-        #                 ],
-        #             },
-        #             step=global_step,
-        #         )
-
         samples["rewards"]["ori_avg"] = samples["rewards"]["avg"]
 
         # The purpose of repeating `avg` along the timestep dimension here is to make it easier to introduce timestep-dependent advantages later, such as adding a KL reward.

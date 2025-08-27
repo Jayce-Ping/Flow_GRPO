@@ -485,11 +485,11 @@ def test_flux_1gpu():
     config.sample.eval_num_steps = 4
     config.sample.guidance_scale = 3.5
 
-    config.resolution = 512
+    config.resolution = 256
 
     config.sample.batch_size = 1
-    config.sample.num_image_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 30 # Number of unique prompts used in each epoch
+    config.sample.num_image_per_prompt = 1
+    config.sample.unique_sample_num_per_epoch = 2 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -524,6 +524,70 @@ def test_flux_1gpu():
     config.sample.noise_level = 0.9
     config.save_freq = 0 # epoch
     config.eval_freq = 0
+    config.save_dir = 'logs/test_run'
+    config.reward_fn = {
+        "jpeg_compressibility": 1.0,
+    }
+    
+    config.prompt_fn = "general_ocr"
+
+    config.per_prompt_stat_tracking = True
+    return config
+
+def test_flux_4gpu():
+    gpu_number = 4
+    config = compressibility()
+    config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
+
+    config.sample.use_sliding_window = True
+    config.sample.window_size = 2
+    config.sample.left_boundary = 1
+
+    # flux
+    config.pretrained.model = FLUX_MODEL_PATH
+    config.sample.num_steps = 4
+    config.sample.eval_num_steps = 4
+    config.sample.guidance_scale = 3.5
+
+    config.resolution = 256
+
+    config.sample.batch_size = 2
+    config.sample.num_image_per_prompt = 1
+    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch
+    config.sample.sample_num_per_epoch = math.lcm(
+        config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
+        gpu_number * config.sample.batch_size
+    ) # Total number of sample on all processes, to make sure all unique prompts are includede at least `num_image_per_prompt` times.
+
+    # Update number of unique prompt per epoch and check balance
+    unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.num_image_per_prompt
+    num_image_per_prompt = config.sample.sample_num_per_epoch // config.sample.unique_sample_num_per_epoch
+    assert unique_sample_num_per_epoch == config.sample.unique_sample_num_per_epoch and num_image_per_prompt == config.sample.num_image_per_prompt, \
+        f""" Current setting:
+            config.sample.unique_sample_num_per_epoch={config.sample.unique_sample_num_per_epoch}
+            config.sample.num_image_per_prompt={config.sample.num_image_per_prompt}
+            requires total sample number per epoch to be multiplies of {config.sample.unique_sample_num_per_epoch}*{config.sample.num_image_per_prompt}={config.sample.unique_sample_num_per_epoch*config.sample.num_image_per_prompt},
+            which is not a multiple of sample_batch_size*gpu_number={config.sample.batch_size*gpu_number} and will cause unbalanced sampling.
+            Consider to set config.sample.unique_sample_num_per_epoch to be {unique_sample_num_per_epoch},
+            or config.sample.num_image_per_prompt to be {num_image_per_prompt}.
+        """
+    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
+
+    assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
+    config.test_batch_size = 16
+
+    config.train.batch_size = config.sample.batch_size
+    config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch//2
+    config.train.num_inner_epochs = 1
+    config.train.timestep_fraction = 0.99
+    config.train.beta = 0
+    config.sample.global_std = True
+    config.sample.use_history = False
+    config.sample.same_latent = False
+    config.train.ema = True
+    config.sample.noise_level = 0.9
+    config.save_freq = 0 # epoch
+    config.eval_freq = 10
     config.save_dir = 'logs/test_run'
     config.reward_fn = {
         "jpeg_compressibility": 1.0,
