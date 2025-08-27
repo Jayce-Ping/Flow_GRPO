@@ -243,8 +243,19 @@ def eval(pipeline : FluxPipeline,
         rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
         all_rewards[key] = np.concatenate(rewards_gather)
 
-    log_data['images'] = torch.stack(log_data['images'], dim=0)
+    if accelerator.is_main_process:
+        for key, value in all_rewards.items():
+            print(key, np.mean(value))
 
+        # Log eval metrics
+        wandb.log(
+            {f"eval/{key}": np.mean(value) for key, value in all_rewards.items()},
+            step=global_step
+        )
+
+
+    # ---------------------------Log detailed examples, with prompt-image-reward tuples--------------------------
+    log_data['images'] = torch.stack(log_data['images'], dim=0)
     # Gather log_data from all processes
     gathered_images = accelerator.gather(torch.as_tensor(log_data['images'], device=accelerator.device)).cpu().numpy()
     prompt_ids = tokenizers[1](
@@ -277,19 +288,16 @@ def eval(pipeline : FluxPipeline,
                 )
                 pil = pil.resize((config.resolution, config.resolution))
                 pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
-            for key, value in all_rewards.items():
-                print(key, np.mean(value))
 
             wandb.log(
                 {
                     "eval_images": [
                         wandb.Image(
                             os.path.join(tmpdir, f"{idx}.jpg"),
-                            caption=" | ".join(f"{k}: {v:.2f} | " + f"{prompt:.100}" for k, v in reward.items()),
+                            caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt:.200}",
                         )
                         for idx, (prompt, reward) in enumerate(zip(gathered_prompts, gathered_rewards))
-                    ],
-                    **{f"eval_reward_{key}": np.mean(value) for key, value in all_rewards.items()},
+                    ]
                 },
                 step=global_step,
             )

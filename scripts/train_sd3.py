@@ -157,10 +157,10 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
         ):
         prompts, prompt_metadata = test_batch
         prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
-            prompts, 
-            text_encoders, 
-            tokenizers, 
-            max_sequence_length=config.max_sequence_length, 
+            prompts,
+            text_encoders,
+            tokenizers,
+            max_sequence_length=config.max_sequence_length,
             device=accelerator.device
         )
         # The last batch may not be full batch_size
