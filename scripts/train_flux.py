@@ -132,7 +132,7 @@ def compute_log_prob(
         pooled_projections=sample["pooled_prompt_embeds"],
         encoder_hidden_states=sample["prompt_embeds"],
         txt_ids=torch.zeros(sample["prompt_embeds"].shape[1], 3).to(device=device, dtype=dtype),
-        img_ids=sample["image_ids"][j],
+        img_ids=sample["image_ids"][0],
         return_dict=False,
     )[0]
     
@@ -738,6 +738,9 @@ def main(_):
             }
             for k in samples[0].keys()
         }
+        # for key, value in samples.items():
+        #     if isinstance(value, torch.Tensor):
+        #         print(key, 'has shape', value.shape)
 
         samples["rewards"]["ori_avg"] = samples["rewards"]["avg"]
 
