@@ -109,30 +109,40 @@ def compute_log_prob(
         j : int,
         config : Namespace
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    packed_noisy_model_input = sample["latents"][:, j]
+    latents = sample["latents"][:, j]
     time_steps = sample["timesteps"][:, j]
+    batch_size, num_channels_latents, height, width = latents.shape
     # Since the time_steps are copied after sampling, each batch of time_step should equal
     # noise_levels = [pipeline.scheduler.get_noise_level_for_timestep(t) for t in time_steps]
     noise_level = pipeline.scheduler.get_noise_level_for_timestep(time_steps[0]) # So, all noise levels are equal
 
-    device = packed_noisy_model_input.device
-    dtype = packed_noisy_model_input.dtype
+    device = latents.device
+    dtype = latents.dtype
 
     if transformer.module.config.guidance_embeds:
         guidance = torch.tensor([config.sample.guidance_scale], device=device)
-        guidance = guidance.expand(packed_noisy_model_input.shape[0])
+        guidance = guidance.expand(latents.shape[0])
     else:
         guidance = None
 
+    latents, image_ids = pipeline.prepare_latents(
+        batch_size,
+        num_channels_latents,
+        height,
+        width,
+        dtype=dtype,
+        device=device,
+    )
+
     # Predict the noise residual
     model_pred = transformer(
-        hidden_states=packed_noisy_model_input,
-        timestep=sample["timesteps"][:, j] / 1000,
+        hidden_states=latents,
+        timestep=time_steps / 1000,
         guidance=guidance,
         pooled_projections=sample["pooled_prompt_embeds"],
         encoder_hidden_states=sample["prompt_embeds"],
         txt_ids=torch.zeros(sample["prompt_embeds"].shape[1], 3).to(device=device, dtype=dtype),
-        img_ids=sample["image_ids"][j],
+        img_ids=image_ids,
         return_dict=False,
     )[0]
     
@@ -141,8 +151,8 @@ def compute_log_prob(
     prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
         pipeline.scheduler,
         model_pred.float(),
-        sample["timesteps"][:, j],
-        sample["latents"][:, j].float(),
+        time_steps,
+        latents.float(),
         noise_level=noise_level,
         prev_sample=sample["next_latents"][:, j].float(),
     )
