@@ -130,7 +130,8 @@ def compute_log_prob(
         *latents.shape,
         dtype=dtype,
         device=device,
-        latents=latents,
+        generator=None,
+        latents=latents
     )
 
     # Predict the noise residual
