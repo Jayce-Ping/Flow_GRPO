@@ -101,7 +101,6 @@ def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generat
         generators.append(gen)
     return generators
 
-
 def compute_log_prob(
         transformer : FluxTransformer2DModel,
         pipeline : FluxPipeline,
@@ -111,7 +110,6 @@ def compute_log_prob(
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     latents = sample["latents"][:, j]
     time_steps = sample["timesteps"][:, j]
-    batch_size, num_channels_latents, height, width = latents.shape
     # Since the time_steps are copied after sampling, each batch of time_step should equal
     # noise_levels = [pipeline.scheduler.get_noise_level_for_timestep(t) for t in time_steps]
     noise_level = pipeline.scheduler.get_noise_level_for_timestep(time_steps[0]) # So, all noise levels are equal
@@ -125,13 +123,14 @@ def compute_log_prob(
     else:
         guidance = None
 
+    # batch_size, num_channels_latents, height, width = latents.shape
+    # The first four arguments of `prepare_latents` are exact those in correct order
+    # The `latents` is input and the output remains the same
     latents, image_ids = pipeline.prepare_latents(
-        batch_size,
-        num_channels_latents,
-        height,
-        width,
+        *latents.shape,
         dtype=dtype,
         device=device,
+        latents=latents,
     )
 
     # Predict the noise residual
@@ -312,8 +311,6 @@ def save_ckpt(save_dir, transformer, global_step, accelerator, ema, transformer_
         unwrap_model(transformer, accelerator).save_pretrained(save_root_lora)
         if config.train.ema:
             ema.copy_temp_to(transformer_trainable_parameters)
-
-
 
 def load_pipeline(config : Namespace, accelerator : Accelerator):
     # -------------------------------Load models-----------------------------------
