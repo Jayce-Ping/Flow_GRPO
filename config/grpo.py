@@ -672,7 +672,7 @@ def consistency_flux_4gpu():
     config.max_sequence_length = 512
 
     config.sample.batch_size = 1
-    config.sample.num_image_per_prompt = 24
+    config.sample.num_image_per_prompt = 32
     config.sample.unique_sample_num_per_epoch = 30 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
@@ -709,8 +709,8 @@ def consistency_flux_4gpu():
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.noise_level = 0.9
-    config.save_freq = 15 # epoch
-    config.eval_freq = 15 # 0 for no eval applied
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10 # 0 for no eval applied
     config.save_dir = 'logs/consistency/flux-4gpu-half-train'
     config.reward_fn = {
         "consistency_score": 1.0,

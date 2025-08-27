@@ -114,6 +114,10 @@ def compute_log_prob(
     # noise_levels = [pipeline.scheduler.get_noise_level_for_timestep(t) for t in time_steps]
     noise_level = pipeline.scheduler.get_noise_level_for_timestep(time_steps[0]) # So, all noise levels are equal
 
+    batch_size = latents.shape[0]
+    num_channels_latents = pipeline.transformer.config.in_channels // 4
+    height = config.resolution
+    width = config.resolution
     device = latents.device
     dtype = latents.dtype
 
@@ -123,13 +127,13 @@ def compute_log_prob(
     else:
         guidance = None
 
-    # batch_size, num_channels_latents, height, width = latents.shape
-    # The first four arguments of `prepare_latents` are exact those in correct order
-    # The `latents` is input and the output remains the same
     latents, image_ids = pipeline.prepare_latents(
-        *latents.shape,
-        dtype=dtype,
-        device=device,
+        batch_size,
+        num_channels_latents,
+        height,
+        width,
+        dtype,
+        device,
         generator=None,
         latents=latents
     )
@@ -742,7 +746,6 @@ def main(_):
         #         key: torch.as_tensor(value, device=accelerator.device).float()
         #         for key, value in rewards.items()
         #     }
-
         # collate samples into dict where each entry has shape (num_batches_per_epoch * sample.batch_size, ...)
         samples = {
             k: torch.cat([s[k] for s in samples], dim=0)
