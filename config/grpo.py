@@ -523,7 +523,7 @@ def test_flux_4gpu():
     config.train.ema = True
     config.sample.noise_level = 0.9
     config.save_freq = 0 # epoch
-    config.eval_freq = 10
+    config.eval_freq = 0
     config.save_dir = 'logs/test_run'
     config.reward_fn = {
         "jpeg_compressibility": 1.0,
@@ -672,7 +672,7 @@ def consistency_flux_4gpu():
     config.max_sequence_length = 512
 
     config.sample.batch_size = 1
-    config.sample.num_image_per_prompt = 16
+    config.sample.num_image_per_prompt = 24
     config.sample.unique_sample_num_per_epoch = 30 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
@@ -722,7 +722,6 @@ def consistency_flux_4gpu():
 
     # config.train.lora_path = 'logs/consistency/flux-4gpu/checkpoints/8-21-checkpoint-60/lora'
     config.project_name = 'FlowGRPO-Flux'
-    config.resume_from_id = 'avpl5kom'
 
     return config
 

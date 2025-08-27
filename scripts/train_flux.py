@@ -748,6 +748,9 @@ def main(_):
             }
             for k in samples[0].keys()
         }
+        # for key, value in samples.items():
+        #     if isinstance(value, torch.Tensor):
+        #         print(key, 'has shape', value.shape)
 
         samples["rewards"]["ori_avg"] = samples["rewards"]["avg"]
 
