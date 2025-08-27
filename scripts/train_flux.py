@@ -715,7 +715,6 @@ def main(_):
                     "prompt_ids": prompt_ids,
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
-                    "image_ids": image_ids.unsqueeze(0).repeat(len(prompt_ids),1,1),
                     "timesteps": timesteps,
                     "latents": all_latents[:, :-1],  # each entry is the latent before timestep t
                     "next_latents": all_latents[:, 1:],  # each entry is the latent after timestep t
