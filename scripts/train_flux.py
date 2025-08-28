@@ -818,8 +818,8 @@ def main(_):
             .to(accelerator.device)
         )
         if accelerator.is_local_main_process:
-            for key, value in gathered_rewards.items():
-                print(key, ": ", value)
+            # for key, value in gathered_rewards.items():
+            #     print(key, ": ", value)
 
             print("advantages: ", samples["advantages"].abs().mean())
         
