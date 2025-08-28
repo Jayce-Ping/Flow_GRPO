@@ -245,6 +245,7 @@ def eval(pipeline : FluxPipeline,
     #         all_rewards[key].append(value)
 
     for key, value in all_rewards.items():
+        value = np.array(value)
         rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
         all_rewards[key] = np.concatenate(rewards_gather)
 
@@ -817,8 +818,11 @@ def main(_):
             .to(accelerator.device)
         )
         if accelerator.is_local_main_process:
-            print("advantages: ", samples["advantages"].abs().mean())
+            for key, value in gathered_rewards.items():
+                print(key, ": ", value)
 
+            print("advantages: ", samples["advantages"].abs().mean())
+        
         del samples["rewards"]
         del samples["prompt_ids"]
 
