@@ -3,6 +3,7 @@ import io
 import numpy as np
 import torch
 from collections import defaultdict
+from typing import List, Tuple, Callable
 
 def jpeg_incompressibility():
     def _fn(images, prompts, metadata):
@@ -419,7 +420,7 @@ def unifiedreward_score_sglang(device):
     
     return _fn
 
-def multi_score(device, score_dict):
+def multi_score(device, score_dict) -> Callable[[List[Image.Image], List[str], List[dict], bool, bool], Tuple[dict[str, np.ndarray], dict]]:
     score_functions = {
         "deqa": deqa_score_remote,
         "ocr": ocr_score,
@@ -439,7 +440,7 @@ def multi_score(device, score_dict):
         score_fns[score_name] = score_functions[score_name](device) if 'device' in score_functions[score_name].__code__.co_varnames else score_functions[score_name]()
 
     # only_strict is only for geneval. During training, only the strict reward is needed, and non-strict rewards don't need to be computed, reducing reward calculation time.
-    def _fn(images, prompts, metadata, ref_images=None, only_strict=True):
+    def _fn(images : List[Image.Image], prompts : List[str], metadata: List[dict], ref_images=None, only_strict=True) -> Tuple[dict[str, np.ndarray], dict]:
         total_scores = []
         score_details = {}
         
@@ -456,6 +457,14 @@ def multi_score(device, score_dict):
                 scores, rewards = score_fns[score_name](images, ref_images)
             else:
                 scores, rewards = score_fns[score_name](images, prompts, metadata)
+
+            # Make sure to convert all scores to numpy arrays
+            if isinstance(scores, torch.Tensor):
+                scores = scores.cpu().numpy()
+            
+            if isinstance(scores, list):
+                scores = np.array(scores)
+
             score_details[score_name] = scores
             weighted_scores = [weight * score for score in scores]
             
