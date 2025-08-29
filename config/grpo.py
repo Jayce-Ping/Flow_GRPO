@@ -587,8 +587,8 @@ def subfig_clip_flux_2gpu():
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.7
-    config.save_freq = 0 # epoch
-    config.eval_freq = 0
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10
     config.save_dir = 'logs/subfig_clipI/flux_2gpu'
     config.reward_fn = {
         "subfig_clipI": 1.0,
