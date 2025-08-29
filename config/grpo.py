@@ -477,7 +477,7 @@ def test_flux_1gpu():
     config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
 
     config.sample.use_sliding_window = True
-    config.sample.window_size = 2
+    config.sample.window_size = 1
     config.sample.left_boundary = 1
 
     # flux
@@ -489,8 +489,8 @@ def test_flux_1gpu():
     config.resolution = 512
 
     config.sample.batch_size = 2
-    config.sample.num_image_per_prompt = 12
-    config.sample.unique_sample_num_per_epoch = 1 # Number of unique prompts used in each epoch
+    config.sample.num_image_per_prompt = 16
+    config.sample.unique_sample_num_per_epoch = 24 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -535,10 +535,10 @@ def test_flux_1gpu():
     config.per_prompt_stat_tracking = True
     return config
 
-def test_flux_4gpu():
-    gpu_number = 4
+def subfig_clip_flux_2gpu():
+    gpu_number = 2
     config = compressibility()
-    config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
 
     config.sample.use_sliding_window = True
     config.sample.window_size = 2
@@ -546,15 +546,15 @@ def test_flux_4gpu():
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
-    config.sample.num_steps = 4
-    config.sample.eval_num_steps = 4
+    config.sample.num_steps = 20
+    config.sample.eval_num_steps = 20
     config.sample.guidance_scale = 3.5
 
-    config.resolution = 256
+    config.resolution = 1024
 
-    config.sample.batch_size = 2
-    config.sample.num_image_per_prompt = 1
-    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch
+    config.sample.batch_size = 1
+    config.sample.num_image_per_prompt = 24
+    config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -575,7 +575,7 @@ def test_flux_4gpu():
     config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
 
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
-    config.test_batch_size = 16
+    config.test_batch_size = 8
 
     config.train.batch_size = config.sample.batch_size
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch//2
@@ -586,15 +586,15 @@ def test_flux_4gpu():
     config.sample.use_history = False
     config.sample.same_latent = False
     config.train.ema = True
-    config.sample.noise_level = 0.9
+    config.sample.noise_level = 0.7
     config.save_freq = 0 # epoch
     config.eval_freq = 0
-    config.save_dir = 'logs/test_run'
+    config.save_dir = 'logs/subfig_clipI/flux_2gpu'
     config.reward_fn = {
-        "jpeg_compressibility": 1.0,
+        "subfig_clipI": 1.0,
     }
     
-    config.prompt_fn = "general_ocr"
+    config.prompt_fn = "geneval"
 
     config.per_prompt_stat_tracking = True
     return config
