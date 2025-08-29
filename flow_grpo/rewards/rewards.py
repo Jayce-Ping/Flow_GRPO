@@ -132,10 +132,10 @@ def consistency_score(device):
 
     return _fn
 
-def subfig_clipI_score(device):
-    from flow_grpo.rewards.subfig_clip import SubfigClipScorer
+def subfig_clipT_score(device):
+    from flow_grpo.rewards.subfig_clip import SubfigClipTScorer
 
-    scorer = SubfigClipScorer(device=device)
+    scorer = SubfigClipTScorer(device=device)
 
     def _fn(images, prompts, metadatas):
         if isinstance(images, torch.Tensor):
@@ -451,7 +451,7 @@ def multi_score(device, score_dict) -> Callable[[List[Image.Image], List[str], L
         "clipscore": clip_score,
         "image_similarity": image_similarity_score,
         "consistency_score": consistency_score,
-        "subfig_clipI": subfig_clipI_score,
+        "subfig_clipT": subfig_clipT_score,
     }
     score_fns={}
     for score_name, weight in score_dict.items():

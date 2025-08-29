@@ -53,9 +53,9 @@ def extract_grid_info(prompt) -> tuple[int, int]:
 
 
 
-class SubfigClipScorer(torch.nn.Module):
+class SubfigClipTScorer(torch.nn.Module):
     """
-        Scorer for sub-images clip-score.
+        Scorer for sub-images clip-T-score - align Image-Text semantics.
     """
     def __init__(self, device):
         super().__init__()
@@ -121,7 +121,7 @@ def main():
     prompt = "THREE-PANEL Images with a 1x3 grid layout a male child with a round face, short ginger hair, and curious, wide eyes, rendered in watercolor style.All illustrations maintain a warm, whimsical watercolor aesthetic with soft edges and vibrant yet gentle colors. The child's features, including ginger hair and wide-eyed curiosity, remain consistent across settings. [LEFT]:The child plays in a sunlit backyard, surrounded by scattered toys and a half-built sandcastle. Dandelion puffs float in the air, and a small dog bounds joyfully nearby. The scene emphasizes playful energy with loose brushstrokes and warm golden-green hues. [MIDDLE]:The child explores a museum exhibit, gazing up at a towering dinosaur skeleton. Display cases glow softly with amber lighting, casting playful shadows. His posture leans forward in wonder, clutching a magnifying glass, with watercolor textures suggesting aged parchment and fossil textures. [RIGHT]:The child sits cross-legged in a wooden treehouse, sketching in a notebook. Sunlight filters through leaves, dappling the pages. A jar of fireflies and binoculars rest beside him, with distant hills rendered in hazy blue layers to evoke depth and quiet imagination."
     prompts = [prompt for _ in range(len(images))]
 
-    scorer = SubfigClipScorer(device='cuda:0')
+    scorer = SubfigClipTScorer(device='cuda:0')
 
     scores = scorer(images, prompts, [])
 
