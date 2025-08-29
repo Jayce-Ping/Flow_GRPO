@@ -47,7 +47,7 @@ class DistributedKRepeatSampler(Sampler):
             shuffled_indices = torch.randperm(len(repeated_indices), generator=g).tolist()
             shuffled_samples = [repeated_indices[i] for i in shuffled_indices]
             for i in range(self.num_batches_per_epoch):
-                # Offset for current epoch
+                # Offset for current iteration
                 offset = i * self.sample_num_per_iteration
                 # Compute start and end indices for current replica
                 start = offset + self.rank * self.batch_size
