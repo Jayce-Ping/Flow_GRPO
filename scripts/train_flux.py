@@ -670,7 +670,7 @@ These two numbers should be equal
         samples = []
         prompts = []
         for i in tqdm(
-            range(config.sample.num_batches_per_epoch),
+            range(train_sampler.num_batches_per_epoch),
             desc=f"Epoch {epoch}: sampling",
             disable=not accelerator.is_local_main_process,
             position=0,
