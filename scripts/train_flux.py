@@ -822,7 +822,7 @@ def main(_):
             #     print(key, ": ", value)
 
             print("advantages: ", samples["advantages"].abs().mean())
-        
+
         del samples["rewards"]
         del samples["prompt_ids"]
 

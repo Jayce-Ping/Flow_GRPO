@@ -132,6 +132,23 @@ def consistency_score(device):
 
     return _fn
 
+def subfig_clipI_score(device):
+    from flow_grpo.rewards.subfig_clip import SubfigClipScorer
+
+    scorer = SubfigClipScorer(device=device)
+
+    def _fn(images, prompts, metadatas):
+        if isinstance(images, torch.Tensor):
+            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+            images = images.transpose(0, 2, 3, 1)  # NCHW -> NHWC
+            images = [Image.fromarray(image) for image in images]
+
+        
+        scores = scorer(images, prompts, metadatas)
+        return scores, {}
+
+    return _fn
+
 
 def qwenvl_score(device):
     from flow_grpo.rewards.qwenvl import QwenVLScorer
@@ -433,7 +450,8 @@ def multi_score(device, score_dict) -> Callable[[List[Image.Image], List[str], L
         "geneval": geneval_score,
         "clipscore": clip_score,
         "image_similarity": image_similarity_score,
-        "consistency_score": consistency_score
+        "consistency_score": consistency_score,
+        "subfig_clipI": subfig_clipI_score,
     }
     score_fns={}
     for score_name, weight in score_dict.items():
