@@ -569,6 +569,13 @@ def main(_):
         seed=config.seed
     )
 
+    assert config.sample.num_batches_per_epoch == train_sampler.num_batches_per_epoch, \
+        f"""
+config.sample.num_batches_per_epoch={config.sample.num_batches_per_epoch},
+train_sampler.num_batches_per_epoch={train_sampler.num_batches_per_epoch},
+These two numbers should be equal
+        """
+
     # Create a DataLoader; note that shuffling is not needed here because it’s controlled by the Sampler.
     train_dataloader = DataLoader(
         train_dataset,
