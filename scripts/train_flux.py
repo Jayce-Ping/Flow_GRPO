@@ -651,7 +651,6 @@ These two numbers should be equal
         global_step = 0
         epoch = 0
     
-    train_iter = iter(train_dataloader)
 
     while True:
         #################### EVAL ####################
@@ -664,6 +663,10 @@ These two numbers should be equal
         #################### SAMPLING ####################
         pipeline.transformer.eval()
         train_sampler.set_epoch(epoch)
+        train_iter = iter(train_dataloader)
+        # Key: Rebuild the iterator for each external epoch to make set_epoch(epoch) effective and ensure the sampling boundaries of each rank are aligned.
+        # Reason: The __iter__ method of DistributedKRepeatSampler generates a global sequence using seed + self.epoch, and it is only called again when the iterator is rebuilt.
+        # Importance: Avoid misalignment across epoch boundaries to prevent inconsistencies
         samples = []
         prompts = []
         for i in tqdm(

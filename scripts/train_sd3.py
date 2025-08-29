@@ -572,7 +572,6 @@ def main(_):
         global_step = 0
         epoch = 0
     
-    train_iter = iter(train_dataloader)
 
     while True:
         #################### EVAL ####################
@@ -585,6 +584,7 @@ def main(_):
         #################### SAMPLING ####################
         pipeline.transformer.eval()
         train_sampler.set_epoch(epoch)
+        train_iter = iter(train_dataloader)
         samples = []
         prompts = []
         for i in tqdm(
