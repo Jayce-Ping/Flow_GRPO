@@ -102,16 +102,12 @@ if __name__ == "__main__":
         ) for train_sampler in train_samplers
     ]
 
-
-    train_iters = [iter(loader) for loader in train_dataloaders]
-
-
     all_samples = []
     epoch_num = 3
     for epoch in range(epoch_num):
         for j, sampler in enumerate(train_samplers):
             sampler.set_epoch(epoch)
-            loader_iter = train_iters[j]
+            loader_iter = iter(train_dataloaders[j])
             for i in range(num_batches_per_epoch):
                 samples = next(loader_iter)
                 all_samples.extend(samples[0])
