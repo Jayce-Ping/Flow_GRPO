@@ -1,5 +1,3 @@
-from operator import truediv
-from pty import STDIN_FILENO
 from typing import List
 import numpy as np
 import torch
