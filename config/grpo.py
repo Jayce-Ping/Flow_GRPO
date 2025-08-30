@@ -494,7 +494,7 @@ def test_flux_1gpu():
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
-    ) # Total number of sample on all processes, to make sure all unique prompts are includede at least `num_image_per_prompt` times.
+    ) # Total number of sample on all processes, to make sure all unique prompts are included `num_image_per_prompt` times.
 
     # Update number of unique prompt per epoch and check balance
     unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.num_image_per_prompt
@@ -558,7 +558,7 @@ def subfig_clip_flux_2gpu():
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
-    ) # Total number of sample on all processes, to make sure all unique prompts are includede at least `num_image_per_prompt` times.
+    ) # Total number of sample on all processes, to make sure all unique prompts are included `num_image_per_prompt` times.
 
     # Update number of unique prompt per epoch and check balance
     unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.num_image_per_prompt
@@ -669,7 +669,7 @@ def consistency_flux_8gpu():
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
-    ) # Total number of sample on all processes, to make sure all unique prompts are includede at least `num_image_per_prompt` times.
+    ) # Total number of sample on all processes, to make sure all unique prompts are included `num_image_per_prompt` times.
 
     # Update number of unique prompt per epoch and check balance
     unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.num_image_per_prompt
@@ -742,7 +742,7 @@ def consistency_flux_4gpu():
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
-    ) # Total number of sample on all processes, to make sure all unique prompts are includede at least `num_image_per_prompt` times.
+    ) # Total number of sample on all processes, to make sure all unique prompts are included `num_image_per_prompt` times.
 
     # Update number of unique prompt per epoch and check balance
     unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.num_image_per_prompt
@@ -816,7 +816,7 @@ def consistency_flux_7gpu():
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
-    ) # Total number of sample on all processes, to make sure all unique prompts are includede at least `num_image_per_prompt` times.
+    ) # Total number of sample on all processes, to make sure all unique prompts are included `num_image_per_prompt` times.
 
     # Update number of unique prompt per epoch and check balance
     unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.num_image_per_prompt
