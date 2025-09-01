@@ -491,7 +491,7 @@ def multi_score(device, score_dict) -> Callable[[List[Image.Image], List[str], L
             else:
                 total_scores = [total + weighted for total, weighted in zip(total_scores, weighted_scores)]
         
-        score_details['avg'] = total_scores
+        score_details['avg'] = np.array(total_scores)
         return score_details, {}
 
     return _fn

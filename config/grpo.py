@@ -873,16 +873,16 @@ def consistency_clip_flux_1gpu():
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
-    config.sample.num_steps = 10
-    config.sample.eval_num_steps = 10
+    config.sample.num_steps = 5
+    config.sample.eval_num_steps = 5
     config.sample.guidance_scale = 3.5
 
     config.resolution = 1024
     config.max_sequence_length = 512
 
     config.sample.batch_size = 1
-    config.sample.num_image_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
+    config.sample.num_image_per_prompt = 2
+    config.sample.unique_sample_num_per_epoch = 1 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
