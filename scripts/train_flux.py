@@ -221,8 +221,9 @@ def eval(pipeline : FluxPipeline,
         # all_futures.append(future)
         rewards, reward_metadata = future.result()
         for key, value in rewards.items():
-            all_rewards[key].append(value)
+            all_rewards[key].extend(value)
         
+        # -------------------------------Collect log data--------------------------------
         if len(log_data['images']) < log_sample_num // accelerator.num_processes:
             # Get data from this batch for log
             sample_indices = list(range(0, len(images), 2))
@@ -234,18 +235,8 @@ def eval(pipeline : FluxPipeline,
                 
                 log_data['rewards'][key].extend(value)
 
-    # for future in tqdm(
-    #     all_futures,
-    #     desc='Waiting for rewards',
-    #     disable=not accelerator.is_local_main_process,
-    #     position=0
-    # ):
-    #     rewards, reward_metadata = future.result()
-    #     for key, value in rewards.items():
-    #         all_rewards[key].append(value)
-
+    # ---------------------------------Gather rewards------------------------------------
     for key, value in all_rewards.items():
-        value = np.array(value)
         rewards_gather = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
         all_rewards[key] = np.concatenate(rewards_gather)
 

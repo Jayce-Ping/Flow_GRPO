@@ -116,7 +116,7 @@ def consistency_score(device):
     scorer = ConsistencyScorer(
         api_key='dummy_key',
         base_url='http://127.0.0.1:8000/v1',
-        model='QwenVL2.5-7B-Instruct',
+        model='Qwen2.5-VL-7B-Instruct',
         criteria_path='dataset/T2IS/prompt_consistency_criterion.json',
         max_concurrent=12, # Adjust based on the system's capabilities (especially when using vllm as local model server)
     )

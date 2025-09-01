@@ -92,7 +92,7 @@ def get_score_from_completion(completion : openai.ChatCompletion) -> float:
     else:
         # log_prob cannot be derived here. How to calculate?
         # TODO
-        score = 0.5
+        score = 0.0
 
     return score
 
@@ -102,7 +102,7 @@ class ConsistencyScorer:
             self,
             api_key='dummy_key',
             base_url='http://127.0.0.1:8000/v1',
-            model='QwenVL2.5-7B-Instruct',
+            model='Qwen2.5-VL-7B-Instruct',
             criteria_path='prompt_consistency_criterion.json',
             async_mode=True,
             max_concurrent=12,  # 2x2 grid has 6 pair of images to compare. 12 for at most 2 batches at once.
