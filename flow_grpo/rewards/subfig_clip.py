@@ -91,7 +91,8 @@ class SubfigClipTScorer(torch.nn.Module):
             sub_prompts = divide_prompt(prompt)[1:]
 
             clip_matrix = self.compute_ClipT_matrix(sub_prompts, sub_images)
-            clip_scores = clip_matrix.softmax(dim=-1).diagonal().numpy()
+            # clip_scores = clip_matrix.softmax(dim=-1).diagonal().numpy()
+            clip_scores = clip_matrix.diagonal().numpy()
 
             scores.append(np.mean(clip_scores))
         

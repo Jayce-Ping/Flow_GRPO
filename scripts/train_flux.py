@@ -272,8 +272,10 @@ def eval(pipeline : FluxPipeline,
     ]
 
     if accelerator.is_main_process:
+         # Use a fixed generator to log same indices everytime for comparison
+        gen = torch.Generator().manual_seed(0)
         # Sample `log_sample_num` data for logging
-        sample_indices = torch.randperm(len(gathered_images))[:log_sample_num]
+        sample_indices = torch.randperm(len(gathered_images), generator=gen)[:log_sample_num]
         sampled_images = gathered_images[sample_indices]
         sampled_prompts = [gathered_prompts[i] for i in sample_indices]
         sampled_rewards = [gathered_rewards[i] for i in sample_indices]
