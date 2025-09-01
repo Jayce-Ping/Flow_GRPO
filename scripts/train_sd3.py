@@ -25,7 +25,7 @@ from peft import LoraConfig, PeftModel, get_peft_model, set_peft_model_state_dic
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Sampler
 
-import flow_grpo.rewards.rewards
+from flow_grpo.rewards.rewards import multi_score
 from flow_grpo.datasets.prompt_dataset import GenevalPromptDataset, TextPromptDataset
 from flow_grpo.datasets.sampler import DistributedKRepeatSampler
 from flow_grpo.diffusers_patch.sd3_pipeline_with_logprob import pipeline_with_logprob
@@ -466,8 +466,10 @@ def main(_):
     )
     # ------------------------------------------Reward--------------------------------------------
     # prepare prompt and reward fn
-    reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
-    eval_reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
+    # reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
+    # eval_reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
+    reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
+    eval_reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
 
     if config.prompt_fn == "general_ocr":
         train_dataset = TextPromptDataset(config.dataset, 'train')

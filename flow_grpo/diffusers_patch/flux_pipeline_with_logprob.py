@@ -178,7 +178,6 @@ def pipeline_with_logprob(
                 latents.float(),
                 noise_level=current_noise_level,
                 prev_sample=None,
-                # generator=noise_gens # Add different generator for each step, a solution is to use given generator to generate new random generators.
             )
             if latents.dtype != latents_dtype:
                 latents = latents.to(latents_dtype)

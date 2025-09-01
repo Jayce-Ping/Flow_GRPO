@@ -1,9 +1,12 @@
-from PIL import Image
+from collections import defaultdict
+from typing import List, Tuple, Callable, Union
 import io
+import inspect
+
+from PIL import Image
 import numpy as np
 import torch
-from collections import defaultdict
-from typing import List, Tuple, Callable
+
 
 def jpeg_incompressibility():
     def _fn(images, prompts, metadata):
@@ -437,7 +440,42 @@ def unifiedreward_score_sglang(device):
     
     return _fn
 
-def multi_score(device, score_dict) -> Callable[[List[Image.Image], List[str], List[dict], bool, bool], Tuple[dict[str, np.ndarray], dict]]:
+def multi_score(
+    device,
+    score_dict : List[str],
+    aggregate_fn : Callable[[List[float]], float] = np.sum
+    ) -> Callable[[List[Image.Image], List[str], List[dict], bool, bool], Tuple[dict[str, np.ndarray], dict]]:
+    """
+    Constructs a multi-score reward function that computes multiple reward metrics for a batch of images and prompts.
+
+    Args:
+        device: The device (e.g., "cuda" or "cpu") on which to run the reward functions.
+        score_dict (List[str]): A dictionary mapping reward function names to their weights.
+        aggregate_fn (Callable[[List[float]], float], optional): A function to aggregate multiple scores. Defaults to np.sum.
+
+    Returns:
+        Callable: A function that takes as input:
+            - images (List[Image.Image] or np.ndarray or torch.Tensor): The batch of images to evaluate.
+            - prompts (List[str]): The corresponding text prompts for the images.
+            - metadata (List[dict]): Additional metadata for each image/prompt pair.
+            - ref_images (optional): Reference images for similarity-based rewards.
+            - only_strict (bool, optional): If True, only compute strict rewards (used for some reward types like geneval).
+
+        The returned function outputs:
+            - A dictionary mapping reward names to their computed numpy arrays.
+            - A dictionary containing detailed reward information (e.g., per-group or strict scores).
+
+    Raises:
+        ValueError: If an unknown score name is provided in score_dict.
+
+    Example:
+        reward_fn = multi_score("cuda:0", {"clipscore": 0.5, "aesthetic": 0.5}, sum)
+        rewards, details = reward_fn(images, prompts, metadata)
+    """
+    if aggregate_fn is None:
+        # If not given, use np.sum directly
+        aggregate_fn = np.sum
+
     score_functions = {
         "deqa": deqa_score_remote,
         "ocr": ocr_score,
@@ -455,7 +493,11 @@ def multi_score(device, score_dict) -> Callable[[List[Image.Image], List[str], L
     }
     score_fns={}
     for score_name, weight in score_dict.items():
-        score_fns[score_name] = score_functions[score_name](device) if 'device' in score_functions[score_name].__code__.co_varnames else score_functions[score_name]()
+        factory = score_functions.get(score_name)
+        if factory is None:
+            raise ValueError(f"Unknown score: {score_name}")
+        params = inspect.signature(factory).parameters
+        score_fns[score_name] = factory(device) if "device" in params else factory()
 
     # only_strict is only for geneval. During training, only the strict reward is needed, and non-strict rewards don't need to be computed, reducing reward calculation time.
     def _fn(images : List[Image.Image], prompts : List[str], metadata: List[dict], ref_images=None, only_strict=True) -> Tuple[dict[str, np.ndarray], dict]:
@@ -484,14 +526,15 @@ def multi_score(device, score_dict) -> Callable[[List[Image.Image], List[str], L
                 scores = np.array(scores)
 
             score_details[score_name] = scores
+            # Scale each reward by corresponding weight
             weighted_scores = [weight * score for score in scores]
             
-            if not total_scores:
-                total_scores = weighted_scores
-            else:
-                total_scores = [total + weighted for total, weighted in zip(total_scores, weighted_scores)]
-        
-        score_details['avg'] = np.array(total_scores)
+            total_scores.append(weighted_scores)
+
+        # Aggregate scores from different reward models
+        total_scores = np.apply_along_axis(aggregate_fn, axis=0, arr=total_scores)
+
+        score_details['avg'] = total_scores
         return score_details, {}
 
     return _fn

@@ -32,15 +32,15 @@ def denoising_sde_step_with_logprob(
         noise_level (`float`):
             The noise level parameter
         prev_sample (`torch.FloatTensor`):
-            The next insance of the sample. If given, returns the log_probs between predicted prev_sample and given prev_sample, with no grad.
+            The next insance of the sample. If given, calculate the log_prob using given `prev_sample` as predicted value.
         generator (`torch.Generator`, *optional*):
             A random number generator for SDE solving. If not given, a random generator will be used.
     """
     # bf16 can overflow here when compute prev_sample_mean, we must convert all variable to fp32
-    model_output=model_output.float()
-    sample=sample.float()
+    model_output = model_output.float()
+    sample = sample.float()
     if prev_sample is not None:
-        prev_sample=prev_sample.float()
+        prev_sample = prev_sample.float()
 
     step_index = [self.index_for_timestep(t) for t in timestep]
     prev_step_index = [step + 1 for step in step_index]

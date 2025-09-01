@@ -27,7 +27,7 @@ from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftMode
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
-import flow_grpo.rewards.rewards
+from flow_grpo.rewards.rewards import multi_score
 from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import pipeline_with_logprob
 from flow_grpo.diffusers_patch.denoising_step_with_logprob import denoising_sde_step_with_logprob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
@@ -180,8 +180,6 @@ def eval(pipeline : FluxPipeline,
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
 
-    # test_dataloader = itertools.islice(test_dataloader, 2)
-    all_futures = []
     log_data = {
         'images': [],
         'prompts': [],
@@ -537,8 +535,10 @@ def main(_):
 
     # ---------------------------------------Reward---------------------------------------
     # prepare prompt and reward fn
-    reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
-    eval_reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
+    # reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
+    # eval_reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
+    reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
+    eval_reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
 
     if config.prompt_fn == "general_ocr":
         train_dataset = TextPromptDataset(config.dataset, 'train')
@@ -730,8 +730,8 @@ These two numbers should be equal
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
                     "timesteps": timesteps,
-                    "latents": all_latents[:, :-1],  # each entry is the latent before timestep t
-                    "next_latents": all_latents[:, 1:],  # each entry is the latent after timestep t
+                    "latents": all_latents[:, :-1],  # each entry is the latent at timestep t - 1 (init latents for 0)
+                    "next_latents": all_latents[:, 1:],  # each entry is the latent at timestep t
                     "log_probs": all_log_probs,
                     "rewards": rewards
                 }
