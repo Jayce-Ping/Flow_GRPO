@@ -44,7 +44,7 @@ def get_config():
     # classifier-free guidance weight. 1.0 is no guidance.
     sample.guidance_scale = 4.5
     # batch size (per GPU!) to use for sampling.
-    sample.train_batch_size = 1
+    sample.batch_size = 1
     sample.num_image_per_prompt = 1
     sample.test_batch_size = 1
     # number of batches to sample per epoch. the total number of samples per epoch is `num_batches_per_epoch *
