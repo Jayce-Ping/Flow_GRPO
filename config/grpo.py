@@ -8,8 +8,8 @@ base = module_from_spec(spec)
 spec.loader.exec_module(base)
 
 
-# FLUX_MODEL_PATH = '/raid/data_qianh/jcy/hugging/models/FLUX.1-dev'
-FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/models/FLUX.1-dev"
+FLUX_MODEL_PATH = '/raid/data_qianh/jcy/hugging/models/FLUX.1-dev'
+# FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/models/FLUX.1-dev"
 SD3_MODEL_PATH = "/raid/data_qianh/jcy/hugging/models/stable-diffusion-3.5-medium"
 
 # --------------------------------------------------base------------------------------------------------------------
@@ -942,7 +942,7 @@ def consistency_clip_flux_4gpu():
     # Sliding Window Scheduler
     config.sample.use_sliding_window = True
     config.sample.window_size = 2
-    config.sample.left_boundary = 0
+    config.sample.left_boundary = 1
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
@@ -995,8 +995,8 @@ def consistency_clip_flux_4gpu():
     config.eval_freq = 10 # 0 for no eval applied
     config.save_dir = 'logs/consistency-subclip/flux-4gpu-half-train'
     config.reward_fn = {
-        "consistency_score": 0.4,
-        "subfig_clipT" : 0.6
+        "consistency_score": 0.3,
+        "subfig_clipT" : 0.7
     }
     
     config.prompt_fn = "geneval"

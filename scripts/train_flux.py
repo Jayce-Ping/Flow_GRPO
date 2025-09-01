@@ -187,16 +187,12 @@ def eval(pipeline : FluxPipeline,
         'prompts': [],
         'rewards': defaultdict(list)
     }
-    cnt = 0
     for test_batch in tqdm(
             test_dataloader,
             desc="Eval: ",
             disable=not accelerator.is_local_main_process,
             position=0,
         ):
-        cnt += 1
-        if cnt > 2:
-            break
         prompts, prompt_metadata = test_batch
         prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
             prompts,
