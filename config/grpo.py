@@ -10,8 +10,8 @@ base = module_from_spec(spec)
 spec.loader.exec_module(base)
 
 
-# FLUX_MODEL_PATH = '/raid/data_qianh/jcy/hugging/models/FLUX.1-dev'
-FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/models/FLUX.1-dev"
+FLUX_MODEL_PATH = '/raid/data_qianh/jcy/hugging/models/FLUX.1-dev'
+# FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/models/FLUX.1-dev"
 SD3_MODEL_PATH = "/raid/data_qianh/jcy/hugging/models/stable-diffusion-3.5-medium"
 
 # --------------------------------------------------base------------------------------------------------------------
