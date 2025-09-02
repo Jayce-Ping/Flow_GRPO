@@ -642,8 +642,7 @@ These two numbers should be equal
     # assert samples_per_epoch % total_train_batch_size == 0
 
     if config.resume_from_id:
-        global_step = config.resume_from_step + 1 # Add 1 to start from the next step
-        # epoch = config.resume_from_epoch
+        global_step = config.resume_from_step
         epoch = global_step // 2
     else:
         global_step = 0
