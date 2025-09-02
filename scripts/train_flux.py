@@ -603,7 +603,7 @@ These two numbers should be equal
     # for deepspeed zero
     if accelerator.state.deepspeed_plugin:
         accelerator.state.deepspeed_plugin.deepspeed_config['train_micro_batch_size_per_gpu'] = config.sample.batch_size
-    transformer, optimizer, train_dataloader, test_dataloader = accelerator.prepare(transformer, optimizer, train_dataloader, test_dataloader)
+    transformer, optimizer, test_dataloader = accelerator.prepare(transformer, optimizer, test_dataloader)
     # executor to perform callbacks asynchronously. this is beneficial for the llava callbacks which makes a request to a
     # remote server running llava inference.
     executor = futures.ThreadPoolExecutor(max_workers=8)
