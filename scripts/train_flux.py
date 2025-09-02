@@ -898,15 +898,14 @@ These two numbers should be equal
                         )
                         policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
                         if config.train.beta > 0:
-                            kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=(1,2,3), keepdim=True) / (2 * std_dev_t ** 2)
+                            kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=(1,2), keepdim=True) / (2 * std_dev_t ** 2)
                             kl_loss = torch.mean(kl_loss)
                             loss = policy_loss + config.train.beta * kl_loss
                         else:
                             loss = policy_loss
 
                         info["approx_kl"].append(
-                            0.5
-                            * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2)
+                            0.5 * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2)
                         )
                         info["clipfrac"].append(
                             torch.mean(

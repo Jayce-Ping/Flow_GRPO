@@ -44,12 +44,14 @@ def denoising_sde_step_with_logprob(
 
     step_index = [self.index_for_timestep(t) for t in timestep]
     prev_step_index = [step + 1 for step in step_index]
-    sigma = self.sigmas[step_index].view(-1, *([1] * (len(sample.shape) - 1))) # sigma is a decreasing sequence from 1 to 0, sigma=1 means pure noise, sigma=0 means pure data
+    # sigmas is a decreasing sequence from 1 to 0, sigma=1 means pure noise, sigma=0 means pure data
+    # sigma here has shape (batch_size, 1, 1)
+    sigma = self.sigmas[step_index].view(-1, *([1] * (len(sample.shape) - 1)))
     sigma_prev = self.sigmas[prev_step_index].view(-1, *([1] * (len(sample.shape) - 1)))
     sigma_max = self.sigmas[1].item()
-    dt = sigma_prev - sigma # dt is negative
+    dt = sigma_prev - sigma # dt is negative, (batch_size, 1, 1)
 
-    std_dev_t = torch.sqrt(sigma / (1 - torch.where(sigma == 1, sigma_max, sigma))) * noise_level
+    std_dev_t = torch.sqrt(sigma / (1 - torch.where(sigma == 1, sigma_max, sigma))) * noise_level # (batch_size, 1, 1)
     
     # our sde
     # Equation (9):
