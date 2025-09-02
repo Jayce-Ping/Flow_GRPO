@@ -7,9 +7,14 @@ from PIL import Image
 
 
 def divide_prompt(prompt):
+    # seqis like ". [TOP-LEFT]:"
     match_sep = re.compile(r"\.\s+[A-Z0-9-\[\]]+:")
     seps = match_sep.findall(prompt)
-    sub_prompts = re.split('|'.join(map(re.escape, seps)), prompt)
+    # Add '.' for each sentence
+    sub_prompts = [
+        p + '.' if p.strip()[-1] != '.' else p
+        for p in re.split('|'.join(map(re.escape, seps)), prompt)
+    ]
     return sub_prompts
 
 def divide_image(image, grid_info : tuple[int, int]):
