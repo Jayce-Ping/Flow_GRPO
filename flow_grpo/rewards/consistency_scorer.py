@@ -36,8 +36,8 @@ def divide_image(image, grid_info : tuple[int, int]):
     width, height = image.size
 
     grid_cells = []
-    cell_width = width // a
-    cell_height = height // b
+    cell_width = width // b
+    cell_height = height // a
 
     # 2x2 grid
     # | 1 | 2 |
@@ -49,9 +49,8 @@ def divide_image(image, grid_info : tuple[int, int]):
     # (cell_width, cell_height, 2 * cell_width, 2 * cell_height)
     # ]
 
-    # Row first, column second
-    for i in range(b):
-        for j in range(a):
+    for i in range(a):
+        for j in range(b):
             upper = i * cell_height
             left = j * cell_width
             right = left + cell_width
