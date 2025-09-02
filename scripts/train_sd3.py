@@ -352,8 +352,10 @@ def set_resume_info(config):
     api_run = wandb.Api().run(f"{project_name}/{run_id}")
     history = api_run.history()
     if not history.empty:
-        config.resume_from_step = int(history['_step'].iloc[-1])
-        config.resume_from_epoch = int(history['epoch'].iloc[-1])
+        if config.resume_from_step is None:
+            config.resume_from_step = int(history['_step'].iloc[-1])
+        if config.resume_from_epoch is None:
+            config.resume_from_epoch = config.resume_from_step // 2
         logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
     else:
         logger.info("No previous history found, starting from beginning")
@@ -569,7 +571,8 @@ def main(_):
 
     if config.resume_from_id:
         global_step = config.resume_from_step + 1 # Add 1 to start from the next step
-        epoch = config.resume_from_epoch
+        # epoch = config.resume_from_epoch
+        epoch = global_step // 2
     else:
         global_step = 0
         epoch = 0

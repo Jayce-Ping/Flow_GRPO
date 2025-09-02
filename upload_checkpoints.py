@@ -1,5 +1,6 @@
-from huggingface_hub import upload_folder
+import os
 from datetime import datetime
+from huggingface_hub import upload_folder
 def upload_checkpoint_dir(folder_path, path_in_repo, repo_id, commit_message="Upload folder", token=None):
     """
     Upload a folder to the Hugging Face Hub.
@@ -22,13 +23,14 @@ def upload_checkpoint_dir(folder_path, path_in_repo, repo_id, commit_message="Up
 
 if __name__ == "__main__":
     label = ""
-    folder_path = "logs"
-    path_in_repo = "" # As root dir
-    repo_id = "Jayce-Ping/Flux-GRPO"  # Replace with your Hugging Face repo ID
+    folder_name = 'consistency-subclip'
+    folder_path = os.path.join("logs", folder_name)
+    path_in_repo = folder_name
+    repo_id = "Jayce-Ping/Flux-GRPO"
 
     if not label:
         label = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    commit_message = f"Update checkpoints - {label}"
+    commit_message = f"Update checkpoints{folder_name} - {label}"
 
     upload_checkpoint_dir(folder_path, path_in_repo, repo_id, commit_message)
