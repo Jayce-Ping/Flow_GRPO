@@ -37,7 +37,7 @@ def compressibility():
 
     # rewards
     config.reward_fn = {"jpeg_compressibility": 1}
-    config.aggregate_fn = np.sum
+    config.aggregate_fn = None
     config.per_prompt_stat_tracking = True
 
 
@@ -597,7 +597,6 @@ def subfig_clip_flux_2gpu():
     config.reward_fn = {
         "subfig_clipT": 1.0,
     }
-    config.aggregate_fn = np.sum
 
     config.prompt_fn = "geneval"
 
@@ -787,9 +786,7 @@ def consistency_clip_flux_4gpu():
     config.reward_fn = {
         "consistency_score": 0.3,
         "subfig_clipT" : 0.7
-    }
-    config.aggregate_fn = np.sum
-    
+    }    
     config.prompt_fn = "geneval"
 
     config.per_prompt_stat_tracking = True
@@ -864,7 +861,11 @@ def grid_consistency_clip_flux_4gpu():
         "consistency_score": 0.3,
         "subfig_clipT" : 0.7
     }
-    config.aggregate_fn = lambda rewards: rewards[0] * np.sum(rewards[1:])
+    def agg_fn(grid_layout, consistency_score, subfig_clipT):
+        return grid_layout * (consistency_score + subfig_clipT)
+    
+    config.aggregate_fn = agg_fn
+
     
     config.prompt_fn = "geneval"
 

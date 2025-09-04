@@ -505,7 +505,7 @@ def multi_score(
     """
     if aggregate_fn is None:
         # If not given, use np.sum directly
-        aggregate_fn = np.sum
+        aggregate_fn = lambda **agg_dict: np.sum(list(agg_dict.values()))
 
     score_functions = {
         "deqa": deqa_score_remote,
@@ -525,7 +525,7 @@ def multi_score(
     }
 
     score_fns = {}
-    
+
     for score_name, weight in score_dict.items():
         factory = score_functions.get(score_name)
         if factory is None:
@@ -569,7 +569,11 @@ def multi_score(
             total_scores.append(weighted_scores)
 
         # Aggregate scores from different reward models
-        total_scores = np.apply_along_axis(aggregate_fn, axis=0, arr=total_scores)
+        total_scores = [
+            {k: v for k,v in zip(score_dict.keys(), scores)}
+            for scores in zip(*total_scores)
+        ]
+        total_scores = np.array([aggregate_fn(**v) for v in total_scores])
 
         score_details['avg'] = total_scores
         return score_details, {}
