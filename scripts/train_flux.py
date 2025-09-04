@@ -543,6 +543,8 @@ def main(_):
 
     # ---------------------------------------Reward---------------------------------------
     # prepare prompt and reward fn
+    if accelerator.is_main_process:
+        print(f"Reward dict: {config.reward_fn}")
     reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
     eval_reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
 
@@ -900,10 +902,9 @@ These two numbers should be equal
                         )
                         policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
 
-                        kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=(1,2), keepdim=True) / (2 * std_dev_t ** 2)
-                        kl_loss = torch.mean(kl_loss)
-
                         if config.train.beta > 0:
+                            kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=(1,2), keepdim=True) / (2 * std_dev_t ** 2)
+                            kl_loss = torch.mean(kl_loss)
                             loss = policy_loss + config.train.beta * kl_loss
                         else:
                             loss = policy_loss
@@ -933,7 +934,9 @@ These two numbers should be equal
                             )
                         )
                         info["policy_loss"].append(policy_loss)
-                        info["kl_loss"].append(kl_loss)
+                        
+                        if config.train.beta > 0:
+                            info["kl_loss"].append(kl_loss)
 
                         info["loss"].append(loss)
 
