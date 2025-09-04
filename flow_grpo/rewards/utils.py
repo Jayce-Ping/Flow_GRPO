@@ -64,7 +64,7 @@ def extract_grid_info(prompt) -> tuple[int, int]:
     return (int(match[0][0]), int(match[0][1]))
 
 
-def get_yes_cond_prob_from_completion(completion : openai.ChatCompletion) -> float:
+def get_yes_cond_prob_from_completion(completion : openai.ChatCompletion, canonicalize=False) -> float:
     if completion is None:
         return 0.0
 
@@ -74,19 +74,43 @@ def get_yes_cond_prob_from_completion(completion : openai.ChatCompletion) -> flo
         # score = 1 / (1 + exp(logprob('no') -  logprob('yes')))
         # Same formular for logits as well. Since the sum term will cancel out.
         # Use uppercase only here.
-        token_logprobs = {t.token: t.logprob for t in logprobs.content[0].top_logprobs}
-        yes_logprob = token_logprobs.get('Yes', float('-inf'))
-        no_logprob = token_logprobs.get('No', float('-inf'))
-
-        if yes_logprob == float('-inf') and no_logprob == float('-inf'):
-            # When inf - inf encountered, give 0.0 score.
-            score = 0.0 # 0.0
+        if not canonicalize:
+            token_logprobs = {t.token: t.logprob for t in logprobs.content[0].top_logprobs}
+            yes_logprob = token_logprobs.get('Yes', float('-inf'))
+            no_logprob = token_logprobs.get('No', float('-inf'))
+            if yes_logprob == float('-inf') and no_logprob == float('-inf'):
+                # When inf - inf encountered, give 0.0 score.
+                yes_cond_prob = 0.0 # 0.0
+            else:
+                diff = torch.tensor(yes_logprob - no_logprob, dtype=torch.float64)
+                yes_cond_prob = torch.sigmoid(diff).item()
         else:
-            diff = torch.tensor(yes_logprob - no_logprob, dtype=torch.float64)
-            score = torch.sigmoid(diff).item()
-    else:
-        # log_prob cannot be derived here. How to calculate?
-        # TODO
-        score = 0.0
+            # Sum all possible cases together
+            # 'yes', 'Yes', 'YES', 'yes ',....
+            # 'no', 'No', 'NO',....
+            token_probs = {t.token: torch.exp(t.logprob, dtype=torch.float64).item() for t in logprobs.content[0].top_logprobs}
+            yes_prob_sum = 0.0
+            no_prob_sum = 0.0
+            for token, prob in token_probs.items():
+                token_stripped = token.strip().lower()
+                if token_stripped == "yes":
+                    yes_logprob_sum += prob
+                elif token_stripped == "no":
+                    no_prob_sum += prob
 
-    return score
+            total = yes_logprob_sum + no_prob_sum
+
+            if total == 0.0:
+                yes_cond_prob = 0.0
+            else:
+                yes_cond_prob = yes_logprob_sum / total
+
+    else:
+        # log_prob cannot be derived here. Return 0.0.
+        # TODO
+        yes_cond_prob = 0.0
+
+    return yes_cond_prob
+
+
+

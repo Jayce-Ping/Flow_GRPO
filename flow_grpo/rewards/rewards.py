@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import List, Tuple, Callable, Union
+from typing import List, Tuple, Callable, Union, Dict
 import io
 import inspect
 
@@ -113,13 +113,18 @@ def imagereward_score(device):
 
     return _fn
 
-def grid_layout_score(client):
+def grid_layout_score():
     import asyncio
     from flow_grpo.rewards.layout_scorer import GridLayoutScorer
 
+    client = AsyncOpenAI(
+        api_key='dummy-key',
+        base_url='http://127.0.0.1:8000/v1'
+    )
+
     scorer = GridLayoutScorer(
         client=client,
-        model='QwenVL2.5-VL-7B-Instruct',
+        model='Qwen2.5-VL-7B-Instruct',
         max_concurrent=12, # Adjust based on the system's capabilities (especially when using vllm as local model server)
     )
     def _fn(images, prompts, metadatas):
@@ -134,9 +139,14 @@ def grid_layout_score(client):
 
     return _fn
 
-def consistency_score(client):
+def consistency_score():
     import asyncio
     from flow_grpo.rewards.consistency_scorer import ConsistencyScorer
+
+    client = AsyncOpenAI(
+        api_key='dummy-key',
+        base_url='http://127.0.0.1:8000/v1'
+    )
 
     scorer = ConsistencyScorer(
         client=client,
@@ -463,7 +473,7 @@ def unifiedreward_score_sglang(device):
 
 def multi_score(
     device,
-    score_dict : List[str],
+    score_dict : Dict[str, float],
     aggregate_fn : Callable[[List[float]], float] = np.sum
     ) -> Callable[[List[Image.Image], List[str], List[dict], bool, bool], Tuple[dict[str, np.ndarray], dict]]:
     """
@@ -515,22 +525,14 @@ def multi_score(
     }
 
     score_fns = {}
-
-    shared_client = AsyncOpenAI(
-        api_key='dummy-key',
-        base_url='http://127.0.0.1:8000/v1'
-    )
-
+    
     for score_name, weight in score_dict.items():
         factory = score_functions.get(score_name)
         if factory is None:
             raise ValueError(f"Unknown score: {score_name}")
         params = inspect.signature(factory).parameters
-        args = []
-        if 'device' in params:
+        if "device" in params:
             score_fns[score_name] = factory(device)
-        if 'client' in params:
-            score_fns[score_name] = factory(shared_client)
         else:
             score_fns[score_name] = factory()
 

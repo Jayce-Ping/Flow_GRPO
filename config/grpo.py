@@ -858,7 +858,7 @@ def grid_consistency_clip_flux_4gpu():
     config.sample.noise_level = 0.9
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
-    config.save_dir = 'logs/consistency-subclip/flux-4gpu-half-train'
+    config.save_dir = 'logs/grid-consistency-subclip/flux-4gpu-half-train'
     config.reward_fn = {
         "grid_layout": 1.0,
         "consistency_score": 0.3,

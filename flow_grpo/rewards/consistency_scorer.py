@@ -154,7 +154,7 @@ class ConsistencyScorer:
         # Execute all tasks concurrently
         completions = await asyncio.gather(*tasks)
 
-        return [get_yes_cond_prob_from_completion(c) for c in completions]
+        return [get_yes_cond_prob_from_completion(c, canonicalize=False) for c in completions]
 
     def _sync_compute_image_consistency(
             self,
@@ -203,4 +203,4 @@ class ConsistencyScorer:
 
             completions.append(completion)
 
-        return [get_yes_cond_prob_from_completion(c) for c in completions]
+        return [get_yes_cond_prob_from_completion(c, canonicalize=False) for c in completions]

@@ -25,7 +25,7 @@ class GridLayoutScorer:
     def __init__(
             self,
             client : AsyncOpenAI,
-            model='QwenVL2.5-VL-7B-Instruct',
+            model='Qwen2.5-VL-7B-Instruct',
             max_concurrent=12,
             max_retries=10,
             timeout=60
@@ -83,7 +83,7 @@ class GridLayoutScorer:
                 completion = await self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
-                    temperature=0.0,
+                    temperature=1e-6, # Low temperature may cause issue here. Still use log_prob
                     max_completion_tokens=1,
                     logprobs=True,
                     top_logprobs=top_logprobs,
@@ -104,8 +104,8 @@ class GridLayoutScorer:
                 return 1.0
             else:
                 return 0.0
-            yes_prob = get_yes_cond_prob_from_completion(completion)
+            yes_prob = get_yes_cond_prob_from_completion(completion, canonicalize=True)
             if yes_prob > threshold:
-                return 1
+                return 1.0
             else:
-                return 0
+                return 0.0

@@ -175,7 +175,7 @@ def eval(pipeline : FluxPipeline,
          autocast,
          ema,
          transformer_trainable_parameters,
-         log_sample_num : int = 90
+         log_sample_num : int = None
     ):
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
@@ -274,8 +274,12 @@ def eval(pipeline : FluxPipeline,
     if accelerator.is_main_process:
          # Use a fixed generator to log same indices everytime for comparison
         gen = torch.Generator().manual_seed(0)
-        # Sample `log_sample_num` data for logging
-        sample_indices = torch.randperm(len(gathered_images), generator=gen)[:log_sample_num]
+        # Sample `log_sample_num` data for logging, 'None' for all data.
+        if log_sample_num is None:
+            sample_indices = list(range(len(gathered_images)))
+        else:
+            sample_indices = torch.randperm(len(gathered_images), generator=gen)[:log_sample_num]
+        
         sampled_images = gathered_images[sample_indices]
         sampled_prompts = [gathered_prompts[i] for i in sample_indices]
         sampled_rewards = [gathered_rewards[i] for i in sample_indices]
@@ -539,8 +543,6 @@ def main(_):
 
     # ---------------------------------------Reward---------------------------------------
     # prepare prompt and reward fn
-    # reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
-    # eval_reward_fn = getattr(flow_grpo.rewards.rewards, 'multi_score')(accelerator.device, config.reward_fn)
     reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
     eval_reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
 
@@ -897,9 +899,11 @@ These two numbers should be equal
                             1.0 + config.train.clip_range,
                         )
                         policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
+
+                        kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=(1,2), keepdim=True) / (2 * std_dev_t ** 2)
+                        kl_loss = torch.mean(kl_loss)
+
                         if config.train.beta > 0:
-                            kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=(1,2), keepdim=True) / (2 * std_dev_t ** 2)
-                            kl_loss = torch.mean(kl_loss)
                             loss = policy_loss + config.train.beta * kl_loss
                         else:
                             loss = policy_loss
@@ -929,8 +933,7 @@ These two numbers should be equal
                             )
                         )
                         info["policy_loss"].append(policy_loss)
-                        if config.train.beta > 0:
-                            info["kl_loss"].append(kl_loss)
+                        info["kl_loss"].append(kl_loss)
 
                         info["loss"].append(loss)
 
