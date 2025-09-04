@@ -504,7 +504,7 @@ def multi_score(
     """
     if aggregate_fn is None:
         # If not given, use np.sum directly
-        aggregate_fn = lambda **agg_dict: np.sum(list(agg_dict.values()))
+        aggregate_fn = lambda **score_dict: np.sum(list(score_dict.values()))
 
     assert aggregate_fn is not None
 
