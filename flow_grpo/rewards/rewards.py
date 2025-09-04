@@ -511,9 +511,10 @@ def multi_score(
         "image_similarity": image_similarity_score,
         "consistency_score": consistency_score,
         "subfig_clipT": subfig_clipT_score,
+        "grid_layout": grid_layout_score,
     }
-    
-    score_fns={}
+
+    score_fns = {}
 
     shared_client = AsyncOpenAI(
         api_key='dummy-key',

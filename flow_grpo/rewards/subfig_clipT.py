@@ -14,7 +14,7 @@ class SubfigClipTScorer(torch.nn.Module):
         super().__init__()
         self.device = device
         self.model, _, self.preprocess = open_clip.create_model_and_transforms(
-            model_name="ViT-H-14",         
+            model_name="ViT-H-14",
             pretrained="laion2b_s32b_b79k",
             device=device
         )

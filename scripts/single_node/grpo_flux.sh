@@ -7,4 +7,4 @@ accelerate launch \
     --num_processes=4 \
     --main_process_port 29501 \
     scripts/train_flux.py \
-    --config config/grpo.py:consistency_clip_flux_4gpu
+    --config config/grpo.py:grid_consistency_clip_flux_4gpu

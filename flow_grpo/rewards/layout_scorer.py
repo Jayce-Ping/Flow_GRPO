@@ -83,7 +83,7 @@ class GridLayoutScorer:
                 completion = await self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
-                    temperature=0.0, # Deterministic result, no use for logprobs, actually.
+                    temperature=0.0,
                     max_completion_tokens=1,
                     logprobs=True,
                     top_logprobs=top_logprobs,
@@ -99,6 +99,11 @@ class GridLayoutScorer:
         if completion is None:
             return 0.0
         else:
+            content = completion.choices[0].message.content.strip().lower()
+            if content == 'yes':
+                return 1.0
+            else:
+                return 0.0
             yes_prob = get_yes_cond_prob_from_completion(completion)
             if yes_prob > threshold:
                 return 1
