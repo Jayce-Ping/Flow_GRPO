@@ -100,7 +100,7 @@ class GridLayoutScorer:
             return 0.0
         else:
             content = completion.choices[0].message.content.strip().lower()
-            if content == 'yes':
+            if 'yes' in content:
                 return 1.0
             else:
                 return 0.0
