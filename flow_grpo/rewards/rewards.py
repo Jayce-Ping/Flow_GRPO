@@ -6,6 +6,7 @@ import inspect
 from PIL import Image
 import numpy as np
 import torch
+from openai import OpenAI, AsyncOpenAI
 
 
 def jpeg_incompressibility():
@@ -112,13 +113,33 @@ def imagereward_score(device):
 
     return _fn
 
-def consistency_score(device):
+def grid_layout_score(client):
+    import asyncio
+    from flow_grpo.rewards.layout_scorer import GridLayoutScorer
+
+    scorer = GridLayoutScorer(
+        client=client,
+        model='QwenVL2.5-VL-7B-Instruct',
+        max_concurrent=12, # Adjust based on the system's capabilities (especially when using vllm as local model server)
+    )
+    def _fn(images, prompts, metadatas):
+        if isinstance(images, torch.Tensor):
+            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+            images = images.transpose(0, 2, 3, 1)
+        
+            images = [Image.fromarray(image) for image in images]
+
+        scores = asyncio.run(scorer(images, prompts, metadatas))
+        return scores, {}
+
+    return _fn
+
+def consistency_score(client):
     import asyncio
     from flow_grpo.rewards.consistency_scorer import ConsistencyScorer
 
     scorer = ConsistencyScorer(
-        api_key='dummy_key',
-        base_url='http://127.0.0.1:8000/v1',
+        client=client,
         model='Qwen2.5-VL-7B-Instruct',
         criteria_path='dataset/T2IS/prompt_consistency_criterion.json',
         max_concurrent=12, # Adjust based on the system's capabilities (especially when using vllm as local model server)
@@ -136,7 +157,7 @@ def consistency_score(device):
     return _fn
 
 def subfig_clipT_score(device):
-    from flow_grpo.rewards.subfig_clip import SubfigClipTScorer
+    from flow_grpo.rewards.subfig_clipT import SubfigClipTScorer
 
     scorer = SubfigClipTScorer(device=device)
 
@@ -491,13 +512,26 @@ def multi_score(
         "consistency_score": consistency_score,
         "subfig_clipT": subfig_clipT_score,
     }
+    
     score_fns={}
+
+    shared_client = AsyncOpenAI(
+        api_key='dummy-key',
+        base_url='http://127.0.0.1:8000/v1'
+    )
+
     for score_name, weight in score_dict.items():
         factory = score_functions.get(score_name)
         if factory is None:
             raise ValueError(f"Unknown score: {score_name}")
         params = inspect.signature(factory).parameters
-        score_fns[score_name] = factory(device) if "device" in params else factory()
+        args = []
+        if 'device' in params:
+            score_fns[score_name] = factory(device)
+        if 'client' in params:
+            score_fns[score_name] = factory(shared_client)
+        else:
+            score_fns[score_name] = factory()
 
     # only_strict is only for geneval. During training, only the strict reward is needed, and non-strict rewards don't need to be computed, reducing reward calculation time.
     def _fn(images : List[Image.Image], prompts : List[str], metadata: List[dict], ref_images=None, only_strict=True) -> Tuple[dict[str, np.ndarray], dict]:

@@ -4,58 +4,7 @@ import open_clip
 import torch
 import numpy as np
 from PIL import Image
-
-
-def divide_prompt(prompt):
-    # seqis like ". [TOP-LEFT]:"
-    match_sep = re.compile(r"\.\s+[A-Z0-9-\[\]]+:")
-    seps = match_sep.findall(prompt)
-    # Add '.' for each sentence
-    sub_prompts = [
-        p + '.' if p.strip()[-1] != '.' else p
-        for p in re.split('|'.join(map(re.escape, seps)), prompt)
-    ]
-    return sub_prompts
-
-def divide_image(image, grid_info : tuple[int, int]):
-    assert len(grid_info) == 2, "grid_info must be a tuple of two integers (a, b)"
-
-    a, b = grid_info
-    width, height = image.size
-
-    grid_cells = []
-    cell_width = width // b
-    cell_height = height // a
-
-    # 2x2 grid
-    # | 1 | 2 |
-    # | 3 | 4 |
-    # [
-    # (0, 0, cell_width, cell_height),
-    # (cell_width, 0, 2 * cell_width, cell_height),
-    # (0, cell_height, cell_width, 2 * cell_height),
-    # (cell_width, cell_height, 2 * cell_width, 2 * cell_height)
-    # ]
-
-    for i in range(a):
-        for j in range(b):
-            upper = i * cell_height
-            left = j * cell_width
-            right = left + cell_width
-            lower = upper + cell_height
-            grid_cells.append(image.crop((left, upper, right, lower)))
-
-    return grid_cells
-
-def extract_grid_info(prompt) -> tuple[int, int]:
-    # Grid can be represented as int x int, or int ⨉ int. ⨉ has unicode \u2a09
-    match = re.findall(r'(\d+)\s*[x⨉]\s*(\d+)', prompt)
-    if len(match) == 0:
-        return (1, 1)
-
-    return (int(match[0][0]), int(match[0][1]))
-
-
+from flow_grpo.rewards.utils import divide_image, extract_grid_info, divide_prompt
 
 class SubfigClipTScorer(torch.nn.Module):
     """

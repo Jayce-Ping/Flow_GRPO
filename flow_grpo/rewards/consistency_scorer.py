@@ -16,91 +16,17 @@ import numpy as np
 import openai
 from openai import OpenAI, AsyncOpenAI
 from PIL import Image
+from flow_grpo.rewards.utils import pil_image_to_base64, divide_image, extract_grid_info
+from flow_grpo.rewards.utils import get_yes_cond_prob_from_completion
 
 # VLLM log filter
 logging.getLogger("vllm").setLevel(logging.ERROR)
 logging.getLogger().setLevel(logging.ERROR)
 
-
-def pil_image_to_base64(image, format="JPEG"):
-    buffered = BytesIO()
-    image.save(buffered, format="JPEG")
-    encoded_image_text = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    base64_qwen = f"data:image/{format.lower()};base64,{encoded_image_text}"
-    return base64_qwen
-
-def divide_image(image, grid_info : tuple[int, int]):
-    assert len(grid_info) == 2, "grid_info must be a tuple of two integers (a, b)"
-
-    a, b = grid_info
-    width, height = image.size
-
-    grid_cells = []
-    cell_width = width // b
-    cell_height = height // a
-
-    # 2x2 grid
-    # | 1 | 2 |
-    # | 3 | 4 |
-    # [
-    # (0, 0, cell_width, cell_height),
-    # (cell_width, 0, 2 * cell_width, cell_height),
-    # (0, cell_height, cell_width, 2 * cell_height),
-    # (cell_width, cell_height, 2 * cell_width, 2 * cell_height)
-    # ]
-
-    for i in range(a):
-        for j in range(b):
-            upper = i * cell_height
-            left = j * cell_width
-            right = left + cell_width
-            lower = upper + cell_height
-            grid_cells.append(image.crop((left, upper, right, lower)))
-
-    return grid_cells
-
-def extract_grid_info(prompt) -> tuple[int, int]:
-    # Grid can be represented as int x int, or int ⨉ int. ⨉ has unicode \u2a09
-    match = re.findall(r'(\d+)\s*[x⨉]\s*(\d+)', prompt)
-    if len(match) == 0:
-        return (1, 1)
-
-    return (int(match[0][0]), int(match[0][1]))
-
-
-def get_score_from_completion(completion : openai.ChatCompletion) -> float:
-    if completion is None:
-        return 0.0
-
-    logprobs = completion.choices[0].logprobs
-    if logprobs:
-        # Use logprobs to compute, score = P('yes') / (P('yes') + P('no'))
-        # score = 1 / (1 + exp(logprob('no') -  logprob('yes')))
-        # Same formular for logits as well. Since the sum term will cancel out.
-        # Use uppercase only here.
-        token_logprobs = {t.token: t.logprob for t in logprobs.content[0].top_logprobs}
-        yes_logprob = token_logprobs.get('Yes', float('-inf'))
-        no_logprob = token_logprobs.get('No', float('-inf'))
-
-        if yes_logprob == float('-inf') and no_logprob == float('-inf'):
-            # When inf - inf encountered, give 0.0 score.
-            score = 0.0 # 0.0
-        else:
-            diff = torch.tensor(yes_logprob - no_logprob, dtype=torch.float64)
-            score = torch.sigmoid(diff).item()
-    else:
-        # log_prob cannot be derived here. How to calculate?
-        # TODO
-        score = 0.0
-
-    return score
-
-
 class ConsistencyScorer:
     def __init__(
             self,
-            api_key='dummy_key',
-            base_url='http://127.0.0.1:8000/v1',
+            client: Union[OpenAI, AsyncOpenAI],
             model='Qwen2.5-VL-7B-Instruct',
             criteria_path='prompt_consistency_criterion.json',
             async_mode=True,
@@ -108,24 +34,12 @@ class ConsistencyScorer:
             max_retries=10,
             timeout=60
         ):
-        self.openai_api_key = api_key
-        self.openai_base_url = base_url
+        self.client = client
         self.model = model
         self.async_mode = async_mode
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
         self.timeout = timeout
-
-        if async_mode:
-            self.client = AsyncOpenAI(
-                api_key=self.openai_api_key,
-                base_url=self.openai_base_url
-            )
-        else:
-            self.client = OpenAI(
-                api_key=self.openai_api_key,
-                base_url=self.openai_base_url
-            )
 
         with open(criteria_path, 'r') as f:
             self.criteria_data = json.load(f)
@@ -240,7 +154,7 @@ class ConsistencyScorer:
         # Execute all tasks concurrently
         completions = await asyncio.gather(*tasks)
 
-        return [get_score_from_completion(c) for c in completions]
+        return [get_yes_cond_prob_from_completion(c) for c in completions]
 
     def _sync_compute_image_consistency(
             self,
@@ -289,4 +203,4 @@ class ConsistencyScorer:
 
             completions.append(completion)
 
-        return [get_score_from_completion(c) for c in completions]
+        return [get_yes_cond_prob_from_completion(c) for c in completions]
