@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import List, Tuple, Callable, Union, Dict
+from typing import List, Tuple, Callable, Union, Dict, Optional
 import io
 import inspect
 
@@ -7,7 +7,6 @@ from PIL import Image
 import numpy as np
 import torch
 from openai import OpenAI, AsyncOpenAI
-
 
 def jpeg_incompressibility():
     def _fn(images, prompts, metadata):
@@ -472,17 +471,17 @@ def unifiedreward_score_sglang(device):
     return _fn
 
 def multi_score(
-    device,
-    score_dict : Dict[str, float],
-    aggregate_fn : Callable[[List[float]], float] = np.sum
-    ) -> Callable[[List[Image.Image], List[str], List[dict], bool, bool], Tuple[dict[str, np.ndarray], dict]]:
+    device: str,
+    score_dict: Dict[str, float],
+    aggregate_fn: Optional[Callable[[Dict[str, float]], float]] = None,
+) -> Callable[[List[Image.Image], List[str], List[dict], bool, bool], Tuple[dict[str, np.ndarray], dict]]:
     """
     Constructs a multi-score reward function that computes multiple reward metrics for a batch of images and prompts.
 
     Args:
         device: The device (e.g., "cuda" or "cpu") on which to run the reward functions.
         score_dict (List[str]): A dictionary mapping reward function names to their weights.
-        aggregate_fn (Callable[[List[float]], float], optional): A function to aggregate multiple scores. Defaults to np.sum.
+        aggregate_fn (Callable[[Dict[str, float]], float], optional): A function to aggregate multiple scores. If None, defaults to summing the scores.
 
     Returns:
         Callable: A function that takes as input:
@@ -500,12 +499,14 @@ def multi_score(
         ValueError: If an unknown score name is provided in score_dict.
 
     Example:
-        reward_fn = multi_score("cuda:0", {"clipscore": 0.5, "aesthetic": 0.5}, sum)
+        reward_fn = multi_score("cuda:0", {"clipscore": 0.5, "aesthetic": 0.5}, aggregate_fn=lambda score1, score2: score1 + score2)
         rewards, details = reward_fn(images, prompts, metadata)
     """
     if aggregate_fn is None:
         # If not given, use np.sum directly
         aggregate_fn = lambda **agg_dict: np.sum(list(agg_dict.values()))
+
+    assert aggregate_fn is not None
 
     score_functions = {
         "deqa": deqa_score_remote,
@@ -564,16 +565,13 @@ def multi_score(
 
             score_details[score_name] = scores
             # Scale each reward by corresponding weight
-            weighted_scores = [weight * score for score in scores]
-            
-            total_scores.append(weighted_scores)
+            total_scores.append(weight * scores)
 
         # Aggregate scores from different reward models
-        total_scores = [
-            {k: v for k,v in zip(score_dict.keys(), scores)}
+        total_scores = np.array([
+            aggregate_fn(**{k: v for k,v in zip(score_dict.keys(), scores)})
             for scores in zip(*total_scores)
-        ]
-        total_scores = np.array([aggregate_fn(**v) for v in total_scores])
+        ])
 
         score_details['avg'] = total_scores
         return score_details, {}
