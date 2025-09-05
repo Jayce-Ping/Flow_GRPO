@@ -478,6 +478,9 @@ def consistency_sd3_4gpu():
 def test_flux_1gpu():
     gpu_number = 1
     config = compressibility()
+    config.logging_platform = "wandb"
+    config.resume_from_id = "ffbtb6wg9w9bs6619ovf2"
+
     config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
 
     config.sample.use_sliding_window = True
@@ -527,8 +530,8 @@ def test_flux_1gpu():
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
-    config.save_freq = 0 # epoch
-    config.eval_freq = 0
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10
     config.save_dir = 'logs/test_run'
     config.reward_fn = {
         "pickscore": 1.0,

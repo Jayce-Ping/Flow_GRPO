@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import tqdm
 import wandb
+import swanlab
 from absl import app, flags
 from accelerate import Accelerator
 from accelerate.logging import get_logger
@@ -344,35 +345,28 @@ def load_pipeline(config, accelerator):
     return pipeline, text_encoders, tokenizers
 
 
-def set_resume_info(config):
+def setup_wandb_log(config):
     """
-        Resume wandb training log
+        Initialize wandb training log
     """
-    project_name = config.project_name
-    run_id = config.resume_from_id
-    # Get history
-    api_run = wandb.Api().run(f"{project_name}/{run_id}")
-    history = api_run.history()
-    if not history.empty:
-        if config.resume_from_step is None:
-            config.resume_from_step = int(history['_step'].iloc[-1])
-        if config.resume_from_epoch is None:
-            config.resume_from_epoch = config.resume_from_step // 2
-        logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
-    else:
-        logger.info("No previous history found, starting from beginning")
-        config.resume_from_step = 0
-        config.resume_from_epoch = 0
-
-    config.run_name = api_run.name
-    config.run_id = api_run.id
-
-
-def set_wandb(config):
-    # Resume training
-    if config.resume_from_id:
+    if config.resume_from_id is not None:
+        project_name = config.project_name
         run_id = config.resume_from_id
-        wandb_run = wandb.init(
+        # Get history
+        api_run = wandb.Api().run(f"{project_name}/{run_id}")
+        history = api_run.history()
+        if not history.empty:
+            if config.resume_from_step is None:
+                config.resume_from_step = int(history['_step'].iloc[-1])
+            if config.resume_from_epoch is None:
+                config.resume_from_epoch = config.resume_from_step // 2
+            logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
+        else:
+            logger.info("No previous history found, starting from beginning")
+            config.resume_from_step = 0
+            config.resume_from_epoch = 0
+
+        run = wandb.init(
             project=config.project_name,
             config=config.to_dict(),
             id=run_id,
@@ -385,14 +379,62 @@ def set_wandb(config):
         else:
             config.run_name += "_" + unique_id
 
-        wandb_run = wandb.init(
+        run = wandb.init(
             project=config.project_name,
             config=config.to_dict()
         )
-        config.run_name = wandb_run.name
-        config.run_id = wandb_run.id
 
-    return wandb_run
+    return run
+
+def setup_swanlab_log(config):
+    """
+        Initialize swanlab training log
+    """
+    if config.resume_from_id:
+        project_name = config.project_name
+        run_id = config.resume_from_id
+        # Get history
+        api = swanlab.OpenApi()
+        run_summary = api.get_summary(project=project_name, exp_id=run_id)
+        if config.resume_from_step is None:
+            config.resume_from_step = run_summary.data['epoch']['max']['step']
+        if config.resume_from_epoch is None:
+            config.resume_from_epoch = run_summary.data['epoch']['max']['value']
+        logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
+
+        run = swanlab.init(
+            project=project_name,
+            config=config.to_dict(),
+            resume=True,
+            id=run_id
+        )
+
+    else:
+        unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
+        if not config.run_name:
+            config.run_name = unique_id
+        else:
+            config.run_name += "_" + unique_id
+
+        run = swanlab.init(
+            project=config.project_name,
+            config=config.to_dict()
+        )
+
+    return run
+
+def set_online_log(config):
+    """
+        Initialize logging with platform
+    """
+    if config.logging_platform == 'wandb':
+        run = setup_wandb_log(config)
+    elif config.logging_platform == 'swanlab':
+        run = setup_swanlab_log(config)
+    else:
+        raise ValueError(f"Unsupported logging platform: {config.logging_platform}")
+    
+    return run
 
 
 def main(_):
@@ -420,21 +462,27 @@ def main(_):
         # the total number of optimizer steps to accumulate across.
         gradient_accumulation_steps=config.train.gradient_accumulation_steps * num_train_timesteps,
     )
+    # set seed (device_specific is very important to get different prompts on different devices)
+    set_seed(config.seed, device_specific=True)
+    # -------------------------------------------------Set up online log-----------------------------------
     if not config.project_name:
         config.project_name = 'FlowGRPO-SD3'
 
-    if config.resume_from_id:
-        # Fetch resume info
-        set_resume_info(config)
+    if config.logging_platform == 'wandb':
+        logging_platform = wandb
+    elif config.logging_platform == 'swanlab':
+        logging_platform = swanlab
+    else:
+        raise ValueError(f"Unsupported logging platform: {config.logging_platform}")
 
     if accelerator.is_main_process:
         # Initialize wandb
-        wandb_run = set_wandb(config)
+        run = set_online_log(config)
 
     def safe_exit(sig, frame):
         print("Received signal to terminate.")
         if accelerator.is_main_process:
-            wandb.finish()
+            logging_platform.finish()
         
         sys.exit(0)
 
@@ -442,8 +490,6 @@ def main(_):
 
     logger.info(f"\n{config}")
 
-    # set seed (device_specific is very important to get different prompts on different devices)
-    set_seed(config.seed, device_specific=True)
     # ------------------------------------------Load pipeline--------------------------------------
     # load scheduler, tokenizer and models.
     pipeline, text_encoders, tokenizers = load_pipeline(config, accelerator)

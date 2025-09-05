@@ -14,6 +14,7 @@ import torch
 import tqdm
 from typing import List, Tuple, Any, Optional
 import wandb
+import swanlab
 
 from absl import app, flags
 from accelerate import Accelerator
@@ -43,9 +44,8 @@ tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
 FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", "config/base.py", "Training configuration.")
-    
-logger = get_logger(__name__)
 
+logger = get_logger(__name__)
 
 def compute_text_embeddings(prompt, text_encoders, tokenizers, max_sequence_length, device):
     with torch.no_grad():
@@ -172,6 +172,7 @@ def eval(pipeline : FluxPipeline,
          tokenizers,
          config : Namespace,
          accelerator,
+         logging_platform,
          global_step,
          reward_fn,
          executor,
@@ -188,12 +189,16 @@ def eval(pipeline : FluxPipeline,
         'prompts': [],
         'rewards': defaultdict(list)
     }
+    cnt = 0
     for test_batch in tqdm(
             test_dataloader,
             desc="Eval: ",
             disable=not accelerator.is_local_main_process,
             position=0,
         ):
+        cnt += 1
+        if cnt > 1:
+            break
         prompts, prompt_metadata = test_batch
         prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
             prompts,
@@ -244,7 +249,7 @@ def eval(pipeline : FluxPipeline,
             print(key, np.mean(value))
 
         # Log eval metrics
-        wandb.log(
+        logging_platform.log(
             {f"eval/{key}": np.mean(value) for key, value in gathered_rewards.items()},
             step=global_step
         )
@@ -295,10 +300,10 @@ def eval(pipeline : FluxPipeline,
                 pil = pil.resize((config.resolution, config.resolution))
                 pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
 
-            wandb.log(
+            logging_platform.log(
                 {
                     "eval_images": [
-                        wandb.Image(
+                        logging_platform.Image(
                             os.path.join(tmpdir, f"{idx}.jpg"),
                             caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt:.200}",
                         )
@@ -416,34 +421,28 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
 
     return pipeline, text_encoders, tokenizers
 
-def set_resume_info(config):
+def setup_wandb_log(config):
     """
-        Resume wandb training log
+        Initialize wandb training log
     """
-    project_name = config.project_name
-    run_id = config.resume_from_id
-    # Get history
-    api_run = wandb.Api().run(f"{project_name}/{run_id}")
-    history = api_run.history()
-    if not history.empty:
-        if config.resume_from_step is None:
-            config.resume_from_step = int(history['_step'].iloc[-1])
-        if config.resume_from_epoch is None:
-            config.resume_from_epoch = config.resume_from_step // 2
-        logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
-    else:
-        logger.info("No previous history found, starting from beginning")
-        config.resume_from_step = 0
-        config.resume_from_epoch = 0
-
-    config.run_name = api_run.name
-    config.run_id = api_run.id
-
-def set_wandb(config):
-    # Resume training
-    if config.resume_from_id:
+    if config.resume_from_id is not None:
+        project_name = config.project_name
         run_id = config.resume_from_id
-        wandb_run = wandb.init(
+        # Get history
+        api_run = wandb.Api().run(f"{project_name}/{run_id}")
+        history = api_run.history()
+        if not history.empty:
+            if config.resume_from_step is None:
+                config.resume_from_step = int(history['_step'].iloc[-1])
+            if config.resume_from_epoch is None:
+                config.resume_from_epoch = config.resume_from_step // 2
+            logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
+        else:
+            logger.info("No previous history found, starting from beginning")
+            config.resume_from_step = 0
+            config.resume_from_epoch = 0
+
+        run = wandb.init(
             project=config.project_name,
             config=config.to_dict(),
             id=run_id,
@@ -456,20 +455,68 @@ def set_wandb(config):
         else:
             config.run_name += "_" + unique_id
 
-        wandb_run = wandb.init(
+        run = wandb.init(
             project=config.project_name,
             config=config.to_dict()
         )
-        config.run_name = wandb_run.name
-        config.run_id = wandb_run.id
 
-    return wandb_run
+    return run
+
+def setup_swanlab_log(config):
+    """
+        Initialize swanlab training log
+    """
+    if config.resume_from_id:
+        project_name = config.project_name
+        run_id = config.resume_from_id
+        # Get history
+        api = swanlab.OpenApi()
+        run_summary = api.get_summary(project=project_name, exp_id=run_id)
+        if config.resume_from_step is None:
+            config.resume_from_step = run_summary.data['epoch']['max']['step']
+        if config.resume_from_epoch is None:
+            config.resume_from_epoch = run_summary.data['epoch']['max']['value']
+        logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
+
+        run = swanlab.init(
+            project=project_name,
+            config=config.to_dict(),
+            resume=True,
+            id=run_id
+        )
+
+    else:
+        unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
+        if not config.run_name:
+            config.run_name = unique_id
+        else:
+            config.run_name += "_" + unique_id
+
+        run = swanlab.init(
+            project=config.project_name,
+            config=config.to_dict()
+        )
+
+    return run
+
+def set_online_log(config):
+    """
+        Initialize logging with platform
+    """
+    if config.logging_platform == 'wandb':
+        run = setup_wandb_log(config)
+    elif config.logging_platform == 'swanlab':
+        run = setup_swanlab_log(config)
+    else:
+        raise ValueError(f"Unsupported logging platform: {config.logging_platform}")
+    
+    return run
 
 
 def main(_):
     # basic Accelerate and logging setup
     config = FLAGS.config
-
+    
     # number of timesteps within each trajectory to train on
     if config.sample.use_sliding_window:
         num_train_timesteps = config.sample.window_size 
@@ -483,7 +530,6 @@ def main(_):
     )
 
     accelerator = Accelerator(
-        # log_with="wandb",
         mixed_precision=config.mixed_precision,
         project_config=accelerator_config,
         # we always accumulate gradients across timesteps; we want config.train.gradient_accumulation_steps to be the
@@ -494,22 +540,25 @@ def main(_):
     # set seed (device_specific is very important to get different prompts on different devices)
     set_seed(config.seed, device_specific=True)
 
-    # -------------------------------------------------Set up wandb-----------------------------------
+    # -------------------------------------------------Set up online log-----------------------------------
     if not config.project_name:
         config.project_name = 'FlowGRPO-Flux'
 
-    if config.resume_from_id:
-        # Fetch resume info
-        set_resume_info(config)
+    if config.logging_platform == 'wandb':
+        logging_platform = wandb
+    elif config.logging_platform == 'swanlab':
+        logging_platform = swanlab
+    else:
+        raise ValueError(f"Unsupported logging platform: {config.logging_platform}")
 
     if accelerator.is_main_process:
         # Initialize wandb
-        wandb_run = set_wandb(config)
-    
+        run = set_online_log(config)
+
     def safe_exit(sig, frame):
         print("Received signal to terminate.")
         if accelerator.is_main_process:
-            wandb.finish()
+            logging_platform.finish()
         
         sys.exit(0)
 
@@ -667,7 +716,20 @@ These two numbers should be equal
         #################### EVAL ####################
         pipeline.transformer.eval()
         if config.eval_freq > 0 and epoch % config.eval_freq == 0:
-            eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerator, global_step, eval_reward_fn, executor, autocast, ema, transformer_trainable_parameters)
+            eval(
+                pipeline,
+                test_dataloader,
+                text_encoders,
+                tokenizers,
+                config,
+                accelerator,
+                logging_platform,
+                global_step,
+                eval_reward_fn, executor,
+                autocast,
+                ema,
+                transformer_trainable_parameters
+            )
         if config.save_freq > 0 and epoch % config.save_freq == 0 and accelerator.is_main_process:
             save_ckpt(config.save_dir, transformer, global_step, accelerator, ema, transformer_trainable_parameters, config)
 
@@ -794,7 +856,7 @@ These two numbers should be equal
 
         # log rewards and images
         if accelerator.is_main_process:
-            wandb.log(
+            logging_platform.log(
                 {
                     "epoch": epoch,
                     **{f"reward_{key}": value.mean() for key, value in gathered_rewards.items() if '_strict_accuracy' not in key and '_accuracy' not in key},
@@ -817,7 +879,7 @@ These two numbers should be equal
             zero_std_ratio, reward_std_mean = calculate_zero_std_ratio(prompts, gathered_rewards)
 
             if accelerator.is_main_process:
-                wandb.log(
+                logging_platform.log(
                     {
                         "group_size": group_size,
                         "trained_prompt_num": trained_prompt_num,
@@ -969,7 +1031,7 @@ These two numbers should be equal
                         info = accelerator.reduce(info, reduction="mean")
                         info.update({"epoch": epoch, "inner_epoch": inner_epoch})
                         if accelerator.is_main_process:
-                            wandb.log(info, step=global_step)
+                            logging_platform.log(info, step=global_step)
                         global_step += 1
                         info = defaultdict(list)
 

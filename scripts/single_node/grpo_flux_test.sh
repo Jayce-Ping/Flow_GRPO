@@ -1,6 +1,5 @@
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 export WANDB_API_KEY="66795f41320baafdbf8b4a19b62dce232ded0c2e"
-export WANDB__REQUIRE_LEGACY_SERVICE=TRUE
 export WANDB_MODE=offline
 
 accelerate launch \

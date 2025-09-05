@@ -6,6 +6,7 @@ def get_config():
 
     ###### General ######
     # run name for wandb logging and checkpoint saving -- if not provided, will be auto-generated based on the datetime.
+    config.logging_platform = "wandb"  # options ["wandb", "swanlab"]
     config.run_name = ""
     config.run_id = ""
     
