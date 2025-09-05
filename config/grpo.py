@@ -479,7 +479,6 @@ def test_flux_1gpu():
     gpu_number = 1
     config = compressibility()
     config.logging_platform = "wandb"
-    config.resume_from_id = "ffbtb6wg9w9bs6619ovf2"
 
     config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
 
@@ -545,6 +544,8 @@ def test_flux_1gpu():
 def subfig_clip_flux_2gpu():
     gpu_number = 2
     config = compressibility()
+    config.logging_platform = "swanlab"
+    
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
 
     config.sample.use_sliding_window = True
@@ -557,10 +558,10 @@ def subfig_clip_flux_2gpu():
     config.sample.eval_num_steps = 20
     config.sample.guidance_scale = 3.5
 
-    config.resolution = 512
+    config.resolution = 1024
 
     config.sample.batch_size = 1
-    config.sample.num_image_per_prompt = 16
+    config.sample.num_image_per_prompt = 24
     config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
