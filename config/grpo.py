@@ -486,15 +486,15 @@ def test_flux_1gpu():
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
-    config.sample.num_steps = 10
+    config.sample.num_steps = 2
     config.sample.eval_num_steps = 20
     config.sample.guidance_scale = 3.5
 
     config.resolution = 512
 
     config.sample.batch_size = 2
-    config.sample.num_image_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 24 # Number of unique prompts used in each epoch
+    config.sample.num_image_per_prompt = 2
+    config.sample.unique_sample_num_per_epoch = 4 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -527,8 +527,8 @@ def test_flux_1gpu():
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
-    config.save_freq = 10 # epoch
-    config.eval_freq = 10
+    config.save_freq = 0 # epoch
+    config.eval_freq = 0
     config.save_dir = 'logs/test_run'
     config.reward_fn = {
         "pickscore": 1.0,

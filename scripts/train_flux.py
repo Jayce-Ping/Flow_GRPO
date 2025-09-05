@@ -1,3 +1,4 @@
+from argparse import Namespace
 import contextlib
 import datetime
 import hashlib
@@ -5,13 +6,14 @@ import json
 import numpy as np
 import os
 import random
+import signal
+import sys
 import tempfile
 import time
 import torch
 import tqdm
-import wandb
-from argparse import Namespace
 from typing import List, Tuple, Any, Optional
+import wandb
 
 from absl import app, flags
 from accelerate import Accelerator
@@ -43,6 +45,7 @@ FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", "config/base.py", "Training configuration.")
     
 logger = get_logger(__name__)
+
 
 def compute_text_embeddings(prompt, text_encoders, tokenizers, max_sequence_length, device):
     with torch.no_grad():
@@ -212,7 +215,7 @@ def eval(pipeline : FluxPipeline,
                     width=config.resolution, 
                     noise_level=0,
                 )
-        future = executor.submit(reward_fn, images, prompts, prompt_metadata, only_strict=False)
+        future = executor.submit(reward_fn, images, prompts, prompt_metadata)
         # yield to to make sure reward computation starts
         time.sleep(0)
         # all_futures.append(future)
@@ -503,9 +506,16 @@ def main(_):
         # Initialize wandb
         wandb_run = set_wandb(config)
     
+    def safe_exit(sig, frame):
+        print("Received signal to terminate.")
+        if accelerator.is_main_process:
+            wandb.finish()
+        
+        sys.exit(0)
 
+    signal.signal(signal.SIGINT, safe_exit)
+    
     logger.info(f"\n{config}")
-
 
     # --------------------------------------Load pipeline----------------------------------
     pipeline, text_encoders, tokenizers = load_pipeline(config, accelerator)
@@ -720,7 +730,7 @@ These two numbers should be equal
             timesteps = pipeline.scheduler.get_window_timesteps().repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
 
             # compute rewards asynchronously
-            rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, only_strict=True)
+            rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
             # yield to to make sure reward computation starts
             time.sleep(0)
 

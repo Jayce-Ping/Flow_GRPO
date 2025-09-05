@@ -292,7 +292,6 @@ def multi_score(
         else:
             score_fns[score_name] = factory()
 
-    # only_strict is only for geneval. During training, only the strict reward is needed, and non-strict rewards don't need to be computed, reducing reward calculation time.
     def _fn(
         images : List[Image.Image],
         prompts : List[str],

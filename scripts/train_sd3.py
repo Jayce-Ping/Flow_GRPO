@@ -9,6 +9,8 @@ import time
 from collections import defaultdict
 from concurrent import futures
 from functools import partial
+import sys
+import signal
 
 import numpy as np
 import torch
@@ -182,7 +184,7 @@ def eval(pipeline, test_dataloader, text_encoders, tokenizers, config, accelerat
                     width=config.resolution, 
                     noise_level=0,
                 )
-        rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, only_strict=False)
+        rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
         # yield to to make sure reward computation starts
         time.sleep(0)
         rewards, reward_metadata = rewards.result()
@@ -429,6 +431,15 @@ def main(_):
         # Initialize wandb
         wandb_run = set_wandb(config)
 
+    def safe_exit(sig, frame):
+        print("Received signal to terminate.")
+        if accelerator.is_main_process:
+            wandb.finish()
+        
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, safe_exit)
+
     logger.info(f"\n{config}")
 
     # set seed (device_specific is very important to get different prompts on different devices)
@@ -642,7 +653,7 @@ def main(_):
             timesteps = pipeline.scheduler.get_window_timesteps().repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
 
             # compute rewards asynchronously
-            rewards = executor.submit(reward_fn, images, prompts, prompt_metadata, only_strict=True)
+            rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
             # yield to to make sure reward computation starts
             time.sleep(0)
 
