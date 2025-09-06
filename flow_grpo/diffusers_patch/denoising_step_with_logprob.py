@@ -14,7 +14,7 @@ def denoising_sde_step_with_logprob(
     model_output: torch.FloatTensor,
     timestep: Union[list[float], torch.FloatTensor],
     sample: torch.FloatTensor,
-    noise_level: float = 0.7,
+    noise_level: Union[int, float, list[float], torch.FloatTensor] = 0.7,
     prev_sample: Optional[torch.FloatTensor] = None,
     generator: Optional[Union[torch.Generator, list[torch.Generator]]] = None
 ):
@@ -29,8 +29,8 @@ def denoising_sde_step_with_logprob(
             The current discrete timestep(s) in the diffusion chain, with batch dimension.
         sample (`torch.FloatTensor`):
             A current instance of a sample created by the diffusion process.
-        noise_level (`float`):
-            The noise level parameter
+        noise_level (`int` | `float` | `list[float]` | `torch.FloatTensor`, *optional*, defaults to 0.7):
+            The noise level parameter, can be different for each sample in the batch. This parameter controls the standard deviation of the noise added to the denoised sample.
         prev_sample (`torch.FloatTensor`):
             The next insance of the sample. If given, calculate the log_prob using given `prev_sample` as predicted value.
         generator (`torch.Generator`, *optional*):
@@ -50,6 +50,14 @@ def denoising_sde_step_with_logprob(
     sigma_prev = self.sigmas[prev_step_index].view(-1, *([1] * (len(sample.shape) - 1)))
     sigma_max = self.sigmas[1].item()
     dt = sigma_prev - sigma # dt is negative, (batch_size, 1, 1)
+
+    # Convert noise_level to a tensor with shape (batch_size, 1, 1)
+    if isinstance(noise_level, float) or isinstance(noise_level, int):
+        noise_level = torch.tensor([noise_level], device=sample.device, dtype=sample.dtype).repeat(sample.shape[0])
+    elif isinstance(noise_level, list):
+        noise_level = torch.tensor(noise_level, device=sample.device, dtype=sample.dtype)
+
+    noise_level = noise_level.view(-1, *([1] * (len(sample.shape) - 1)))
 
     std_dev_t = torch.sqrt(sigma / (1 - torch.where(sigma == 1, sigma_max, sigma))) * noise_level # (batch_size, 1, 1)
     

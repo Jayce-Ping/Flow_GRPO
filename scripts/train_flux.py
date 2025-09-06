@@ -31,7 +31,7 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
 from flow_grpo.rewards.rewards import multi_score
-from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import pipeline_with_logprob
+from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import pipeline_with_logprob, compute_log_prob
 from flow_grpo.diffusers_patch.denoising_step_with_logprob import denoising_sde_step_with_logprob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
 from flow_grpo.ema import EMAModuleWrapper
@@ -57,42 +57,6 @@ def compute_text_embeddings(prompt, text_encoders, tokenizers, max_sequence_leng
         text_ids = text_ids.to(device)
     return prompt_embeds, pooled_prompt_embeds
 
-def calculate_zero_std_ratio(prompts, gathered_rewards):
-    """
-    Calculate the proportion of unique prompts whose reward standard deviation is zero.
-    
-    Args:
-        prompts: List of prompts.
-        gathered_rewards: Dictionary containing rewards, must include the key 'ori_avg'.
-        
-    Returns:
-        zero_std_ratio: Proportion of prompts with zero standard deviation.
-        prompt_std_devs: Mean standard deviation across all unique prompts.
-    """
-    # Convert prompt list to NumPy array
-    prompt_array = np.array(prompts)
-    
-    # Get unique prompts and their group information
-    unique_prompts, inverse_indices, counts = np.unique(
-        prompt_array, 
-        return_inverse=True,
-        return_counts=True
-    )
-    
-    # Group rewards for each prompt
-    grouped_rewards = gathered_rewards['ori_avg'][np.argsort(inverse_indices)]
-    split_indices = np.cumsum(counts)[:-1]
-    reward_groups = np.split(grouped_rewards, split_indices)
-    
-    # Calculate standard deviation for each group
-    prompt_std_devs = np.array([np.std(group) for group in reward_groups])
-    
-    # Calculate the ratio of zero standard deviation
-    zero_std_count = np.count_nonzero(prompt_std_devs == 0)
-    zero_std_ratio = zero_std_count / len(prompt_std_devs)
-    
-    return zero_std_ratio, prompt_std_devs.mean()
-
 def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generator]:
     generators = []
     for batch_pos, prompt in enumerate(prompts):
@@ -103,68 +67,6 @@ def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generat
         gen = torch.Generator().manual_seed(seed)
         generators.append(gen)
     return generators
-
-def compute_log_prob(
-        transformer : FluxTransformer2DModel,
-        pipeline : FluxPipeline,
-        sample : dict[str, torch.Tensor],
-        j : int,
-        config : Namespace
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    latents = sample["latents"][:, j]
-    time_steps = sample["timesteps"][:, j]
-    # Since the time_steps are copied after sampling, each batch of time_step should equal
-    # noise_levels = [pipeline.scheduler.get_noise_level_for_timestep(t) for t in time_steps]
-    noise_level = pipeline.scheduler.get_noise_level_for_timestep(time_steps[0]) # So, all noise levels are equal
-
-    batch_size = latents.shape[0]
-    num_channels_latents = pipeline.transformer.config.in_channels // 4
-    height = config.resolution
-    width = config.resolution
-    device = latents.device
-    dtype = latents.dtype
-
-    if transformer.module.config.guidance_embeds:
-        guidance = torch.tensor([config.sample.guidance_scale], device=device)
-        guidance = guidance.expand(latents.shape[0])
-    else:
-        guidance = None
-
-    latents, image_ids = pipeline.prepare_latents(
-        batch_size,
-        num_channels_latents,
-        height,
-        width,
-        dtype,
-        device,
-        generator=None,
-        latents=latents
-    )
-
-    # Predict the noise residual
-    model_pred = transformer(
-        hidden_states=latents,
-        timestep=time_steps / 1000,
-        guidance=guidance,
-        pooled_projections=sample["pooled_prompt_embeds"],
-        encoder_hidden_states=sample["prompt_embeds"],
-        txt_ids=torch.zeros(sample["prompt_embeds"].shape[1], 3).to(device=device, dtype=dtype),
-        img_ids=image_ids,
-        return_dict=False,
-    )[0]
-    
-    # compute the log prob of next_latents given latents under the current model
-    # Here, use determistic denoising for normal diffusion process.
-    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
-        pipeline.scheduler,
-        model_pred.float(),
-        time_steps,
-        latents.float(),
-        noise_level=noise_level,
-        prev_sample=sample["next_latents"][:, j].float(),
-    )
-
-    return prev_sample, log_prob, prev_sample_mean, std_dev_t
 
 def eval(pipeline : FluxPipeline,
          test_dataloader : DataLoader,
@@ -733,9 +635,6 @@ These two numbers should be equal
         pipeline.transformer.eval()
         train_sampler.set_epoch(epoch)
         train_iter = iter(train_dataloader)
-        # Key: Rebuild the iterator for each external epoch to make set_epoch(epoch) effective and ensure the sampling boundaries of each rank are aligned.
-        # Reason: The __iter__ method of DistributedKRepeatSampler generates a global sequence using seed + self.epoch, and it is only called again when the iterator is rebuilt.
-        # Importance: Avoid misalignment across epoch boundaries to prevent inconsistencies
         samples = []
         prompts = []
         for i in tqdm(
@@ -764,7 +663,7 @@ These two numbers should be equal
             # sample
             if config.sample.same_latent:
                 # Same seed for same prompt
-                generator = create_generator(prompts, base_seed=epoch*10000+i)
+                generator = create_generator(prompts, base_seed=epoch)
             else:
                 # Different initial latent seed
                 generator = None
@@ -785,7 +684,10 @@ These two numbers should be equal
             all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
             all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
 
-            timesteps = pipeline.scheduler.get_window_timesteps().repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
+            timesteps = pipeline.scheduler.get_window_timesteps()
+            noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps]).to(all_latents.device)
+            timesteps = timesteps.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
+            noise_levels = noise_levels.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
@@ -806,6 +708,7 @@ These two numbers should be equal
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
                     "timesteps": timesteps,
+                    "noise_levels": noise_levels,
                     "latents": all_latents[:, :-1],  # each entry is the latent at timestep t - 1 (init latents for 0)
                     "next_latents": all_latents[:, 1:],  # each entry is the latent at timestep t
                     "log_probs": all_log_probs,
@@ -840,8 +743,6 @@ These two numbers should be equal
         #     if isinstance(value, torch.Tensor):
         #         print(key, 'has shape', value.shape)
 
-        samples["rewards"]["ori_avg"] = samples["rewards"]["avg"]
-
         # The purpose of repeating `avg` along the timestep dimension here is to make it easier to introduce timestep-dependent advantages later, such as adding a KL reward.
         # Now the rewards/advanatages is only one-dimensional to save mem.
         # samples["rewards"]["avg"] = samples["rewards"]["avg"].unsqueeze(1).repeat(1, num_train_timesteps)
@@ -870,17 +771,22 @@ These two numbers should be equal
                 print("len(prompts)", len(prompts))
                 print("len unique prompts", len(set(prompts)))
 
-            group_size, trained_prompt_num = stat_tracker.get_stats()
-
-            zero_std_ratio, reward_std_mean = calculate_zero_std_ratio(prompts, gathered_rewards)
+            (
+                avg_group_size,
+                trained_prompt_num,
+                avg_group_std,
+                global_std,
+                zero_std_ratio
+            ) = stat_tracker.get_stats()
 
             if accelerator.is_main_process:
                 logging_platform.log(
                     {
-                        "group_size": group_size,
+                        "avg_group_size": avg_group_size,
                         "trained_prompt_num": trained_prompt_num,
+                        "avg_group_std": avg_group_std,
+                        "global_std": global_std,
                         "zero_std_ratio": zero_std_ratio,
-                        "reward_std_mean": reward_std_mean,
                     },
                     step=global_step,
                 )

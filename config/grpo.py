@@ -12,7 +12,7 @@ spec.loader.exec_module(base)
 
 
 FLUX_MODEL_PATH = '/raid/data_qianh/jcy/hugging/models/FLUX.1-dev'
-# FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
+FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 SD3_MODEL_PATH = "/raid/data_qianh/jcy/hugging/models/stable-diffusion-3.5-medium"
 
 # --------------------------------------------------base------------------------------------------------------------
@@ -379,7 +379,7 @@ def general_ocr_sd3_1gpu():
 def consistency_sd3_2gpu():
     gpu_number = 2
     config = compressibility()
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
 
     # sd3.5 medium
     config.pretrained.model = SD3_MODEL_PATH
@@ -428,7 +428,7 @@ def consistency_sd3_2gpu():
 def consistency_sd3_4gpu():
     gpu_number = 4
     config = compressibility()
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
 
     # sd3.5 medium
     config.pretrained.model = SD3_MODEL_PATH
@@ -475,12 +475,12 @@ def consistency_sd3_4gpu():
 
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
-def test_flux_1gpu():
-    gpu_number = 1
+def test_flux():
+    gpu_number = 2
     config = compressibility()
-    config.logging_platform = "wandb"
+    config.logging_platform = "swanlab"
 
-    config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_all_2by2")
 
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
@@ -488,13 +488,13 @@ def test_flux_1gpu():
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
-    config.sample.num_steps = 2
+    config.sample.num_steps = 3
     config.sample.eval_num_steps = 20
     config.sample.guidance_scale = 3.5
 
     config.resolution = 512
 
-    config.sample.batch_size = 2
+    config.sample.batch_size = 1
     config.sample.num_image_per_prompt = 2
     config.sample.unique_sample_num_per_epoch = 4 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
@@ -517,7 +517,7 @@ def test_flux_1gpu():
     config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
 
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
-    config.test_batch_size = 16
+    config.test_batch_size = 4
 
     config.train.batch_size = config.sample.batch_size
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch//2
@@ -529,14 +529,14 @@ def test_flux_1gpu():
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
-    config.save_freq = 10 # epoch
+    config.save_freq = 0 # epoch
     config.eval_freq = 10
     config.save_dir = 'logs/test_run'
     config.reward_fn = {
         "pickscore": 1.0,
     }
     
-    config.prompt_fn = "general_ocr"
+    config.prompt_fn = "geneval"
 
     config.per_prompt_stat_tracking = True
     return config
@@ -546,7 +546,7 @@ def subfig_clip_flux_2gpu():
     config = compressibility()
     config.logging_platform = "swanlab"
     
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
 
     config.sample.use_sliding_window = True
     config.sample.window_size = 2
@@ -657,7 +657,7 @@ def pickscore_flux_8gpu():
 def consistency_flux_4gpu():
     gpu_number = 4
     config = compressibility()
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
 
     # Sliding Window Scheduler
     config.sample.use_sliding_window = True
@@ -730,7 +730,7 @@ def consistency_flux_4gpu():
 def consistency_clip_flux_4gpu():
     gpu_number = 4
     config = compressibility()
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
 
     # Sliding Window Scheduler
     config.sample.use_sliding_window = True
@@ -803,7 +803,7 @@ def consistency_clip_flux_4gpu():
 def grid_consistency_clip_flux_4gpu():
     gpu_number = 4
     config = compressibility()
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
 
     # Sliding Window Scheduler
     config.sample.use_sliding_window = True

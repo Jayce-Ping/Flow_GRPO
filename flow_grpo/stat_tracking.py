@@ -87,8 +87,11 @@ class PerPromptStatTracker:
     def get_stats(self):
         avg_group_size = sum(len(v) for v in self.stats.values()) / len(self.stats) if self.stats else 0
         history_prompts = len(self.history_prompts)
-        return avg_group_size, history_prompts
-    
+        avg_group_std = np.mean([np.std(v) for v in self.stats.values()]) if self.stats else 0
+        global_std = np.std(np.concatenate(list(self.stats.values()))) if self.stats else 0
+        zero_std_ratio = sum(1 for v in self.stats.values() if np.std(v) < 1e-6) / len(self.stats) if self.stats else 0
+        return avg_group_size, history_prompts, avg_group_std, global_std, zero_std_ratio
+
     def clear(self):
         self.stats = {}
 
