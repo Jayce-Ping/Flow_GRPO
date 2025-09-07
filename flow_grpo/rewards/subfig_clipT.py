@@ -67,7 +67,9 @@ class SubfigClipTScorer(torch.nn.Module):
 
             clip_scores = (image_features @ text_features.T)
             return clip_scores.cpu()
-    
+
+def download_model():
+    scorer = SubfigClipTScorer(device='cpu')        
 
 def main():
     image_paths = ['/root/flux_trained_0001_0003.png', '/root/flux_0001_0003.png', '/root/sd3_0001_0003.png']

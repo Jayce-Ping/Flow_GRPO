@@ -18,6 +18,7 @@ setup(
         "scipy==1.15.2",
         "scikit-learn==1.6.1",
         "scikit-image==0.25.2",
+        "open-clip-torch==3.1.0",
         
         "albumentations==1.4.10",  
         "opencv-python==4.11.0.86",

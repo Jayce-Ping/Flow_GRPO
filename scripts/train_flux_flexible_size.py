@@ -536,6 +536,15 @@ def main(_):
     if not config.project_name:
         config.project_name = 'FlowGRPO-Flux'
 
+    if config.logging_platform == 'wandb':
+        import wandb
+        logging_platform = wandb
+    elif config.logging_platform == 'swanlab':
+        import swanlab
+        logging_platform = swanlab
+    else:
+        raise ValueError(f"Unsupported logging platform: {config.logging_platform}")    
+
     if accelerator.is_main_process:
         # Initialize wandb
         run = set_online_log(config)
