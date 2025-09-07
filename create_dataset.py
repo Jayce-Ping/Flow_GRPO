@@ -53,8 +53,8 @@ def save_split_dataset(
                 f.write(json.dumps(item) + '\n')
 
 def main():
-    data_summary_path = "dataset/T2IS/data_summary.jsonl"
-    output_dir = "dataset/T2IS/train_half"
+    data_summary_path = "dataset/T2IS/data_summary_less_than_5.jsonl"
+    output_dir = "dataset/T2IS/train_half_less_than_5"
 
     with open(data_summary_path, "r") as f:
         data = [json.loads(line) for line in f]

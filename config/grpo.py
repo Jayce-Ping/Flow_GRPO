@@ -800,10 +800,10 @@ def consistency_clip_flux_4gpu():
     return config
 
 
-def grid_consistency_clip_flux_4gpu():
-    gpu_number = 4
+def grid_consistency_clip_flux():
+    gpu_number = 7
     config = compressibility()
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_less_than_5")
 
     # Sliding Window Scheduler
     config.sample.use_sliding_window = True
@@ -821,7 +821,7 @@ def grid_consistency_clip_flux_4gpu():
 
     config.sample.batch_size = 1
     config.sample.num_image_per_prompt = 24
-    config.sample.unique_sample_num_per_epoch = 30 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
