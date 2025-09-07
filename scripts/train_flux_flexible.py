@@ -116,6 +116,7 @@ def compute_log_prob(
 
     # OOM happens with the following line, weird.TODO: fix it.
     print(f"Image shape: ({height, width}) has latent shape {latents.shape} - image_seq_len = {image_seq_len}")
+    print(f"[Device {device} before]", torch.cuda.memory_summary(device=device, abbreviated=False))
     sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps, dtype=np.float32)
     mu = calculate_shift(
         image_seq_len,
@@ -131,7 +132,9 @@ def compute_log_prob(
         sigmas=sigmas,
         mu=mu,
     )
+    print(f"[Device {device} after:]", torch.cuda.memory_summary(device=device, abbreviated=False))
 
+    torch.cuda.empty_cache()
     # Predict the noise residual
     model_pred = transformer(
         hidden_states=latents,

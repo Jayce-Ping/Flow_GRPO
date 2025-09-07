@@ -863,8 +863,8 @@ def grid_consistency_clip_flux():
     config.save_dir = '/scratch/users/astar/ares/cp3jia/checkpoints/flow-grpo/grid-consistency-subclip/flux-7gpu-train-half-less-than-5'
     config.reward_fn = {
         "grid_layout": 1.0,
-        "consistency_score": 0.3,
-        "subfig_clipT" : 0.7
+        "consistency_score": 0.2,
+        "subfig_clipT" : 0.8
     }
     def agg_fn(grid_layout, consistency_score, subfig_clipT):
         return grid_layout * (consistency_score + subfig_clipT)
