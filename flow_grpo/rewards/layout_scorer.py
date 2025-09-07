@@ -83,7 +83,7 @@ class GridLayoutScorer:
                 completion = await self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
-                    temperature=1e-6, # Low temperature may cause issue here. Still use log_prob
+                    temperature=0.1, # Low temperature may cause issue here.
                     max_completion_tokens=1,
                     logprobs=True,
                     top_logprobs=top_logprobs,

@@ -6,5 +6,5 @@ accelerate launch \
     --config_file scripts/accelerate_configs/deepspeed_zero2.yaml \
     --num_processes=7 \
     --main_process_port 29501 \
-    scripts/train_flux.py \
+    scripts/train_flux_flexible_size.py \
     --config config/grpo.py:grid_consistency_clip_flux

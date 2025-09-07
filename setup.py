@@ -25,6 +25,7 @@ setup(
         
         "tqdm==4.67.1",
         "wandb==0.18.7",
+        "swanlab==0.6.8",
         "pydantic==2.10.6",  
         "requests==2.32.3",
         "matplotlib==3.10.0",
