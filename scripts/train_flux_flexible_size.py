@@ -103,9 +103,6 @@ def eval(pipeline : FluxPipeline,
             position=0,
         ):
 
-        if len(log_data['prompts']) > 2:
-            break
-
         prompts, prompt_metadata = test_batch
         prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
             prompts,
