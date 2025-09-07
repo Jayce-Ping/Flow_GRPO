@@ -801,9 +801,9 @@ def consistency_clip_flux_4gpu():
 
 
 def grid_consistency_clip_flux():
-    gpu_number = 7
+    gpu_number = 4
     config = compressibility()
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_less_than_5")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
 
     # Sliding Window Scheduler
     config.sample.use_sliding_window = True
@@ -820,8 +820,8 @@ def grid_consistency_clip_flux():
     config.max_sequence_length = 512
 
     config.sample.batch_size = 1
-    config.sample.num_image_per_prompt = 21
-    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch
+    config.sample.num_image_per_prompt = 1
+    config.sample.unique_sample_num_per_epoch = 8 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -857,8 +857,8 @@ def grid_consistency_clip_flux():
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.noise_level = 0.9
-    config.save_freq = 5 # epoch
-    config.eval_freq = 5 # 0 for no eval applied
+    config.save_freq = 0 # epoch
+    config.eval_freq = 0 # 0 for no eval applied
     # config.save_dir = 'logs/grid-consistency-subclip/flux-7gpu-train-half-less-than-5'
     config.save_dir = '/scratch/users/astar/ares/cp3jia/checkpoints/flow-grpo/grid-consistency-subclip/flux-7gpu-train-half-less-than-5'
     config.reward_fn = {

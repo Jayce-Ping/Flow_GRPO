@@ -23,7 +23,7 @@ def upload_checkpoint_dir(folder_path, path_in_repo, repo_id, commit_message="Up
 
 if __name__ == "__main__":
     label = ""
-    folder_name = 'consistency-subclip'
+    folder_name = 'grid-consistency-subclip'
     folder_path = os.path.join("logs", folder_name)
     path_in_repo = folder_name
     repo_id = "Jayce-Ping/Flux-GRPO"

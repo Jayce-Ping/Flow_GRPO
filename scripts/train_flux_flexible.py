@@ -23,16 +23,21 @@ from collections import defaultdict
 from concurrent import futures
 from diffusers import FluxPipeline, FluxTransformer2DModel
 from diffusers.utils.torch_utils import is_compiled_module
+from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
 from functools import partial
 from ml_collections import config_flags
 from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftModel
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
-import wandb
-import swanlab
+from transformers.integrations.deepspeed import (
+    is_deepspeed_zero3_enabled,
+    set_hf_deepspeed_config,
+    unset_hf_deepspeed_config,
+)
 
 from flow_grpo.rewards.rewards import multi_score
-from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import pipeline_with_logprob, compute_log_prob
+from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import calculate_shift, pipeline_with_logprob
+from flow_grpo.diffusers_patch.denoising_step_with_logprob import denoising_sde_step_with_logprob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
@@ -68,6 +73,89 @@ def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generat
         generators.append(gen)
     return generators
 
+
+def compute_log_prob(
+        transformer : FluxTransformer2DModel,
+        pipeline : FluxPipeline,
+        sample : dict[str, torch.Tensor],
+        j : int,
+        config : Namespace
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    latents = sample["latents"][:, j]
+    num_inference_steps = config.sample.num_steps
+
+    batch_size = latents.shape[0]
+    image_seq_len = latents.shape[1]
+
+    num_channels_latents = pipeline.transformer.config.in_channels // 4
+    height = sample.get("height", config.resolution)
+    width = sample.get("width", config.resolution)
+    device = latents.device
+    dtype = latents.dtype
+
+    noise_levels = sample["noise_levels"][:, j]
+
+    if transformer.module.config.guidance_embeds:
+        guidance = torch.tensor([config.sample.guidance_scale], device=device)
+        guidance = guidance.expand(latents.shape[0])
+    else:
+        guidance = None
+
+    latents, image_ids = pipeline.prepare_latents(
+        batch_size,
+        num_channels_latents,
+        height,
+        width,
+        dtype,
+        device,
+        generator=None,
+        latents=latents
+    )
+
+    time_steps = sample["timesteps"][:, j]
+
+    # OOM happens with the following line, weird.TODO: fix it.
+    print(f"Image shape: ({height, width}) has latent shape {latents.shape} - image_seq_len = {image_seq_len}")
+    sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps, dtype=np.float32)
+    mu = calculate_shift(
+        image_seq_len,
+        pipeline.scheduler.config.get("base_image_seq_len", 256),
+        pipeline.scheduler.config.get("max_image_seq_len", 4096),
+        pipeline.scheduler.config.get("base_shift", 0.5),
+        pipeline.scheduler.config.get("max_shift", 1.15),
+    )
+    time_steps, num_inference_steps = retrieve_timesteps(
+        pipeline.scheduler,
+        num_inference_steps,
+        device,
+        sigmas=sigmas,
+        mu=mu,
+    )
+
+    # Predict the noise residual
+    model_pred = transformer(
+        hidden_states=latents,
+        timestep=time_steps / 1000,
+        guidance=guidance,
+        pooled_projections=sample["pooled_prompt_embeds"],
+        encoder_hidden_states=sample["prompt_embeds"],
+        txt_ids=torch.zeros(sample["prompt_embeds"].shape[1], 3).to(device=device, dtype=dtype),
+        img_ids=image_ids,
+        return_dict=False,
+    )[0]
+    
+    # compute the log prob of next_latents given latents under the current model
+    # Here, use determistic denoising for normal diffusion process.
+    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
+        scheduler=pipeline.scheduler,
+        model_output=model_pred.float(),
+        timestep=time_steps,
+        sample=latents.float(),
+        noise_level=noise_levels,
+        prev_sample=sample["next_latents"][:, j].float(),
+    )
+
+    return prev_sample, log_prob, prev_sample_mean, std_dev_t
 
 @torch.no_grad()
 def eval(pipeline : FluxPipeline,
@@ -226,7 +314,7 @@ def eval(pipeline : FluxPipeline,
     log_image_with_temp_dir = True
     if log_image_with_temp_dir:
         # Approach 1: by saving them in a temp dir
-        temp_dir = './logs/temp_eval_images'
+        temp_dir = os.path.join(config.save_dir, 'temp_eval_images')
         os.makedirs(temp_dir, exist_ok=True)
         for i,img in enumerate(log_data['images']):
             img = img.cpu().numpy()
@@ -406,10 +494,11 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
 
     return pipeline, text_encoders, tokenizers
 
-def setup_wandb_log(config):
+def setup_wandb_log(accelerator, config):
     """
         Initialize wandb training log
     """
+    import wandb
     if config.resume_from_id is not None:
         project_name = config.project_name
         run_id = config.resume_from_id
@@ -427,30 +516,36 @@ def setup_wandb_log(config):
             config.resume_from_step = 0
             config.resume_from_epoch = 0
 
-        run = wandb.init(
-            project=config.project_name,
-            config=config.to_dict(),
-            id=run_id,
-            resume='must'
-        )
+        if accelerator.is_main_process:
+            run = wandb.init(
+                project=config.project_name,
+                config=config.to_dict(),
+                id=run_id,
+                resume='must'
+            )
+        else:
+            run = None
     else:
         unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
         if not config.run_name:
             config.run_name = unique_id
         else:
             config.run_name += "_" + unique_id
+        if accelerator.is_main_process:
+            run = wandb.init(
+                project=config.project_name,
+                config=config.to_dict()
+            )
+        else:
+            run = None
 
-        run = wandb.init(
-            project=config.project_name,
-            config=config.to_dict()
-        )
+    return run, wandb
 
-    return run
-
-def setup_swanlab_log(config):
+def setup_swanlab_log(accelerator, config):
     """
         Initialize swanlab training log
     """
+    import swanlab
     if config.resume_from_id:
         project_name = config.project_name
         run_id = config.resume_from_id
@@ -463,13 +558,15 @@ def setup_swanlab_log(config):
             config.resume_from_epoch = run_summary.data['epoch']['max']['value']
         logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
 
-        run = swanlab.init(
-            project=project_name,
-            config=config.to_dict(),
-            resume=True,
-            id=run_id
-        )
-
+        if accelerator.is_main_process:
+            run = swanlab.init(
+                project=project_name,
+                config=config.to_dict(),
+                resume=True,
+                id=run_id
+            )
+        else:
+            run = None
     else:
         unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
         if not config.run_name:
@@ -477,28 +574,28 @@ def setup_swanlab_log(config):
         else:
             config.run_name += "_" + unique_id
 
-        run = swanlab.init(
-            project=config.project_name,
-            config=config.to_dict()
-        )
+        if accelerator.is_main_process:
+            run = swanlab.init(
+                project=config.project_name,
+                config=config.to_dict()
+            )
+        else:
+            run = None
 
-    return run
+    return run, swanlab
 
-def set_online_log(config):
+def set_online_log(accelerator, config):
     """
         Initialize logging with platform
     """
     if config.logging_platform == 'wandb':
-        import wandb
-        run = setup_wandb_log(config)
+        run, logging_platform = setup_wandb_log(accelerator, config)
     elif config.logging_platform == 'swanlab':
-        import swanlab
-        run = setup_swanlab_log(config)
+        run, logging_platform = setup_swanlab_log(accelerator, config)
     else:
         raise ValueError(f"Unsupported logging platform: {config.logging_platform}")
     
-    return run
-
+    return run, logging_platform
 
 def main(_):
     # basic Accelerate and logging setup
@@ -533,18 +630,7 @@ def main(_):
     if not config.project_name:
         config.project_name = 'FlowGRPO-Flux'
 
-    if config.logging_platform == 'wandb':
-        import wandb
-        logging_platform = wandb
-    elif config.logging_platform == 'swanlab':
-        import swanlab
-        logging_platform = swanlab
-    else:
-        raise ValueError(f"Unsupported logging platform: {config.logging_platform}")    
-
-    if accelerator.is_main_process:
-        # Initialize wandb
-        run = set_online_log(config)
+    run, logging_platform = set_online_log(accelerator, config)
 
     def safe_exit(sig, frame):
         print("Received signal to terminate.")
@@ -591,13 +677,7 @@ def main(_):
         eps=config.train.adam_epsilon,
     )
 
-    # ---------------------------------------Reward---------------------------------------
-    # prepare prompt and reward fn
-    if accelerator.is_main_process:
-        print(f"Reward dict: {config.reward_fn}")
-    reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
-    eval_reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
-
+    # ---------------------------------------Data---------------------------------------
     if config.prompt_fn == "general_ocr":
         train_dataset = TextPromptDataset(config.dataset, 'train')
         test_dataset = TextPromptDataset(config.dataset, 'test')
@@ -654,14 +734,27 @@ These two numbers should be equal
     autocast = contextlib.nullcontext if config.use_lora else accelerator.autocast
     # autocast = accelerator.autocast
 
-    # Prepare everything with our `accelerator`.
     # for deepspeed zero
     if accelerator.state.deepspeed_plugin:
         accelerator.state.deepspeed_plugin.deepspeed_config['train_micro_batch_size_per_gpu'] = config.sample.batch_size
+
+    if is_deepspeed_zero3_enabled():
+        # Using deepspeed zero3 will cause the model parameter `weight.shape` to be empty.
+        unset_hf_deepspeed_config()
+        set_hf_deepspeed_config(accelerator.state.deepspeed_plugin.dschf)
+
+    # Prepare everything with our `accelerator`.
     transformer, optimizer, test_dataloader = accelerator.prepare(transformer, optimizer, test_dataloader)
     # executor to perform callbacks asynchronously. this is beneficial for the llava callbacks which makes a request to a
     # remote server running llava inference.
     executor = futures.ThreadPoolExecutor(max_workers=8)
+
+    # -----------------------------------------Reward fn-----------------------------------------
+    # prepare prompt and reward fn
+    if accelerator.is_main_process:
+        print(f"Reward dict: {config.reward_fn}")
+    reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
+    eval_reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
 
     # ------------------------------------------- Train!------------------------------------------
     samples_per_epoch = (
@@ -730,6 +823,7 @@ These two numbers should be equal
 
         samples = []
         prompts = []
+        print(f"=== Starting epoch {epoch} with {train_sampler.num_batches_per_epoch} batches ===")
         for i in tqdm(
             range(train_sampler.num_batches_per_epoch),
             desc=f"Epoch {epoch}: sampling",
@@ -742,6 +836,7 @@ These two numbers should be equal
             # width = prompt_metadata[0].get('width', config.resolution)
             height = prompt_metadata[0]['height']
             width = prompt_metadata[0]['width']
+            print(f"[Rank {accelerator.process_index}]: Prompt image size: {height}x{width}")
 
             prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
                 prompts,
@@ -904,8 +999,6 @@ These two numbers should be equal
             del sample["rewards"]
             del sample["prompt_ids"]
         
-        torch.cuda.empty_cache()
-
         total_batch_size = len(samples)
 
         #################### TRAINING ####################
