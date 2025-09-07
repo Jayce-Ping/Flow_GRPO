@@ -13,8 +13,7 @@ import time
 import torch
 import tqdm
 from typing import List, Tuple, Any, Optional
-import wandb
-import swanlab
+import shutil
 
 from absl import app, flags
 from accelerate import Accelerator
@@ -29,6 +28,8 @@ from ml_collections import config_flags
 from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftModel
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
+import wandb
+import swanlab
 
 from flow_grpo.rewards.rewards import multi_score
 from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import pipeline_with_logprob, compute_log_prob
@@ -69,6 +70,7 @@ def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generat
     return generators
 
 
+@torch.no_grad()
 def eval(pipeline : FluxPipeline,
          test_dataloader : DataLoader,
          text_encoders,
@@ -87,6 +89,9 @@ def eval(pipeline : FluxPipeline,
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
 
+    # Empty cache to avoid OOM
+    torch.cuda.empty_cache()
+    
     log_data = {
         'images': [],
         'prompts': [],
@@ -130,18 +135,17 @@ def eval(pipeline : FluxPipeline,
                 height = heights[i]
                 width = widths[i]
                 with autocast():
-                    with torch.no_grad():
-                        imgs, _, _, _, _ = pipeline_with_logprob(
-                            pipeline,
-                            prompt_embeds=prompt_embed,
-                            pooled_prompt_embeds=pooled_prompt_embed,
-                            num_inference_steps=config.sample.eval_num_steps,
-                            guidance_scale=config.sample.guidance_scale,
-                            output_type="pt",
-                            height=height,
-                            width=width,
-                            noise_level=0,
-                        )
+                    imgs, _, _, _, _ = pipeline_with_logprob(
+                        pipeline,
+                        prompt_embeds=prompt_embed,
+                        pooled_prompt_embeds=pooled_prompt_embed,
+                        num_inference_steps=config.sample.eval_num_steps,
+                        guidance_scale=config.sample.guidance_scale,
+                        output_type="pt",
+                        height=height,
+                        width=width,
+                        noise_level=0,
+                    )
 
                 future = executor.submit(reward_fn, imgs, prompt, prompt_meta)
                 # yield to to make sure reward computation starts
@@ -156,18 +160,17 @@ def eval(pipeline : FluxPipeline,
         else:
             # Batch inference if all sizes are the same
             with autocast():
-                with torch.no_grad():
-                    images, _, _, _, _ = pipeline_with_logprob(
-                        pipeline,
-                        prompt_embeds=prompt_embeds,
-                        pooled_prompt_embeds=pooled_prompt_embeds,
-                        num_inference_steps=config.sample.eval_num_steps,
-                        guidance_scale=config.sample.guidance_scale,
-                        output_type="pt",
-                        height=heights[0],
-                        width=widths[0],
-                        noise_level=0,
-                    )
+                images, _, _, _, _ = pipeline_with_logprob(
+                    pipeline,
+                    prompt_embeds=prompt_embeds,
+                    pooled_prompt_embeds=pooled_prompt_embeds,
+                    num_inference_steps=config.sample.eval_num_steps,
+                    guidance_scale=config.sample.guidance_scale,
+                    output_type="pt",
+                    height=heights[0],
+                    width=widths[0],
+                    noise_level=0,
+                )
         
             future = executor.submit(reward_fn, images, prompts, prompt_metadata)
             # yield to to make sure reward computation starts
@@ -202,40 +205,15 @@ def eval(pipeline : FluxPipeline,
             step=global_step
         )
 
-    # 2. Gather all images
-    # group all images by image size for tensor communication
-    # Record image size sequence to recover the original order after gathering
-    image_shape_sequence = torch.as_tensor(
-        [img.shape for img in log_data['images']],
-        device=accelerator.device,
-        dtype=torch.long
-    )
-    image_shape_sequence = accelerator.gather(image_shape_sequence).cpu().numpy()
-    all_unique_shapes = [tuple(int(x) for x in shape) for shape in np.unique(image_shape_sequence, axis=0)]
+    # gathered_rewards = {'r1': [1,2,3], 'r2': [4,5,6]}
+    # ->
+    # gathered_rewards = [{'r1':1, 'r2':4}, {'r1':2, 'r2':5}, {'r1':3, 'r2':6}]
+    gathered_rewards = [
+        dict(zip(gathered_rewards.keys(), value))
+        for value in zip(*gathered_rewards.values())
+    ]
 
-    # Convert a np.ndarray to a tuple of int for dictionary key
-    # Add an empty tensor for size groups with no images on this device
-    grouped_images = {
-        shape: [torch.empty(shape, device=accelerator.device)] 
-        for shape in all_unique_shapes
-    }
-
-    for img in log_data['images']:
-        shape = tuple(int(x) for x in img.shape)
-        grouped_images[shape].append(img)
-
-    # Convert list of images to a single tensor for each size group for communication
-    # then convert tensor back to array after gathering
-    # finally, convert the array to a list of image arrays
-    grouped_images = {
-        k : [img for img in accelerator.gather(torch.stack(v, dim=0)).cpu().numpy()]
-        for k, v in grouped_images.items()
-    }
-
-    gathered_images = [grouped_images[tuple(int(x) for x in shape)].pop(0) for shape in image_shape_sequence]
-
-
-    # 3. Encode prompt to tensors for gpu communication
+    # 2. Encode prompt to tensors for gpu communication
     prompt_ids = tokenizers[1](
         log_data['prompts'],
         padding="max_length",
@@ -248,47 +226,79 @@ def eval(pipeline : FluxPipeline,
         gathered_prompt_ids, skip_special_tokens=True
     )
 
-    # gathered_rewards = {'r1': [1,2,3], 'r2': [4,5,6]}
-    # ->
-    # gathered_rewards = [{'r1':1, 'r2':4}, {'r1':2, 'r2':5}, {'r1':3, 'r2':6}]
-    gathered_rewards = [
-        dict(zip(gathered_rewards.keys(), value))
-        for value in zip(*gathered_rewards.values())
-    ]
+    # 3. Gather all images
+    log_image_with_temp_dir = True
+    if log_image_with_temp_dir:
+        # Approach 1: by saving them in a temp dir
+        temp_dir = './logs/temp_eval_images'
+        os.makedirs(temp_dir, exist_ok=True)
+        for i,img in enumerate(log_data['images']):
+            img = img.cpu().numpy()
+            # Save image to temp dir
+            img_id = f"{accelerator.process_index}_{i}.jpg"
+            pil = Image.fromarray((img.transpose(1, 2, 0) * 255).astype(np.uint8))
+            pil.save(os.path.join(temp_dir, img_id))
+        
+        accelerator.wait_for_everyone()
+        gathered_images = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir)]
+        # NOTE: this approach provides gathered_images as a list of file paths
+    else:
+        # Approach 2: flattern all images into a sequence and pad to the max size
+        # this approach is simple but may waste some communication bandwidth and memory
+        # The following approach may cause CUDA OOM, keep the temp dir approach as default
+        image_shape_sequence = torch.as_tensor(
+            [img.shape for img in log_data['images']],
+            device=accelerator.device,
+            dtype=torch.long
+        )
+        image_shape_sequence = accelerator.gather(image_shape_sequence).cpu().numpy()
+        max_shape = tuple(image_shape_sequence.max(axis=0))
+        # Pad images to max-shape
+        gathered_images = torch.stack([
+            torch.nn.functional.pad(
+                img,
+                (0, max_shape[2] - img.shape[2], 0, max_shape[1] - img.shape[1]),
+                mode='constant',
+                value=0
+            ) for img in log_data['images']
+        ], dim=0)
+        gathered_images = accelerator.gather(gathered_images).cpu().numpy()
+        gathered_images = [
+            img[:shape[1], :shape[2], :] for img, shape in zip(gathered_images, image_shape_sequence)
+        ]
+        gathered_images = [Image.fromarray((img.transpose(1, 2, 0) * 255).astype(np.uint8)) for img in gathered_images]
+        # NOTE: this approach provides gathered_images as a list of PIL images
 
     if accelerator.is_main_process:
          # Use a fixed generator to log same indices everytime for comparison
         gen = torch.Generator().manual_seed(0)
         # Sample `log_sample_num` data for logging, 'None' for all data.
         if log_sample_num is None:
-            sample_indices = list(range(len(gathered_images)))
+            sample_indices = list(range(len(gathered_prompts)))
         else:
-            sample_indices = torch.randperm(len(gathered_images), generator=gen)[:log_sample_num]
-        
+            sample_indices = torch.randperm(len(gathered_prompts), generator=gen)[:log_sample_num]
+
         sampled_images = [gathered_images[i] for i in sample_indices]
         sampled_prompts = [gathered_prompts[i] for i in sample_indices]
         sampled_rewards = [gathered_rewards[i] for i in sample_indices]
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            for idx, image in enumerate(sampled_images):
-                pil = Image.fromarray(
-                    (image.transpose(1, 2, 0) * 255).astype(np.uint8)
-                )
-                pil = pil.resize((config.resolution, config.resolution))
-                pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
+        logging_platform.log(
+            {
+                "eval_images": [
+                    logging_platform.Image(
+                        image,
+                        caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
+                    )
+                    for idx, (image, prompt, reward) in enumerate(zip(sampled_images, sampled_prompts, sampled_rewards))
+                ]
+            },
+            step=global_step,
+        )
+        shutil.rmtree(temp_dir)
 
-            logging_platform.log(
-                {
-                    "eval_images": [
-                        logging_platform.Image(
-                            os.path.join(tmpdir, f"{idx}.jpg"),
-                            caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt:.200}",
-                        )
-                        for idx, (prompt, reward) in enumerate(zip(sampled_prompts, sampled_rewards))
-                    ]
-                },
-                step=global_step,
-            )
+    # Empty cache to avoid OOM
+    torch.cuda.empty_cache()
+
     if config.train.ema:
         ema.copy_temp_to(transformer_trainable_parameters)
 
