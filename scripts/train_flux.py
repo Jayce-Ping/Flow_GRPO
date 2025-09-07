@@ -68,6 +68,7 @@ def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generat
         generators.append(gen)
     return generators
 
+@torch.no_grad()
 def eval(pipeline : FluxPipeline,
          test_dataloader : DataLoader,
          text_encoders,
@@ -106,18 +107,17 @@ def eval(pipeline : FluxPipeline,
             device=accelerator.device
         )
         with autocast():
-            with torch.no_grad():
-                images, _, _, _, _ = pipeline_with_logprob(
-                    pipeline,
-                    prompt_embeds=prompt_embeds,
-                    pooled_prompt_embeds=pooled_prompt_embeds,
-                    num_inference_steps=config.sample.eval_num_steps,
-                    guidance_scale=config.sample.guidance_scale,
-                    output_type="pt",
-                    height=config.resolution,
-                    width=config.resolution, 
-                    noise_level=0,
-                )
+            images, _, _, _, _ = pipeline_with_logprob(
+                pipeline,
+                prompt_embeds=prompt_embeds,
+                pooled_prompt_embeds=pooled_prompt_embeds,
+                num_inference_steps=config.sample.eval_num_steps,
+                guidance_scale=config.sample.guidance_scale,
+                output_type="pt",
+                height=config.resolution,
+                width=config.resolution, 
+                noise_level=0,
+            )
         future = executor.submit(reward_fn, images, prompts, prompt_metadata)
         # yield to to make sure reward computation starts
         time.sleep(0)
