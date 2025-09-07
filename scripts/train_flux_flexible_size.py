@@ -235,12 +235,13 @@ def eval(pipeline : FluxPipeline,
         for i,img in enumerate(log_data['images']):
             img = img.cpu().numpy()
             # Save image to temp dir
-            img_id = f"{accelerator.process_index:02d}_{i:08d}.jpg"
+            img_id = f"{accelerator.process_index * len(log_data['images']) + i}.jpg"
             pil = Image.fromarray((img.transpose(1, 2, 0) * 255).astype(np.uint8))
             pil.save(os.path.join(temp_dir, img_id))
         
         accelerator.wait_for_everyone()
-        gathered_images = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir)]
+        # The order of images here should be guaranteed by the name of images
+        gathered_images = [os.path.join(temp_dir, f) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
         # NOTE: this approach provides gathered_images as a list of file paths
     else:
         # Approach 2: flattern all images into a sequence and pad to the max size
