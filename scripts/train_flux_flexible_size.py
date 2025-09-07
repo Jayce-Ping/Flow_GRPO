@@ -235,7 +235,7 @@ def eval(pipeline : FluxPipeline,
         for i,img in enumerate(log_data['images']):
             img = img.cpu().numpy()
             # Save image to temp dir
-            img_id = f"{accelerator.process_index}_{i}.jpg"
+            img_id = f"{accelerator.process_index:02d}_{i:08d}.jpg"
             pil = Image.fromarray((img.transpose(1, 2, 0) * 255).astype(np.uint8))
             pil.save(os.path.join(temp_dir, img_id))
         
@@ -294,7 +294,8 @@ def eval(pipeline : FluxPipeline,
             },
             step=global_step,
         )
-        shutil.rmtree(temp_dir)
+        if log_image_with_temp_dir:
+            shutil.rmtree(temp_dir)
 
     # Empty cache to avoid OOM
     torch.cuda.empty_cache()
@@ -901,6 +902,8 @@ These two numbers should be equal
         for sample in samples:
             del sample["rewards"]
             del sample["prompt_ids"]
+        
+        torch.cuda.empty_cache()
 
         total_batch_size = len(samples)
 
@@ -909,11 +912,6 @@ These two numbers should be equal
             # shuffle samples along batch dimension
             perm = torch.randperm(total_batch_size, device=accelerator.device)
             samples = [samples[i] for i in perm]
-
-            all_unique_heights = list(set([sample["height"] for sample in samples]))
-            all_unique_widths = list(set([sample["width"] for sample in samples]))
-            if accelerator.is_local_main_process:
-                print(f"Unique heights: {all_unique_heights}, Unique widths: {all_unique_widths}")
 
             # train
             pipeline.transformer.train()
