@@ -6,13 +6,13 @@ from typing import Optional, Union
 import torch
 
 from diffusers.utils.torch_utils import randn_tensor
-# from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
-from ..scheduler import FlowMatchSlidingWindowScheduler
+from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
+# from ..scheduler import FlowMatchSlidingWindowScheduler
 
 def denoising_sde_step_with_logprob(
-    self: FlowMatchSlidingWindowScheduler,
+    scheduler: FlowMatchEulerDiscreteScheduler,
     model_output: torch.FloatTensor,
-    timestep: Union[list[float], torch.FloatTensor],
+    timestep: Union[float, list[float], torch.FloatTensor],
     sample: torch.FloatTensor,
     noise_level: Union[int, float, list[float], torch.FloatTensor] = 0.7,
     prev_sample: Optional[torch.FloatTensor] = None,
@@ -25,7 +25,7 @@ def denoising_sde_step_with_logprob(
     Args:
         model_output (`torch.FloatTensor`):
             The direct output from learned flow model.
-        timestep (`float` | `torch.FloatTensor`):
+        timestep (`float` | `list[float]` | `torch.FloatTensor`):
             The current discrete timestep(s) in the diffusion chain, with batch dimension.
         sample (`torch.FloatTensor`):
             A current instance of a sample created by the diffusion process.
@@ -42,13 +42,17 @@ def denoising_sde_step_with_logprob(
     if prev_sample is not None:
         prev_sample = prev_sample.float()
 
-    step_index = [self.index_for_timestep(t) for t in timestep]
+    if isinstance(timestep, float) or isinstance(timestep, int):
+        # Convert single value to a tensor with shape (batch_size,)
+        timestep = [timestep] * sample.shape[0]
+
+    step_index = [scheduler.index_for_timestep(t) for t in timestep]
     prev_step_index = [step + 1 for step in step_index]
     # sigmas is a decreasing sequence from 1 to 0, sigma=1 means pure noise, sigma=0 means pure data
     # sigma here has shape (batch_size, 1, 1)
-    sigma = self.sigmas[step_index].view(-1, *([1] * (len(sample.shape) - 1)))
-    sigma_prev = self.sigmas[prev_step_index].view(-1, *([1] * (len(sample.shape) - 1)))
-    sigma_max = self.sigmas[1].item()
+    sigma = scheduler.sigmas[step_index].view(-1, *([1] * (len(sample.shape) - 1)))
+    sigma_prev = scheduler.sigmas[prev_step_index].view(-1, *([1] * (len(sample.shape) - 1)))
+    sigma_max = scheduler.sigmas[1].item()
     dt = sigma_prev - sigma # dt is negative, (batch_size, 1, 1)
 
     # Convert noise_level to a tensor with shape (batch_size, 1, 1)

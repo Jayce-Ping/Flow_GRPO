@@ -5,6 +5,7 @@ import torch
 import numpy as np
 from diffusers import FluxPipeline, FluxTransformer2DModel
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
+from .denoising_step_with_logprob import denoising_sde_step_with_logprob
 
 def calculate_shift(
     image_seq_len,
@@ -88,10 +89,11 @@ def compute_log_prob(
     
     # compute the log prob of next_latents given latents under the current model
     # Here, use determistic denoising for normal diffusion process.
-    prev_sample, log_prob, prev_sample_mean, std_dev_t = pipeline.scheduler.step(
+    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
+        scheduler=pipeline.scheduler,
         model_output=model_pred.float(),
-        sample=latents.float(),
         timestep=time_steps,
+        sample=latents.float(),
         noise_level=noise_levels,
         prev_sample=sample["next_latents"][:, j].float(),
     )
@@ -251,10 +253,11 @@ def pipeline_with_logprob(
             noise_pred = noise_pred.to(prompt_embeds.dtype)
             latents_dtype = latents.dtype
 
-            latents, log_prob, prev_latents_mean, std_dev_t = pipeline.scheduler.step(
+            latents, log_prob, prev_latents_mean, std_dev_t = denoising_sde_step_with_logprob(
+                scheduler=pipeline.scheduler,
                 model_output=noise_pred.float(),
-                sample=latents.float(),
                 timestep=t.unsqueeze(0).repeat(latents.shape[0]),
+                sample=latents.float(),
                 noise_level=current_noise_level,
                 prev_sample=None,
             )

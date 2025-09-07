@@ -160,10 +160,10 @@ def pipeline_with_logprob(
             latents_dtype = latents.dtype
 
             latents, log_prob, prev_latents_mean, std_dev_t = denoising_sde_step_with_logprob(
-                pipeline.scheduler,
-                noise_pred.float(),
-                t.unsqueeze(0),
-                latents.float(),
+                scheduler=pipeline.scheduler,
+                model_output=noise_pred.float(),
+                timestep=t.unsqueeze(0),
+                sample=latents.float(),
                 noise_level=current_noise_level,
             )
             if latents.dtype != latents_dtype:
