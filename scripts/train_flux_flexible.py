@@ -179,7 +179,7 @@ def eval(pipeline : FluxPipeline,
             rewards, reward_metadata = future.result()
         
         # -------------------------------Collect log data--------------------------------
-        log_data['images'].extend(images)
+        log_data['images'].extend([img.cpu().numpy() for img in images])
         log_data['prompts'].extend(prompts)
         for key, value in rewards.items():
             if key not in log_data['rewards']:
@@ -233,7 +233,6 @@ def eval(pipeline : FluxPipeline,
         temp_dir = os.path.join(config.save_dir, 'temp_eval_images')
         os.makedirs(temp_dir, exist_ok=True)
         for i,img in enumerate(log_data['images']):
-            img = img.cpu().numpy()
             # Save image to temp dir
             img_id = f"{accelerator.process_index * len(log_data['images']) + i}.jpg"
             pil = Image.fromarray((img.transpose(1, 2, 0) * 255).astype(np.uint8))
@@ -774,7 +773,7 @@ These two numbers should be equal
                 generator = None
             with autocast():
                 with torch.no_grad():
-                    images, all_latents, image_ids, text_ids, all_log_probs = pipeline_with_logprob(
+                    images, all_latents, _, _, all_log_probs = pipeline_with_logprob(
                         pipeline,
                         prompt_embeds=prompt_embeds,
                         pooled_prompt_embeds=pooled_prompt_embeds,
@@ -789,14 +788,12 @@ These two numbers should be equal
             all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
             all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
 
-            timesteps = pipeline.scheduler.get_window_timesteps()
-            sigmas = pipeline.scheduler.get_window_sigmas()
-            prev_sigmas = pipeline.scheduler.get_window_sigmas(left_boundary=pipeline.scheduler.left_boundary + 1)
-            noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps]).to(all_latents.device)
-            timesteps = timesteps.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
-            noise_levels = noise_levels.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
-            sigmas = torch.as_tensor(sigmas).to(all_latents.device).repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
-            prev_sigmas = torch.as_tensor(prev_sigmas).to(all_latents.device).repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
+            timesteps = pipeline.scheduler.get_window_timesteps().unsqueeze(0)  # (1, window_size)
+            sigmas = pipeline.scheduler.sigmas[pipeline.left_boundary:pipeline.window_size + 1].unsqueeze(0)  # (1, window_size + 1)
+            noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps]).unsqueeze(0)  # (1, window_size)
+            # timesteps = timesteps.expand(config.sample.batch_size, 1)  # (batch_size, window_size)
+            noise_levels = noise_levels.expand(config.sample.batch_size, 1)  # (batch_size, window_size)
+            sigmas = sigmas.expand(config.sample.batch_size, 1)  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
@@ -818,9 +815,8 @@ These two numbers should be equal
                     "prompt_ids": prompt_ids,
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
-                    'timesteps': timesteps,
-                    'sigmas': sigmas,
-                    'prev_sigmas': prev_sigmas,
+                    'sigmas': sigmas[:, :-1], # each entry is the sigma at timestep t - 1 
+                    'next_sigmas': sigmas[:, 1:], # each entry is the sigma at timestep t
                     "noise_levels": noise_levels,
                     "latents": all_latents[:, :-1],  # each entry is the latent at timestep t - 1 (init latents for 0)
                     "next_latents": all_latents[:, 1:],  # each entry is the latent at timestep t
@@ -834,8 +830,7 @@ These two numbers should be equal
             k: torch.cat([s["rewards"][k] for s in samples], dim=0)
             for k in samples[0]["rewards"].keys()
         }
-        gathered_rewards = {key: accelerator.gather(value) for key, value in all_rewards.items()}
-        gathered_rewards = {key: value.cpu().numpy() for key, value in gathered_rewards.items()}
+        gathered_rewards = {key: accelerator.gather(value).cpu().numpy() for key, value in all_rewards.items()}
 
         # log rewards and images
         if accelerator.is_main_process:
@@ -853,8 +848,8 @@ These two numbers should be equal
         # per-prompt mean/std tracking
         if config.per_prompt_stat_tracking:
             # gather the prompts across processes
-            all_prompt_ids = torch.cat([s["prompt_ids"] for s in samples], dim=0)
-            prompt_ids = accelerator.gather(all_prompt_ids).cpu().numpy()
+            prompt_ids = torch.cat([s["prompt_ids"] for s in samples], dim=0)
+            prompt_ids = accelerator.gather(prompt_ids).cpu().numpy()
             prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
             advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
             if accelerator.is_local_main_process:

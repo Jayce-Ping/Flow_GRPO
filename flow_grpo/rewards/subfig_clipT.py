@@ -84,4 +84,5 @@ def main():
     print(scores)
 
 if __name__ == "__main__":
-    main()
+    download_model()
+    # main()

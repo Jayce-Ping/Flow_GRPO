@@ -18,7 +18,7 @@ def denoising_sde_step_with_logprob(
     sigma: Union[float, list[float], torch.FloatTensor],
     prev_sigma: Union[float, list[float], torch.FloatTensor],
     sample: torch.FloatTensor,
-    noise_level: Union[int, float, list[float], torch.FloatTensor] = 0.7,
+    noise_level: Union[float, list[float], torch.FloatTensor] = 0.7,
     prev_sample: Optional[torch.FloatTensor] = None,
     generator: Optional[Union[torch.Generator, list[torch.Generator]]] = None
 ):
@@ -48,21 +48,34 @@ def denoising_sde_step_with_logprob(
 
     if isinstance(sigma, float) or isinstance(sigma, int):
         # Convert single value to a tensor with shape (batch_size,)
-        sigma = [sigma] * sample.shape[0]
+        sigma = torch.as_tensor([sigma], device=sample.device).expand(sample.shape[0])
+    elif isinstance(sigma, list):
+        sigma = torch.as_tensor(sigma, device=sample.device)
+    elif isinstance(sigma, torch.Tensor):
+        sigma = sigma.to(device=sample.device)
 
+    if isinstance(prev_sigma, float) or isinstance(prev_sigma, int):
+        # Convert single value to a tensor with shape (batch_size,)
+        prev_sigma = torch.as_tensor([prev_sigma], device=sample.device).expand(sample.shape[0])
+    elif isinstance(prev_sigma, list):
+        prev_sigma = torch.as_tensor(prev_sigma, device=sample.device)
+    elif isinstance(prev_sigma, torch.Tensor):
+        prev_sigma = prev_sigma.to(device=sample.device)
+
+    if isinstance(noise_level, float) or isinstance(noise_level, int):
+        # Convert single value to a tensor with shape (batch_size,)
+        noise_level = torch.as_tensor([noise_level], device=sample.device).expand(sample.shape[0])
+    elif isinstance(noise_level, list):
+        noise_level = torch.as_tensor(noise_level, device=sample.device)
+    elif isinstance(noise_level, torch.Tensor):
+        noise_level = noise_level.to(device=sample.device)
 
     sigma = sigma.view(-1, *([1] * (len(sample.shape) - 1)))
     prev_sigma = prev_sigma.view(-1, *([1] * (len(sample.shape) - 1)))
-    sigma_max = 0.98 # avoid inf in std_dev_t when sigma=1, 0.999 will cause overflow in bf16
-    dt = prev_sigma - sigma # dt is negative, (batch_size, 1, 1)
-
-    # Convert noise_level to a tensor with shape (batch_size, 1, 1)
-    if isinstance(noise_level, float) or isinstance(noise_level, int):
-        noise_level = torch.tensor([noise_level], device=sample.device, dtype=sample.dtype).repeat(sample.shape[0])
-    elif isinstance(noise_level, list):
-        noise_level = torch.tensor(noise_level, device=sample.device, dtype=sample.dtype)
-
     noise_level = noise_level.view(-1, *([1] * (len(sample.shape) - 1)))
+
+    sigma_max = 0.985 # avoid inf in std_dev_t when sigma=1, 0.999 will cause overflow in bf16
+    dt = prev_sigma - sigma # dt is negative, (batch_size, 1, 1)
 
     std_dev_t = torch.sqrt(sigma / (1 - torch.where(sigma == 1, sigma_max, sigma))) * noise_level # (batch_size, 1, 1)
     
@@ -111,10 +124,9 @@ def compute_log_prob(
         config : Namespace
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     latents = sample["latents"][:, j]
-    timestep = sample['timesteps'][:, j]
     sigma = sample['sigmas'][:, j]
-    prev_sigma = sample['prev_sigmas'][:, j]
-    num_inference_steps = config.sample.num_steps
+    prev_sigma = sample['next_sigmas'][:, j]
+    noise_levels = sample["noise_levels"][:, j]
 
     batch_size = latents.shape[0]
     image_seq_len = latents.shape[1]
@@ -125,7 +137,6 @@ def compute_log_prob(
     device = latents.device
     dtype = latents.dtype
 
-    noise_levels = sample["noise_levels"][:, j]
 
     if transformer.module.config.guidance_embeds:
         guidance = torch.tensor([config.sample.guidance_scale], device=device)
@@ -161,10 +172,10 @@ def compute_log_prob(
     prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
         scheduler=pipeline.scheduler,
         model_output=model_pred.float(),
-        sigma=sigma.float(),
-        prev_sigma=prev_sigma.float(),
+        sigma=sigma,
+        prev_sigma=prev_sigma,
         sample=latents.float(),
-        noise_level=noise_levels.float(),
+        noise_level=noise_levels,
         prev_sample=sample["next_latents"][:, j].float(),
     )
 

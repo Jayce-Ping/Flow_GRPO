@@ -818,7 +818,7 @@ def grid_consistency_clip_flux():
     config.max_sequence_length = 512
 
     config.sample.batch_size = 1
-    config.sample.num_image_per_prompt = 24
+    config.sample.num_image_per_prompt = 16
     config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
@@ -858,7 +858,8 @@ def grid_consistency_clip_flux():
     config.save_freq = 5 # epoch
     config.eval_freq = 5 # 0 for no eval applied
     # config.save_dir = 'logs/grid-consistency-subclip/flux-7gpu-train-half-leq-4'
-    config.save_dir = '/scratch/users/astar/ares/cp3jia/checkpoints/flow-grpo/grid-consistency-subclip/flux-7gpu-train-leq-4'
+    # config.save_dir = '/scratch/users/astar/ares/cp3jia/checkpoints/flow-grpo/grid-consistency-subclip/flux-7gpu-train-leq-4'
+    config.save_dir = '/root/autodl-tmp/checkpoints/flowgrpo/grid-consistency-subclip/flux-7gpu-train-half-leq-4'
     config.reward_fn = {
         "grid_layout": 1.0,
         "consistency_score": 1,

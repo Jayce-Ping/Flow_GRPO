@@ -10,3 +10,4 @@ deepspeed_config:
 machine_rank: 0
 num_machines: 1
 num_processes: 8
+mixed_precision: bf16
