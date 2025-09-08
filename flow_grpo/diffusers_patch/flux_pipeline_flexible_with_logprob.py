@@ -13,6 +13,7 @@ from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import r
 
 
 def denoising_sde_step_with_logprob(
+    scheduler: FlowMatchEulerDiscreteScheduler,
     model_output: torch.FloatTensor,
     sigma: Union[float, list[float], torch.FloatTensor],
     prev_sigma: Union[float, list[float], torch.FloatTensor],
@@ -52,7 +53,7 @@ def denoising_sde_step_with_logprob(
 
     sigma = sigma.view(-1, *([1] * (len(sample.shape) - 1)))
     prev_sigma = prev_sigma.view(-1, *([1] * (len(sample.shape) - 1)))
-    sigma_max = 0.999 # scheduler.sigmas[0]
+    sigma_max = 0.98 # avoid inf in std_dev_t when sigma=1, 0.999 will cause overflow in bf16
     dt = prev_sigma - sigma # dt is negative, (batch_size, 1, 1)
 
     # Convert noise_level to a tensor with shape (batch_size, 1, 1)
@@ -110,6 +111,7 @@ def compute_log_prob(
         config : Namespace
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     latents = sample["latents"][:, j]
+    timestep = sample['timesteps'][:, j]
     sigma = sample['sigmas'][:, j]
     prev_sigma = sample['prev_sigmas'][:, j]
     num_inference_steps = config.sample.num_steps
@@ -145,7 +147,7 @@ def compute_log_prob(
     # Predict the noise residual
     model_pred = transformer(
         hidden_states=latents,
-        timestep=sigma,
+        timestep=sigma, # Original code uses timestep/1000 here, which should be equal to sigma.
         guidance=guidance,
         pooled_projections=sample["pooled_prompt_embeds"],
         encoder_hidden_states=sample["prompt_embeds"],
@@ -157,6 +159,7 @@ def compute_log_prob(
     # compute the log prob of next_latents given latents under the current model
     # Here, use determistic denoising for normal diffusion process.
     prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
+        scheduler=pipeline.scheduler,
         model_output=model_pred.float(),
         sigma=sigma.float(),
         prev_sigma=prev_sigma.float(),
@@ -315,9 +318,11 @@ def pipeline_with_logprob(
             current_noise_level = noise_level if noise_level is not None else pipeline.scheduler.get_noise_level_for_timestep(t)
 
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-            # timestep = t.expand(latents.shape[0]).to(latents.dtype)
-            sigma = pipeline.scheduler.sigmas[i].to(latents.dtype)
-            prev_sigma = pipeline.scheduler.sigmas[i + 1].to(latents.dtype)
+            timestep = t.expand(latents.shape[0]).to(latents.dtype)
+            # DONOT use `sigmas` but use `pipeline.scheduler.sigmas` here
+            # since `sigmas` is not shifted by `mu` but `pipeline.scheduler.sigmas` is shifted.
+            sigma = pipeline.scheduler.sigmas[i].expand(latents.shape[0]).to(latents.dtype)
+            prev_sigma = pipeline.scheduler.sigmas[i + 1].expand(latents.shape[0]).to(latents.dtype)
 
             noise_pred = pipeline.transformer(
                 hidden_states=latents,
@@ -335,6 +340,7 @@ def pipeline_with_logprob(
             latents_dtype = latents.dtype
 
             latents, log_prob, prev_latents_mean, std_dev_t = denoising_sde_step_with_logprob(
+                scheduler=pipeline.scheduler,
                 model_output=noise_pred.float(),
                 sigma=sigma,
                 prev_sigma=prev_sigma,

@@ -739,7 +739,6 @@ These two numbers should be equal
 
         samples = []
         prompts = []
-        print(f"=== Starting epoch {epoch} with {train_sampler.num_batches_per_epoch} batches ===")
         for i in tqdm(
             range(train_sampler.num_batches_per_epoch),
             desc=f"Epoch {epoch}: sampling",
@@ -747,13 +746,6 @@ These two numbers should be equal
             position=0,
         ):
             prompts, prompt_metadata = next(train_iter)
-            # assert here batch size is 1
-            # height = prompt_metadata[0].get('height', config.resolution)
-            # width = prompt_metadata[0].get('width', config.resolution)
-            height = prompt_metadata[0]['height']
-            width = prompt_metadata[0]['width']
-            print(f"[Rank {accelerator.process_index}]: Prompt image size: {height}x{width}")
-
             prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
                 prompts,
                 text_encoders,
@@ -768,6 +760,10 @@ These two numbers should be equal
                 truncation=True,
                 return_tensors="pt",
             ).input_ids.to(accelerator.device)
+
+            # assert here batch size is 1
+            height = prompt_metadata[0].get('height', config.resolution)
+            width = prompt_metadata[0].get('width', config.resolution)
 
             # sample
             if config.sample.same_latent:
@@ -797,10 +793,10 @@ These two numbers should be equal
             sigmas = pipeline.scheduler.get_window_sigmas()
             prev_sigmas = pipeline.scheduler.get_window_sigmas(left_boundary=pipeline.scheduler.left_boundary + 1)
             noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps]).to(all_latents.device)
-            # timesteps = timesteps.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
+            timesteps = timesteps.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
             noise_levels = noise_levels.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
-            sigmas = sigmas.to(all_latents.device).repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
-            prev_sigmas = prev_sigmas.to(all_latents.device).repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
+            sigmas = torch.as_tensor(sigmas).to(all_latents.device).repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
+            prev_sigmas = torch.as_tensor(prev_sigmas).to(all_latents.device).repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
@@ -822,6 +818,7 @@ These two numbers should be equal
                     "prompt_ids": prompt_ids,
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
+                    'timesteps': timesteps,
                     'sigmas': sigmas,
                     'prev_sigmas': prev_sigmas,
                     "noise_levels": noise_levels,
@@ -842,6 +839,9 @@ These two numbers should be equal
 
         # log rewards and images
         if accelerator.is_main_process:
+            print(f"Epoch {epoch} rewards: ")
+            for key, value in gathered_rewards.items():
+                print(f"  {key}: {value.mean():.4f} ± {value.std():.4f}")
             logging_platform.log(
                 {
                     "epoch": epoch,
@@ -893,13 +893,9 @@ These two numbers should be equal
             .to(accelerator.device)
         )
         for i, sample in enumerate(samples):
-            assert config.sample.batch_size == 1, "Only batch size 1 is supported for flexible size training"
             sample['advantages'] = all_advantages[i]
 
         if accelerator.is_local_main_process:
-            # for key, value in gathered_rewards.items():
-            #     print(key, ": ", value)
-
             print("advantages: ", all_advantages.abs().mean())
 
         for sample in samples:
