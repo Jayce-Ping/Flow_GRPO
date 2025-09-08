@@ -91,9 +91,6 @@ def eval(pipeline : FluxPipeline,
     ):
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
-
-    # Empty cache to avoid OOM
-    torch.cuda.empty_cache()
     
     log_data = {
         'images': [],
@@ -130,15 +127,13 @@ def eval(pipeline : FluxPipeline,
             ):
                 prompt = [prompts[i]]
                 prompt_meta = [prompt_metadata[i]]
-                prompt_embed = prompt_embeds[i].unsqueeze(0)
-                pooled_prompt_embed = pooled_prompt_embeds[i].unsqueeze(0)
                 height = heights[i]
                 width = widths[i]
                 with autocast():
                     imgs, _, _, _, _ = pipeline_with_logprob(
                         pipeline,
-                        prompt_embeds=prompt_embed,
-                        pooled_prompt_embeds=pooled_prompt_embed,
+                        prompt_embeds=prompt_embeds[i].unsqueeze(0),
+                        pooled_prompt_embeds=pooled_prompt_embeds[i].unsqueeze(0),
                         num_inference_steps=config.sample.eval_num_steps,
                         guidance_scale=config.sample.guidance_scale,
                         output_type="pt",
@@ -227,47 +222,19 @@ def eval(pipeline : FluxPipeline,
     )
 
     # 3. Gather all images
-    log_image_with_temp_dir = True
-    if log_image_with_temp_dir:
-        # Approach 1: by saving them in a temp dir
-        temp_dir = os.path.join(config.save_dir, 'temp_eval_images')
-        os.makedirs(temp_dir, exist_ok=True)
-        for i,img in enumerate(log_data['images']):
-            # Save image to temp dir
-            img_id = f"{accelerator.process_index * len(log_data['images']) + i}.jpg"
-            pil = Image.fromarray((img.transpose(1, 2, 0) * 255).astype(np.uint8))
-            pil.save(os.path.join(temp_dir, img_id))
-        
-        accelerator.wait_for_everyone()
-        # The order of images here should be guaranteed by the name of images
-        gathered_images = [os.path.join(temp_dir, f) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
-        # NOTE: this approach provides gathered_images as a list of file paths
-    else:
-        # Approach 2: flattern all images into a sequence and pad to the max size
-        # this approach is simple but may waste some communication bandwidth and memory
-        # The following approach may cause CUDA OOM, keep the temp dir approach as default
-        image_shape_sequence = torch.as_tensor(
-            [img.shape for img in log_data['images']],
-            device=accelerator.device,
-            dtype=torch.long
-        )
-        image_shape_sequence = accelerator.gather(image_shape_sequence).cpu().numpy()
-        max_shape = tuple(image_shape_sequence.max(axis=0))
-        # Pad images to max-shape
-        gathered_images = torch.stack([
-            torch.nn.functional.pad(
-                img,
-                (0, max_shape[2] - img.shape[2], 0, max_shape[1] - img.shape[1]),
-                mode='constant',
-                value=0
-            ) for img in log_data['images']
-        ], dim=0)
-        gathered_images = accelerator.gather(gathered_images).cpu().numpy()
-        gathered_images = [
-            img[:shape[1], :shape[2], :] for img, shape in zip(gathered_images, image_shape_sequence)
-        ]
-        gathered_images = [Image.fromarray((img.transpose(1, 2, 0) * 255).astype(np.uint8)) for img in gathered_images]
-        # NOTE: this approach provides gathered_images as a list of PIL images
+    # Approach 1: by saving them in a temp dir
+    temp_dir = os.path.join(config.save_dir, 'temp_eval_images')
+    os.makedirs(temp_dir, exist_ok=True)
+    for i,img in enumerate(log_data['images']):
+        # Save image to temp dir
+        img_id = f"{accelerator.process_index * len(log_data['images']) + i}.jpg"
+        pil = Image.fromarray((img.transpose(1, 2, 0) * 255).astype(np.uint8))
+        pil.save(os.path.join(temp_dir, img_id))
+    
+    accelerator.wait_for_everyone()
+    # The order of images here should be guaranteed by the name of images
+    # NOTE: it provides gathered_images as a list of file paths
+    gathered_images = [os.path.join(temp_dir, f) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
 
     if accelerator.is_main_process:
          # Use a fixed generator to log same indices everytime for comparison
@@ -294,10 +261,14 @@ def eval(pipeline : FluxPipeline,
             },
             step=global_step,
         )
-        if log_image_with_temp_dir:
-            shutil.rmtree(temp_dir)
+        # Clean up temp dir
+        shutil.rmtree(temp_dir)
 
     # Empty cache to avoid OOM
+    del log_data
+    del gathered_images
+    del gathered_prompt_ids
+    del gathered_prompts
     torch.cuda.empty_cache()
 
     if config.train.ema:
@@ -825,12 +796,27 @@ These two numbers should be equal
                 }
             )
 
-        # gather rewards across processes
-        all_rewards = {
-            k: torch.cat([s["rewards"][k] for s in samples], dim=0)
-            for k in samples[0]["rewards"].keys()
+        # 1. Gather all rewards across processes one by one for each sample - may be slow but saves memory
+        gathered_rewards = [
+            {key: accelerator.gather(sample["rewards"][key]).cpu().numpy() for key in sample["rewards"].keys()}
+            for sample in samples
+        ]
+        # gathered_rewards : List[Dict] -> Dict[List]
+        gathered_rewards = {
+            key: np.concatenate([gr[key] for gr in gathered_rewards], axis=0)
+            for key in gathered_rewards[0].keys()
         }
-        gathered_rewards = {key: accelerator.gather(value).cpu().numpy() for key, value in all_rewards.items()}
+
+        # 2. Gather rewards across processes at once for all samples - may be faster but uses more memory
+        # gathered_rewards = {
+        #     key: accelerator.gather(
+        #         torch.cat(
+        #             [s["rewards"][key] for s in samples],
+        #             dim=0
+        #         )
+        #     ).cpu().numpy()
+        #     for key in samples[0]["rewards"].keys()
+        # }
 
         # log rewards and images
         if accelerator.is_main_process:
@@ -893,6 +879,8 @@ These two numbers should be equal
         if accelerator.is_local_main_process:
             print("advantages: ", all_advantages.abs().mean())
 
+        # clean up to save memory
+        del gathered_rewards
         for sample in samples:
             del sample["rewards"]
             del sample["prompt_ids"]
