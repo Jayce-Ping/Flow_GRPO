@@ -149,7 +149,7 @@ def eval(pipeline : FluxPipeline,
          autocast,
          ema,
          transformer_trainable_parameters,
-         log_sample_num : int = None
+         log_sample_num : int = 90 # 108 as max in wandb/swanlab
     ):
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
