@@ -799,9 +799,9 @@ def consistency_clip_flux_4gpu():
 
 
 def grid_consistency_clip_flux():
-    gpu_number = 4
+    gpu_number = 7
     config = compressibility()
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_le_4")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_leq_4")
 
     # Sliding Window Scheduler
     config.sample.use_sliding_window = True
@@ -818,8 +818,8 @@ def grid_consistency_clip_flux():
     config.max_sequence_length = 512
 
     config.sample.batch_size = 1
-    config.sample.num_image_per_prompt = 12
-    config.sample.unique_sample_num_per_epoch = 4 # Number of unique prompts used in each epoch
+    config.sample.num_image_per_prompt = 24
+    config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -843,7 +843,7 @@ def grid_consistency_clip_flux():
 
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
 
-    config.test_batch_size = 5
+    config.test_batch_size = 4
 
     config.train.batch_size = config.sample.batch_size
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // 2
@@ -855,10 +855,10 @@ def grid_consistency_clip_flux():
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.noise_level = 0.9
-    config.save_freq = 0 # epoch
+    config.save_freq = 5 # epoch
     config.eval_freq = 5 # 0 for no eval applied
-    config.save_dir = 'logs/grid-consistency-subclip/flux-7gpu-train-half-less-than-5'
-    # config.save_dir = '/scratch/users/astar/ares/cp3jia/checkpoints/flow-grpo/grid-consistency-subclip/flux-7gpu-train-half-less-than-5'
+    # config.save_dir = 'logs/grid-consistency-subclip/flux-7gpu-train-half-leq-4'
+    config.save_dir = '/scratch/users/astar/ares/cp3jia/checkpoints/flow-grpo/grid-consistency-subclip/flux-7gpu-train-leq-4'
     config.reward_fn = {
         "grid_layout": 1.0,
         "consistency_score": 1,

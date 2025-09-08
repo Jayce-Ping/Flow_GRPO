@@ -75,7 +75,7 @@ def main():
     data_summary_path = "dataset/T2IS/data_summary.jsonl"
     n = 4
     max_resolution_threshold = 512 * 512 * n
-    output_dir = f"dataset/T2IS/train_half_le_{n}" # less/equal to n 512x512 images
+    output_dir = f"dataset/T2IS/train_half_leq_{n}" # less/equal to n 512x512 images
 
 
     with open(data_summary_path, "r") as f:
@@ -85,7 +85,7 @@ def main():
         d['size'] = (d['height'], d['width'])
 
     data = [d for d in data if d['height'] * d['width'] <= max_resolution_threshold]
-    with open(f"dataset/T2IS/data_summary_le_{n}.jsonl", "w") as f:
+    with open(f"dataset/T2IS/data_summary_leq_{n}.jsonl", "w") as f:
         for d in data:
             f.write(json.dumps(d) + "\n")
 
