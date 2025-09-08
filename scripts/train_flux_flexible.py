@@ -752,12 +752,11 @@ These two numbers should be equal
             all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
             all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
 
-            timesteps = pipeline.scheduler.get_window_timesteps().unsqueeze(0)  # (1, window_size)
-            sigmas = pipeline.scheduler.get_window_sigmas(window_size = config.window_size + 1).unsqueeze(0)  # (1, window_size + 1)
-            noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps]).unsqueeze(0)  # (1, window_size)
+            # timesteps = pipeline.scheduler.get_window_timesteps()  # (window_size,)
+            sigmas = pipeline.scheduler.get_window_sigmas(window_size = config.window_size + 1)  # (window_size + 1,)
             # timesteps = timesteps.expand(config.sample.batch_size, 1)  # (batch_size, window_size)
-            noise_levels = noise_levels.expand(config.sample.batch_size, 1)  # (batch_size, window_size)
-            sigmas = sigmas.expand(config.sample.batch_size, 1)  # (batch_size, window_size)
+            sigmas = sigmas.expand(config.sample.batch_size, 1)  # (batch_size, window_size + 1)
+            noise_levels = torch.as_tensor([config.noise_level]).expand(config.sample.batch_size, config.window_size)  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
@@ -790,26 +789,26 @@ These two numbers should be equal
             )
 
         # # 1. Gather all rewards across processes one by one for each sample - may be slow but saves memory
-        # gathered_rewards = [
-        #     {key: accelerator.gather(sample["rewards"][key]).cpu().numpy() for key in sample["rewards"].keys()}
-        #     for sample in samples
-        # ]
-        # # gathered_rewards : List[Dict] -> Dict[List]
-        # gathered_rewards = {
-        #     key: np.concatenate([gr[key] for gr in gathered_rewards], axis=0)
-        #     for key in gathered_rewards[0].keys()
-        # }
+        gathered_rewards = [
+            {key: accelerator.gather(sample["rewards"][key]).cpu().numpy() for key in sample["rewards"].keys()}
+            for sample in samples
+        ]
+        # gathered_rewards : List[Dict] -> Dict[List]
+        gathered_rewards = {
+            key: np.concatenate([gr[key] for gr in gathered_rewards], axis=0)
+            for key in gathered_rewards[0].keys()
+        }
 
         # 2. Gather rewards across processes at once for all samples - may be faster but uses more memory
-        gathered_rewards = {
-            key: accelerator.gather(
-                torch.cat(
-                    [s["rewards"][key] for s in samples],
-                    dim=0
-                )
-            ).cpu().numpy()
-            for key in samples[0]["rewards"].keys()
-        }
+        # gathered_rewards = {
+        #     key: accelerator.gather(
+        #         torch.cat(
+        #             [s["rewards"][key] for s in samples],
+        #             dim=0
+        #         )
+        #     ).cpu().numpy()
+        #     for key in samples[0]["rewards"].keys()
+        # }
 
         # log rewards and images
         if accelerator.is_main_process:
