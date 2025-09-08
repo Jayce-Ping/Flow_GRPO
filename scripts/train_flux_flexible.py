@@ -753,10 +753,10 @@ These two numbers should be equal
             all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
 
             # timesteps = pipeline.scheduler.get_window_timesteps()  # (window_size,)
-            sigmas = pipeline.scheduler.get_window_sigmas(window_size = config.window_size + 1)  # (window_size + 1,)
+            sigmas = pipeline.scheduler.get_window_sigmas(window_size = config.sample.window_size + 1)  # (window_size + 1,)
             # timesteps = timesteps.expand(config.sample.batch_size, 1)  # (batch_size, window_size)
             sigmas = sigmas.expand(config.sample.batch_size, 1)  # (batch_size, window_size + 1)
-            noise_levels = torch.as_tensor([config.noise_level]).expand(config.sample.batch_size, config.window_size)  # (batch_size, window_size)
+            noise_levels = torch.as_tensor([config.noise_level]).expand(config.sample.batch_size, config.sample.window_size)  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
