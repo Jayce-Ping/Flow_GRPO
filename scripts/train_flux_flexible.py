@@ -756,7 +756,7 @@ These two numbers should be equal
             sigmas = pipeline.scheduler.get_window_sigmas(window_size = config.sample.window_size + 1)  # (window_size + 1,)
             # timesteps = timesteps.expand(config.sample.batch_size, 1)  # (batch_size, window_size)
             sigmas = sigmas.expand(config.sample.batch_size, 1)  # (batch_size, window_size + 1)
-            noise_levels = torch.as_tensor([config.noise_level]).expand(config.sample.batch_size, config.sample.window_size)  # (batch_size, window_size)
+            noise_levels = torch.as_tensor([config.sample.noise_level]).expand(config.sample.batch_size, config.sample.window_size)  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
