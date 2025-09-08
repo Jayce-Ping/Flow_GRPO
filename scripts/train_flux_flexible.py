@@ -264,13 +264,6 @@ def eval(pipeline : FluxPipeline,
         # Clean up temp dir
         shutil.rmtree(temp_dir)
 
-    # Empty cache to avoid OOM
-    del log_data
-    del gathered_images
-    del gathered_prompt_ids
-    del gathered_prompts
-    torch.cuda.empty_cache()
-
     if config.train.ema:
         ema.copy_temp_to(transformer_trainable_parameters)
 
@@ -796,27 +789,27 @@ These two numbers should be equal
                 }
             )
 
-        # 1. Gather all rewards across processes one by one for each sample - may be slow but saves memory
-        gathered_rewards = [
-            {key: accelerator.gather(sample["rewards"][key]).cpu().numpy() for key in sample["rewards"].keys()}
-            for sample in samples
-        ]
-        # gathered_rewards : List[Dict] -> Dict[List]
-        gathered_rewards = {
-            key: np.concatenate([gr[key] for gr in gathered_rewards], axis=0)
-            for key in gathered_rewards[0].keys()
-        }
+        # # 1. Gather all rewards across processes one by one for each sample - may be slow but saves memory
+        # gathered_rewards = [
+        #     {key: accelerator.gather(sample["rewards"][key]).cpu().numpy() for key in sample["rewards"].keys()}
+        #     for sample in samples
+        # ]
+        # # gathered_rewards : List[Dict] -> Dict[List]
+        # gathered_rewards = {
+        #     key: np.concatenate([gr[key] for gr in gathered_rewards], axis=0)
+        #     for key in gathered_rewards[0].keys()
+        # }
 
         # 2. Gather rewards across processes at once for all samples - may be faster but uses more memory
-        # gathered_rewards = {
-        #     key: accelerator.gather(
-        #         torch.cat(
-        #             [s["rewards"][key] for s in samples],
-        #             dim=0
-        #         )
-        #     ).cpu().numpy()
-        #     for key in samples[0]["rewards"].keys()
-        # }
+        gathered_rewards = {
+            key: accelerator.gather(
+                torch.cat(
+                    [s["rewards"][key] for s in samples],
+                    dim=0
+                )
+            ).cpu().numpy()
+            for key in samples[0]["rewards"].keys()
+        }
 
         # log rewards and images
         if accelerator.is_main_process:
