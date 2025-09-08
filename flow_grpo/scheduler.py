@@ -50,12 +50,26 @@ class FlowMatchSlidingWindowScheduler(FlowMatchEulerDiscreteScheduler):
     @property
     def right_boundary(self):
         return self.left_boundary + self.window_size
-    
-    def get_window_timesteps(self) -> torch.Tensor:
-        return self.timesteps[self.left_boundary:self.right_boundary]
 
-    def get_window_sigmas(self) -> torch.Tensor:
-        return self.sigmas[self.left_boundary:self.right_boundary]
+    def get_window_timesteps(self, left_boundary : Optional[int] = None) -> torch.Tensor:
+        """
+            Returns timesteps within the current window.
+            If `left_boundary` is provided, use it instead of the current left boundary.
+        """
+        if left_boundary is None:
+            left_boundary = self.left_boundary
+
+        return self.timesteps[left_boundary:self.right_boundary]
+
+    def get_window_sigmas(self, left_boundary : Optional[int] = None) -> torch.Tensor:
+        """
+            Returns sigmas within the current window.
+            If `left_boundary` is provided, use it instead of the current left boundary.
+        """
+        if left_boundary is None:
+            left_boundary = self.left_boundary
+
+        return self.sigmas[left_boundary:self.right_boundary]
 
     def get_noise_levels(self) -> torch.Tensor:
         """ Returns noise levels on all timesteps, where noise level is non-zero only within the current window. """
@@ -63,7 +77,7 @@ class FlowMatchSlidingWindowScheduler(FlowMatchEulerDiscreteScheduler):
         noise_levels = torch.zeros_like(self.timesteps, dtype=torch.float32)
         noise_levels[window_indices] = self.noise_level
         return noise_levels
-    
+
     def get_noise_level_for_timestep(self, time_step) -> float:
         """
             Return the noise level for a specific timestep.

@@ -36,8 +36,7 @@ from transformers.integrations.deepspeed import (
 )
 
 from flow_grpo.rewards.rewards import multi_score
-from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import calculate_shift, pipeline_with_logprob
-from flow_grpo.diffusers_patch.denoising_step_with_logprob import denoising_sde_step_with_logprob
+from flow_grpo.diffusers_patch.flux_pipeline_flexible_with_logprob import calculate_shift, pipeline_with_logprob, denoising_sde_step_with_logprob, compute_log_prob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
@@ -73,92 +72,6 @@ def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generat
         generators.append(gen)
     return generators
 
-
-def compute_log_prob(
-        transformer : FluxTransformer2DModel,
-        pipeline : FluxPipeline,
-        sample : dict[str, torch.Tensor],
-        j : int,
-        config : Namespace
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    latents = sample["latents"][:, j]
-    num_inference_steps = config.sample.num_steps
-
-    batch_size = latents.shape[0]
-    image_seq_len = latents.shape[1]
-
-    num_channels_latents = pipeline.transformer.config.in_channels // 4
-    height = sample.get("height", config.resolution)
-    width = sample.get("width", config.resolution)
-    device = latents.device
-    dtype = latents.dtype
-
-    noise_levels = sample["noise_levels"][:, j]
-
-    if transformer.module.config.guidance_embeds:
-        guidance = torch.tensor([config.sample.guidance_scale], device=device)
-        guidance = guidance.expand(latents.shape[0])
-    else:
-        guidance = None
-
-    latents, image_ids = pipeline.prepare_latents(
-        batch_size,
-        num_channels_latents,
-        height,
-        width,
-        dtype,
-        device,
-        generator=None,
-        latents=latents
-    )
-
-    time_steps = sample["timesteps"][:, j]
-
-    # OOM happens with the following line, weird.TODO: fix it.
-    print(f"Image shape: ({height, width}) has latent shape {latents.shape} - image_seq_len = {image_seq_len}")
-    print(f"[Device {device} before]", torch.cuda.memory_summary(device=device, abbreviated=False))
-    sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps, dtype=np.float32)
-    mu = calculate_shift(
-        image_seq_len,
-        pipeline.scheduler.config.get("base_image_seq_len", 256),
-        pipeline.scheduler.config.get("max_image_seq_len", 4096),
-        pipeline.scheduler.config.get("base_shift", 0.5),
-        pipeline.scheduler.config.get("max_shift", 1.15),
-    )
-    time_steps, num_inference_steps = retrieve_timesteps(
-        pipeline.scheduler,
-        num_inference_steps,
-        device,
-        sigmas=sigmas,
-        mu=mu,
-    )
-    print(f"[Device {device} after:]", torch.cuda.memory_summary(device=device, abbreviated=False))
-
-    torch.cuda.empty_cache()
-    # Predict the noise residual
-    model_pred = transformer(
-        hidden_states=latents,
-        timestep=time_steps / 1000,
-        guidance=guidance,
-        pooled_projections=sample["pooled_prompt_embeds"],
-        encoder_hidden_states=sample["prompt_embeds"],
-        txt_ids=torch.zeros(sample["prompt_embeds"].shape[1], 3).to(device=device, dtype=dtype),
-        img_ids=image_ids,
-        return_dict=False,
-    )[0]
-    
-    # compute the log prob of next_latents given latents under the current model
-    # Here, use determistic denoising for normal diffusion process.
-    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
-        scheduler=pipeline.scheduler,
-        model_output=model_pred.float(),
-        timestep=time_steps,
-        sample=latents.float(),
-        noise_level=noise_levels,
-        prev_sample=sample["next_latents"][:, j].float(),
-    )
-
-    return prev_sample, log_prob, prev_sample_mean, std_dev_t
 
 @torch.no_grad()
 def eval(pipeline : FluxPipeline,
@@ -881,9 +794,13 @@ These two numbers should be equal
             all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
 
             timesteps = pipeline.scheduler.get_window_timesteps()
+            sigmas = pipeline.scheduler.get_window_sigmas()
+            prev_sigmas = pipeline.scheduler.get_window_sigmas(left_boundary=pipeline.scheduler.left_boundary + 1)
             noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps]).to(all_latents.device)
-            timesteps = timesteps.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
+            # timesteps = timesteps.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
             noise_levels = noise_levels.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
+            sigmas = sigmas.to(all_latents.device).repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
+            prev_sigmas = prev_sigmas.to(all_latents.device).repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
@@ -905,7 +822,8 @@ These two numbers should be equal
                     "prompt_ids": prompt_ids,
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
-                    "timesteps": timesteps,
+                    'sigmas': sigmas,
+                    'prev_sigmas': prev_sigmas,
                     "noise_levels": noise_levels,
                     "latents": all_latents[:, :-1],  # each entry is the latent at timestep t - 1 (init latents for 0)
                     "next_latents": all_latents[:, 1:],  # each entry is the latent at timestep t
@@ -913,20 +831,6 @@ These two numbers should be equal
                     "rewards": rewards
                 }
             )
-
-        # wait for all rewards to be computed
-        # for sample in tqdm(
-        #     samples,
-        #     desc="Waiting for rewards",
-        #     disable=not accelerator.is_local_main_process,
-        #     position=0,
-        # ):
-        #     rewards, reward_metadata = sample["rewards"].result()
-        #     # accelerator.print(reward_metadata)
-        #     sample["rewards"] = {
-        #         key: torch.as_tensor(value, device=accelerator.device).float()
-        #         for key, value in rewards.items()
-        #     }
 
         # gather rewards across processes
         all_rewards = {
