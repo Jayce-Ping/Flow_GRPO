@@ -525,19 +525,20 @@ def main(_):
 
     # -----------------------------------------------Set up memory profiler-----------------------------------
     # Initialize memory profiler
-    meme_log_file = 'memory.log'
+    time_stamp = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
+    meme_log_file = f'memory_{time_stamp}.log'
     # clean up old log file
     if accelerator.is_main_process and os.path.exists(meme_log_file):
         os.remove(meme_log_file)
-    profiler = MemoryProfiler(accelerator, enable_tensor_accumulation=True, log_file=meme_log_file)
+    memory_profiler = MemoryProfiler(accelerator, enable_tensor_accumulation=True, log_file=meme_log_file)
 
     # --------------------------------------Load pipeline----------------------------------
     pipeline, text_encoders, tokenizers = load_pipeline(config, accelerator)
     transformer = pipeline.transformer
 
     # Register model to profiler
-    profiler.register_model(transformer, "transformer")
-    profiler.snapshot("after_model_loading")
+    memory_profiler.register_model(transformer, "transformer")
+    memory_profiler.snapshot("after_model_loading")
     
     transformer_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
 
@@ -570,8 +571,8 @@ def main(_):
         eps=config.train.adam_epsilon,
     )
 
-    profiler.track_optimizer(optimizer)
-    profiler.snapshot("after_optimizer_init")
+    memory_profiler.track_optimizer(optimizer)
+    memory_profiler.snapshot("after_optimizer_init")
 
     # ---------------------------------------Data---------------------------------------
     if config.prompt_fn == "general_ocr":
@@ -645,14 +646,14 @@ These two numbers should be equal
     # remote server running llava inference.
     executor = futures.ThreadPoolExecutor(max_workers=8)
 
-    profiler.snapshot("after_accelerator_prepare")
+    memory_profiler.snapshot("after_accelerator_prepare")
     # -----------------------------------------Reward fn-----------------------------------------
     # prepare prompt and reward fn
     if accelerator.is_main_process:
         print(f"Reward dict: {config.reward_fn}")
     reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
     eval_reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
-
+    memory_profiler.snapshot("after_loading_reward_fn")
     # ------------------------------------------- Train!------------------------------------------
     samples_per_epoch = (
         config.sample.batch_size
@@ -696,7 +697,7 @@ These two numbers should be equal
         #################### EVAL ####################
         pipeline.transformer.eval()
         if config.eval_freq > 0 and epoch % config.eval_freq == 0:
-            profiler.snapshot(f"epoch_{epoch}_before_eval")
+            memory_profiler.snapshot(f"epoch_{epoch}_before_eval")
             eval(
                 pipeline,
                 test_dataloader,
@@ -711,7 +712,7 @@ These two numbers should be equal
                 ema,
                 transformer_trainable_parameters
             )
-            profiler.snapshot(f"epoch_{epoch}_after_eval")
+            memory_profiler.snapshot(f"epoch_{epoch}_after_eval")
         if config.save_freq > 0 and epoch % config.save_freq == 0 and accelerator.is_main_process:
             save_ckpt(config.save_dir, transformer, global_step, accelerator, ema, transformer_trainable_parameters, config)
 
@@ -772,11 +773,11 @@ These two numbers should be equal
             all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
             all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
 
-            # timesteps = pipeline.scheduler.get_window_timesteps()  # (window_size,)
+            timesteps = pipeline.scheduler.get_window_timesteps()  # (window_size,)
             sigmas = pipeline.scheduler.get_window_sigmas(window_size = config.sample.window_size + 1).unsqueeze(0)  # (1, window_size + 1)
-            # timesteps = timesteps.expand(config.sample.batch_size, 1)  # (batch_size, window_size)
-            sigmas = sigmas.expand(config.sample.batch_size, *sigmas.shape[1:])  # (batch_size, window_size + 1)
-            noise_levels = torch.as_tensor([config.sample.noise_level]).expand(config.sample.batch_size, config.sample.window_size)  # (batch_size, window_size)
+            sigmas = sigmas.expand(config.sample.batch_size, -1)  # (batch_size, window_size + 1)
+            noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps]).unsqueeze(0)  # (1, window_size)
+            noise_levels = noise_levels.expand(config.sample.batch_size, -1)  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
@@ -808,8 +809,8 @@ These two numbers should be equal
                 }
             )
 
-            profiler.track_samples(samples, f"sampling")
-            profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
+            memory_profiler.track_samples(samples, f"sampling")
+            memory_profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
 
         # # 1. Gather all rewards across processes one by one for each sample - may be slow but saves memory
         gathered_rewards = [
@@ -902,7 +903,7 @@ These two numbers should be equal
         
         total_batch_size = len(samples)
 
-        profiler.snapshot(f"epoch_{epoch}_before_training")
+        memory_profiler.snapshot(f"epoch_{epoch}_before_training")
         #################### TRAINING ####################
         for inner_epoch in range(config.train.num_inner_epochs):
             # shuffle samples along batch dimension
@@ -926,6 +927,8 @@ These two numbers should be equal
                     leave=False,
                     disable=not accelerator.is_local_main_process,
                 ):
+                    if i % 10 == 0:
+                        memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_before_forward")
                     with accelerator.accumulate(transformer):
                         with autocast():
                             prev_sample, log_prob, prev_sample_mean, std_dev_t = compute_log_prob(transformer, pipeline, sample, j, config)
@@ -990,6 +993,7 @@ These two numbers should be equal
 
                         info["loss"].append(loss)
 
+                        # Track training tensors
                         training_tensors = {
                             "prev_sample": prev_sample,
                             "log_prob": log_prob,
@@ -997,10 +1001,10 @@ These two numbers should be equal
                             "ratio": ratio,
                             "loss": loss,
                         }
-                        profiler.track_tensors(training_tensors, "training")
+                        memory_profiler.track_tensors(training_tensors, "training")
 
                         if i % 10 == 0:
-                            profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_before_backward")
+                            memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_before_backward")
 
                         # backward pass
                         accelerator.backward(loss)
@@ -1011,13 +1015,10 @@ These two numbers should be equal
                         optimizer.step()
                         optimizer.zero_grad()
                         if i % 10 == 0:
-                            profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_after_backward")
+                            memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_after_backward")
 
                     # Checks if the accelerator has performed an optimization step behind the scenes
                     if accelerator.sync_gradients:
-                        # assert (j == train_timesteps[-1]) and (
-                        #     i + 1
-                        # ) % config.train.gradient_accumulation_steps == 0
                         # log training-related stuff
                         info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
                         info = accelerator.reduce(info, reduction="mean")
@@ -1025,8 +1026,9 @@ These two numbers should be equal
                         if accelerator.is_main_process:
                             logging_platform.log(info, step=global_step)
 
-                        profiler.snapshot(f"epoch_{epoch}_step_{i}_after_optimization")
-                        profiler.print_full_report(f"epoch_{epoch}_step_{i}")
+                        memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_after_optimization")
+                        memory_profiler.print_full_report(f"epoch_{epoch}_step_{i}")
+
                         global_step += 1
                         info = defaultdict(list)
 
@@ -1035,9 +1037,9 @@ These two numbers should be equal
             # make sure we did an optimization step at the end of the inner epoch
             # assert accelerator.sync_gradients
 
-        profiler.cleanup_and_snapshot(f"epoch_{epoch}_end")
+        memory_profiler.cleanup_and_snapshot(f"epoch_{epoch}_end")
         # Clear tensor accumulation info in profiler to save memory
-        profiler.tensor_tracker.clear_stats()
+        memory_profiler.tensor_tracker.clear_stats()
         epoch += 1
         
 if __name__ == "__main__":

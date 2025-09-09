@@ -42,6 +42,7 @@ from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
 from flow_grpo.datasets.sampler import DistributedKRepeatSampler
 from flow_grpo.scheduler import FlowMatchSlidingWindowScheduler
+from flow_grpo.debug_utils import MemoryProfiler
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -535,10 +536,24 @@ def main(_):
     
     logger.info(f"\n{config}")
 
+    # -------------------------------------------------Set up memory profiler-----------------------------------
+    # Initialize memory profiler
+    time_stamp = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
+    meme_log_file = f'memory_{time_stamp}.log'
+    # clean up old log file
+    if accelerator.is_main_process and os.path.exists(meme_log_file):
+        os.remove(meme_log_file)
+
+    memory_profiler = MemoryProfiler(accelerator=accelerator, log_file=meme_log_file)
+
     # --------------------------------------Load pipeline----------------------------------
     pipeline, text_encoders, tokenizers = load_pipeline(config, accelerator)
     transformer = pipeline.transformer
     transformer_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
+
+    # Register model to profiler
+    memory_profiler.register_model(transformer, "transformer")
+    memory_profiler.snapshot("after_model_loading")
 
     # This ema setting affects the previous 20 × 8 = 160 steps on average.
     ema = EMAModuleWrapper(transformer_trainable_parameters, decay=0.9, update_step_interval=8, device=accelerator.device)
@@ -568,6 +583,9 @@ def main(_):
         weight_decay=config.train.adam_weight_decay,
         eps=config.train.adam_epsilon,
     )
+
+    memory_profiler.track_optimizer(optimizer)
+    memory_profiler.snapshot("after_optimizer_init")
 
     # ---------------------------------------Data---------------------------------------
     if config.prompt_fn == "general_ocr":
@@ -642,12 +660,14 @@ These two numbers should be equal
     # remote server running llava inference.
     executor = futures.ThreadPoolExecutor(max_workers=8)
     
+    memory_profiler.snapshot("after_accelerator_prepare")
     # -----------------------------------------Reward fn-----------------------------------------
     # prepare prompt and reward fn
     if accelerator.is_main_process:
         print(f"Reward dict: {config.reward_fn}")
     reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
     eval_reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
+    memory_profiler.snapshot("after_loading_reward_fn")
     # ------------------------------------------- Train!------------------------------------------
     samples_per_epoch = (
         config.sample.batch_size
@@ -691,6 +711,7 @@ These two numbers should be equal
         #################### EVAL ####################
         pipeline.transformer.eval()
         if config.eval_freq > 0 and epoch % config.eval_freq == 0:
+            memory_profiler.snapshot(f"epoch_{epoch}_before_eval")
             eval(
                 pipeline,
                 test_dataloader,
@@ -705,6 +726,7 @@ These two numbers should be equal
                 ema,
                 transformer_trainable_parameters
             )
+            memory_profiler.snapshot(f"epoch_{epoch}_after_eval")
         if config.save_freq > 0 and epoch % config.save_freq == 0 and accelerator.is_main_process:
             save_ckpt(config.save_dir, transformer, global_step, accelerator, ema, transformer_trainable_parameters, config)
 
@@ -761,10 +783,10 @@ These two numbers should be equal
             all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
             all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
 
-            timesteps = pipeline.scheduler.get_window_timesteps()
-            noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps]).to(all_latents.device)
-            timesteps = timesteps.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
-            noise_levels = noise_levels.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
+            timesteps = pipeline.scheduler.get_window_timesteps()  # (window_size, )
+            noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps]).unsqueeze(0)  # (1, window_size)
+            timesteps = timesteps.unsqueeze(0).expand(config.sample.batch_size, -1)  # (batch_size, window_size)
+            noise_levels = noise_levels.expand(config.sample.batch_size, -1)  # (batch_size, window_size)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
@@ -793,19 +815,9 @@ These two numbers should be equal
                 }
             )
 
-        # wait for all rewards to be computed
-        # for sample in tqdm(
-        #     samples,
-        #     desc="Waiting for rewards",
-        #     disable=not accelerator.is_local_main_process,
-        #     position=0,
-        # ):
-        #     rewards, reward_metadata = sample["rewards"].result()
-        #     # accelerator.print(reward_metadata)
-        #     sample["rewards"] = {
-        #         key: torch.as_tensor(value, device=accelerator.device).float()
-        #         for key, value in rewards.items()
-        #     }
+            memory_profiler.track_samples(samples, f"sampling")
+            memory_profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
+
         # collate samples into dict where each entry has shape (num_batches_per_epoch * sample.batch_size, ...)
         samples = {
             k: torch.cat([s[k] for s in samples], dim=0)
@@ -819,10 +831,6 @@ These two numbers should be equal
         # for key, value in samples.items():
         #     if isinstance(value, torch.Tensor):
         #         print(key, 'has shape', value.shape)
-
-        # The purpose of repeating `avg` along the timestep dimension here is to make it easier to introduce timestep-dependent advantages later, such as adding a KL reward.
-        # Now the rewards/advanatages is only one-dimensional to save mem.
-        # samples["rewards"]["avg"] = samples["rewards"]["avg"].unsqueeze(1).repeat(1, num_train_timesteps)
 
         # gather rewards across processes
         gathered_rewards = {key: accelerator.gather(value).cpu().numpy() for key, value in samples["rewards"].items()}
@@ -892,6 +900,7 @@ These two numbers should be equal
         # A assertion to ensure the number of timesteps is consistent
         assert num_timesteps == num_train_timesteps
 
+        memory_profiler.snapshot(f"epoch_{epoch}_before_training")
         #################### TRAINING ####################
         for inner_epoch in range(config.train.num_inner_epochs):
             # shuffle samples along batch dimension
@@ -919,6 +928,8 @@ These two numbers should be equal
                 position=0,
                 disable=not accelerator.is_local_main_process,
             ):
+                if i % 10 == 0:
+                    memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_before_forward")
                 for j in tqdm(
                     range(num_train_timesteps),
                     desc="Timestep",
@@ -990,6 +1001,19 @@ These two numbers should be equal
 
                         info["loss"].append(loss)
 
+                        # Track training tensors
+                        training_tensors = {
+                            "prev_sample": prev_sample,
+                            "log_prob": log_prob,
+                            "advantages": advantages,
+                            "ratio": ratio,
+                            "loss": loss,
+                        }
+                        memory_profiler.track_tensors(training_tensors, "training")
+
+                        if i % 10 == 0:
+                            memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_before_backward")
+
                         # backward pass
                         accelerator.backward(loss)
                         if accelerator.sync_gradients:
@@ -998,18 +1022,21 @@ These two numbers should be equal
                             )
                         optimizer.step()
                         optimizer.zero_grad()
+                        if i % 10 == 0:
+                            memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_after_backward")
 
                     # Checks if the accelerator has performed an optimization step behind the scenes
                     if accelerator.sync_gradients:
-                        # assert (j == train_timesteps[-1]) and (
-                        #     i + 1
-                        # ) % config.train.gradient_accumulation_steps == 0
                         # log training-related stuff
                         info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
                         info = accelerator.reduce(info, reduction="mean")
                         info.update({"epoch": epoch, "inner_epoch": inner_epoch})
                         if accelerator.is_main_process:
                             logging_platform.log(info, step=global_step)
+
+                        memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_after_optimization")
+                        memory_profiler.print_full_report(f"epoch_{epoch}_step_{i}")
+
                         global_step += 1
                         info = defaultdict(list)
 
@@ -1018,6 +1045,9 @@ These two numbers should be equal
             # make sure we did an optimization step at the end of the inner epoch
             # assert accelerator.sync_gradients
         
+        memory_profiler.cleanup_and_snapshot(f"epoch_{epoch}_end")
+        # Clear tensor accumulation info in profiler to save memory
+        memory_profiler.tensor_tracker.clear_stats()
         epoch += 1
         
 if __name__ == "__main__":

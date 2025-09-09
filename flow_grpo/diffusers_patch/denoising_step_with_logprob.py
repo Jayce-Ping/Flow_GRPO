@@ -46,6 +46,12 @@ def denoising_sde_step_with_logprob(
         # Convert single value to a tensor with shape (batch_size,)
         timestep = [timestep] * sample.shape[0]
 
+    # Convert noise_level to a tensor with shape (batch_size, 1, 1)
+    if isinstance(noise_level, float) or isinstance(noise_level, int):
+        noise_level = torch.tensor([noise_level], device=sample.device, dtype=sample.dtype).repeat(sample.shape[0])
+    elif isinstance(noise_level, list):
+        noise_level = torch.tensor(noise_level, device=sample.device, dtype=sample.dtype)
+
     step_index = [scheduler.index_for_timestep(t) for t in timestep]
     prev_step_index = [step + 1 for step in step_index]
     # sigmas is a decreasing sequence from 1 to 0, sigma=1 means pure noise, sigma=0 means pure data
@@ -54,12 +60,6 @@ def denoising_sde_step_with_logprob(
     sigma_prev = scheduler.sigmas[prev_step_index].view(-1, *([1] * (len(sample.shape) - 1)))
     sigma_max = scheduler.sigmas[1].item()
     dt = sigma_prev - sigma # dt is negative, (batch_size, 1, 1)
-
-    # Convert noise_level to a tensor with shape (batch_size, 1, 1)
-    if isinstance(noise_level, float) or isinstance(noise_level, int):
-        noise_level = torch.tensor([noise_level], device=sample.device, dtype=sample.dtype).repeat(sample.shape[0])
-    elif isinstance(noise_level, list):
-        noise_level = torch.tensor(noise_level, device=sample.device, dtype=sample.dtype)
 
     noise_level = noise_level.view(-1, *([1] * (len(sample.shape) - 1)))
 
