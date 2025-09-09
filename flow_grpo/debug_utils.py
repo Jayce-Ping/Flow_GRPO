@@ -306,6 +306,7 @@ class GPUMemoryTracker:
         self.accelerator = accelerator
         self.memory_history = []
         self.baseline_memory = None
+        self.last_snapshot = None
         self.log_file = log_file
         
     def _print(self, *args, **kwargs):
@@ -341,6 +342,8 @@ class GPUMemoryTracker:
         
         if self.baseline_memory is None:
             self.baseline_memory = allocated
+
+        self.last_snapshot = snapshot
             
         return snapshot
     
@@ -348,7 +351,8 @@ class GPUMemoryTracker:
         """打印当前显存使用"""
         snapshot = self.snapshot(stage_name)
         if snapshot and self.accelerator.is_local_main_process:
-            increase = snapshot['allocated_gb'] - self.baseline_memory if self.baseline_memory else 0
+            # increase = snapshot['allocated_gb'] - self.baseline_memory if self.baseline_memory else 0
+            increase = snapshot['allocated_gb'] - (self.last_snapshot['allocated_gb'] if self.last_snapshot else 0)
             self._print(f"[{stage_name}] GPU Memory Usage:"
                        f"    Allocated: {snapshot['allocated_gb']:.2f}GB, "
                        f"    Reserved: {snapshot['reserved_gb']:.2f}GB, "
