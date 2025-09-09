@@ -175,13 +175,14 @@ def eval(pipeline : FluxPipeline,
             rewards, reward_metadata = future.result()
         
         # -------------------------------Collect log data--------------------------------
-        log_data['images'].extend([img.cpu().numpy() for img in images])
-        log_data['prompts'].extend(prompts)
-        for key, value in rewards.items():
-            if key not in log_data['rewards']:
-                log_data['rewards'][key] = []
-            
-            log_data['rewards'][key].extend(value)
+        if len(log_data["prompts"]) < log_sample_num:
+            log_data['images'].extend([img.cpu().numpy() for img in images])
+            log_data['prompts'].extend(prompts)
+            for key, value in rewards.items():
+                if key not in log_data['rewards']:
+                    log_data['rewards'][key] = []
+                
+                log_data['rewards'][key].extend(value)
 
 
     # ---------------------------Gather all Log data, with prompt-image-reward tuples--------------------------

@@ -13,6 +13,7 @@ import time
 import torch
 import tqdm
 from typing import List, Tuple, Any, Optional
+import shutil
 
 from absl import app, flags
 from accelerate import Accelerator
@@ -193,17 +194,17 @@ def eval(pipeline : FluxPipeline,
         rewards, reward_metadata = future.result()
         
         # -------------------------------Collect log data--------------------------------
-        log_data['images'].extend(images)
-        log_data['prompts'].extend(prompts)
-        for key, value in rewards.items():
-            if key not in log_data['rewards']:
-                log_data['rewards'][key] = []
-            
-            log_data['rewards'][key].extend(value)
+        if len(log_data["prompts"]) < log_sample_num:
+            log_data['images'].extend([img.cpu().numpy() for img in images])
+            log_data['prompts'].extend(prompts)
+            for key, value in rewards.items():
+                if key not in log_data['rewards']:
+                    log_data['rewards'][key] = []
+                
+                log_data['rewards'][key].extend(value)
 
 
     # ---------------------------Gather all Log data, with prompt-image-reward tuples--------------------------
-
     # 1. Gather all rewards and report average
     gathered_rewards = {}
     for key, value in log_data['rewards'].items():
@@ -220,11 +221,15 @@ def eval(pipeline : FluxPipeline,
             step=global_step
         )
 
-    # 2. Gather all images
-    log_data['images'] = torch.stack(log_data['images'], dim=0)
-    gathered_images = accelerator.gather(torch.as_tensor(log_data['images'], device=accelerator.device)).cpu().numpy()
+    # gathered_rewards = {'r1': [1,2,3], 'r2': [4,5,6]}
+    # ->
+    # gathered_rewards = [{'r1':1, 'r2':4}, {'r1':2, 'r2':5}, {'r1':3, 'r2':6}]
+    gathered_rewards = [
+        dict(zip(gathered_rewards.keys(), value))
+        for value in zip(*gathered_rewards.values())
+    ]
 
-    # 3. Encode prompt to tensors for gpu communication
+    # 2. Encode prompt to tensors for gpu communication
     prompt_ids = tokenizers[1](
         log_data['prompts'],
         padding="max_length",
@@ -237,47 +242,50 @@ def eval(pipeline : FluxPipeline,
         gathered_prompt_ids, skip_special_tokens=True
     )
 
-    # gathered_rewards = {'r1': [1,2,3], 'r2': [4,5,6]}
-    # ->
-    # gathered_rewards = [{'r1':1, 'r2':4}, {'r1':2, 'r2':5}, {'r1':3, 'r2':6}]
-    gathered_rewards = [
-        dict(zip(gathered_rewards.keys(), value))
-        for value in zip(*gathered_rewards.values())
-    ]
+    # 3. Gather all images
+    # Approach 1: by saving them in a temp dir
+    temp_dir = os.environ.get('PBS_O_WORKDIR', config.save_dir)
+    temp_dir = os.path.join(temp_dir, 'temp_eval_images')
+    os.makedirs(temp_dir, exist_ok=True)
+    for i,img in enumerate(log_data['images']):
+        # Save image to temp dir
+        img_id = f"{accelerator.process_index * len(log_data['images']) + i}.jpg"
+        pil = Image.fromarray((img.transpose(1, 2, 0) * 255).astype(np.uint8))
+        pil.save(os.path.join(temp_dir, img_id))
+    
+    accelerator.wait_for_everyone()
+    # The order of images here should be guaranteed by the name of images
+    # NOTE: it provides gathered_images as a list of file paths
+    gathered_images = [os.path.join(temp_dir, f) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
 
     if accelerator.is_main_process:
          # Use a fixed generator to log same indices everytime for comparison
         gen = torch.Generator().manual_seed(0)
         # Sample `log_sample_num` data for logging, 'None' for all data.
         if log_sample_num is None:
-            sample_indices = list(range(len(gathered_images)))
+            sample_indices = list(range(len(gathered_prompts)))
         else:
-            sample_indices = torch.randperm(len(gathered_images), generator=gen)[:log_sample_num]
-        
-        sampled_images = gathered_images[sample_indices]
+            sample_indices = torch.randperm(len(gathered_prompts), generator=gen)[:log_sample_num]
+
+        sampled_images = [gathered_images[i] for i in sample_indices]
         sampled_prompts = [gathered_prompts[i] for i in sample_indices]
         sampled_rewards = [gathered_rewards[i] for i in sample_indices]
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            for idx, image in enumerate(sampled_images):
-                pil = Image.fromarray(
-                    (image.transpose(1, 2, 0) * 255).astype(np.uint8)
-                )
-                pil = pil.resize((config.resolution, config.resolution))
-                pil.save(os.path.join(tmpdir, f"{idx}.jpg"))
+        logging_platform.log(
+            {
+                "eval_images": [
+                    logging_platform.Image(
+                        image,
+                        caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
+                    )
+                    for idx, (image, prompt, reward) in enumerate(zip(sampled_images, sampled_prompts, sampled_rewards))
+                ]
+            },
+            step=global_step,
+        )
+        # Clean up temp dir
+        shutil.rmtree(temp_dir)
 
-            logging_platform.log(
-                {
-                    "eval_images": [
-                        logging_platform.Image(
-                            os.path.join(tmpdir, f"{idx}.jpg"),
-                            caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt:.200}",
-                        )
-                        for idx, (prompt, reward) in enumerate(zip(sampled_prompts, sampled_rewards))
-                    ]
-                },
-                step=global_step,
-            )
     if config.train.ema:
         ema.copy_temp_to(transformer_trainable_parameters)
 
