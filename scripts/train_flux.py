@@ -205,10 +205,23 @@ def eval(pipeline : FluxPipeline,
 
 
     # ---------------------------Gather all Log data, with prompt-image-reward tuples--------------------------
+    gather_batch_size = 1
     # 1. Gather all rewards and report average
     gathered_rewards = {}
     for key, value in log_data['rewards'].items():
-        gathered_rewards[key] = accelerator.gather(torch.as_tensor(value, device=accelerator.device)).cpu().numpy()
+        gathered_rewards[key] = []
+        num_samples = len(value)
+        for i in range(0, num_samples, gather_batch_size):
+            end_idx = min(i + gather_batch_size, num_samples)
+            batch_value = value[i:end_idx]
+            # Gather reward one bacth
+            gathered_batch = accelerator.gather(
+                torch.as_tensor(batch_value, device=accelerator.device, dtype=torch.float16)
+            ).cpu().numpy()
+            gathered_rewards[key].extend(gathered_batch.tolist())
+
+        # Convert back to numpy array
+        gathered_rewards[key] = np.array(gathered_rewards[key])
 
     if accelerator.is_main_process:
         # Report detailed rewards values
@@ -230,17 +243,30 @@ def eval(pipeline : FluxPipeline,
     ]
 
     # 2. Encode prompt to tensors for gpu communication
-    prompt_ids = tokenizers[1](
+    all_prompt_ids = tokenizers[1](
         log_data['prompts'],
         padding="max_length",
         max_length=config.max_sequence_length,
         truncation=True,
         return_tensors="pt",
     ).input_ids.to(accelerator.device)
-    gathered_prompt_ids = accelerator.gather(prompt_ids).cpu().numpy()
-    gathered_prompts = tokenizers[1].batch_decode(
-        gathered_prompt_ids, skip_special_tokens=True
-    )
+
+    gathered_prompt_ids = []
+    num_prompts = len(all_prompt_ids)
+
+    # Gather prompt_ids by batches
+    for i in range(0, num_prompts, gather_batch_size):
+        end_idx = min(i + gather_batch_size, num_prompts)
+        batch_prompt_ids = all_prompt_ids[i:end_idx]
+        gathered_batch = accelerator.gather(batch_prompt_ids).cpu().numpy()
+        gathered_prompt_ids.extend(gathered_batch.tolist())
+
+    # Convert back to numpy array
+    gathered_prompt_ids = np.array(gathered_prompt_ids)
+    gathered_prompts = [
+        tokenizers[1].batch_decode([p], skip_special_tokens=True)[0]
+        for p in gathered_prompt_ids
+    ]
 
     # 3. Gather all images
     # Approach 1: by saving them in a temp dir
