@@ -43,6 +43,7 @@ from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
 from flow_grpo.datasets.sampler import DistributedKRepeatSampler
 from flow_grpo.scheduler import FlowMatchSlidingWindowScheduler
+from flow_grpo.debug_utils import MemoryProfiler
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -505,6 +506,9 @@ def main(_):
     # set seed (device_specific is very important to get different prompts on different devices)
     set_seed(config.seed, device_specific=True)
 
+    # Initialize memory profiler
+    profiler = MemoryProfiler(accelerator, enable_tensor_accumulation=True, log_file='./memory_profiler.log')
+
     # -------------------------------------------------Set up online log-----------------------------------
     if not config.project_name:
         config.project_name = 'FlowGRPO-Flux'
@@ -525,6 +529,11 @@ def main(_):
     # --------------------------------------Load pipeline----------------------------------
     pipeline, text_encoders, tokenizers = load_pipeline(config, accelerator)
     transformer = pipeline.transformer
+
+    # Register model to profiler
+    profiler.register_model(transformer, "transformer")
+    profiler.snapshot("after_model_loading")
+    
     transformer_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
 
     # This ema setting affects the previous 20 × 8 = 160 steps on average.
@@ -555,6 +564,9 @@ def main(_):
         weight_decay=config.train.adam_weight_decay,
         eps=config.train.adam_epsilon,
     )
+
+    profiler.track_optimizer(optimizer)
+    profiler.snapshot("after_optimizer_init")
 
     # ---------------------------------------Data---------------------------------------
     if config.prompt_fn == "general_ocr":
@@ -628,6 +640,7 @@ These two numbers should be equal
     # remote server running llava inference.
     executor = futures.ThreadPoolExecutor(max_workers=8)
 
+    profiler.snapshot("after_accelerator_prepare")
     # -----------------------------------------Reward fn-----------------------------------------
     # prepare prompt and reward fn
     if accelerator.is_main_process:
@@ -678,6 +691,7 @@ These two numbers should be equal
         #################### EVAL ####################
         pipeline.transformer.eval()
         if config.eval_freq > 0 and epoch % config.eval_freq == 0:
+            profiler.snapshot(f"epoch_{epoch}_before_eval")
             eval(
                 pipeline,
                 test_dataloader,
@@ -692,6 +706,7 @@ These two numbers should be equal
                 ema,
                 transformer_trainable_parameters
             )
+            profiler.snapshot(f"epoch_{epoch}_after_eval")
         if config.save_freq > 0 and epoch % config.save_freq == 0 and accelerator.is_main_process:
             save_ckpt(config.save_dir, transformer, global_step, accelerator, ema, transformer_trainable_parameters, config)
 
@@ -788,6 +803,9 @@ These two numbers should be equal
                 }
             )
 
+            profiler.track_samples(samples, f"sampling")
+            profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
+
         # # 1. Gather all rewards across processes one by one for each sample - may be slow but saves memory
         gathered_rewards = [
             {key: accelerator.gather(sample["rewards"][key]).cpu().numpy() for key in sample["rewards"].keys()}
@@ -879,6 +897,7 @@ These two numbers should be equal
         
         total_batch_size = len(samples)
 
+        profiler.snapshot(f"epoch_{epoch}_before_training")
         #################### TRAINING ####################
         for inner_epoch in range(config.train.num_inner_epochs):
             # shuffle samples along batch dimension
@@ -966,6 +985,18 @@ These two numbers should be equal
 
                         info["loss"].append(loss)
 
+                        training_tensors = {
+                            "prev_sample": prev_sample,
+                            "log_prob": log_prob,
+                            "advantages": advantages,
+                            "ratio": ratio,
+                            "loss": loss,
+                        }
+                        profiler.track_tensors(training_tensors, "training")
+
+                        if i % 10 == 0:
+                            profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_before_backward")
+
                         # backward pass
                         accelerator.backward(loss)
                         if accelerator.sync_gradients:
@@ -974,6 +1005,8 @@ These two numbers should be equal
                             )
                         optimizer.step()
                         optimizer.zero_grad()
+                        if i % 10 == 0:
+                            profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_after_backward")
 
                     # Checks if the accelerator has performed an optimization step behind the scenes
                     if accelerator.sync_gradients:
@@ -986,6 +1019,9 @@ These two numbers should be equal
                         info.update({"epoch": epoch, "inner_epoch": inner_epoch})
                         if accelerator.is_main_process:
                             logging_platform.log(info, step=global_step)
+
+                        profiler.snapshot(f"epoch_{epoch}_step_{i}_after_optimization")
+                        profiler.print_full_report(f"epoch_{epoch}_step_{i}")
                         global_step += 1
                         info = defaultdict(list)
 
@@ -993,7 +1029,11 @@ These two numbers should be equal
                     ema.step(transformer_trainable_parameters, global_step)
             # make sure we did an optimization step at the end of the inner epoch
             # assert accelerator.sync_gradients
-        
+
+        profiler.cleanup_and_snapshot(f"epoch_{epoch}_end")
+        # Clear tensor accumulation info in profiler to save memory
+        profiler.tensor_tracker.clear_stats("sampling")
+        profiler.tensor_tracker.clear_stats("training")
         epoch += 1
         
 if __name__ == "__main__":
