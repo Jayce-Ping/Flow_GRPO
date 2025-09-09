@@ -354,10 +354,13 @@ class GPUMemoryTracker:
         if snapshot and self.accelerator.is_local_main_process:
             # increase = snapshot['allocated_gb'] - self.baseline_memory if self.baseline_memory else 0
             increase = snapshot['allocated_gb'] - (self.last_snapshot['allocated_gb'] if self.last_snapshot else 0)
+            increase_to_base_line = snapshot['allocated_gb'] - self.baseline_memory if self.baseline_memory else 0
             self._print(f"[{stage_name}] GPU Memory Usage:"
                        f"    Allocated: {snapshot['allocated_gb']:.2f}GB, "
                        f"    Reserved: {snapshot['reserved_gb']:.2f}GB, "
-                       f"    Increase: {increase:+.2f}GB")
+                       f"    Increase: {increase:+.2f}GB"
+                       f"    Increase to Baseline: {increase_to_base_line:+.2f}GB"
+                       )
     
     def print_summary(self):
         """打印内存使用总结"""
