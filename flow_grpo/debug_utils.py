@@ -6,6 +6,7 @@ import torch
 from accelerate import Accelerator
 import sys
 from contextlib import contextmanager
+import numpy as np
 
 class ModelMemoryTracker:
     """追踪模型参数的显存使用情况"""
@@ -364,27 +365,38 @@ class GPUMemoryTracker:
             return
             
         self._print("\n=== GPU Memory Summary ===")
-        max_allocated = max(s['allocated_gb'] for s in self.memory_history)
-        max_reserved = max(s['reserved_gb'] for s in self.memory_history)
+        allocated_gbs = np.array([s['allocated_gb'] for s in self.memory_history])
+        max_allocated = np.max(allocated_gbs)
+        max_reserved = np.max([s['reserved_gb'] for s in self.memory_history])
         
         self._print(f"Peak Allocated: {max_allocated:.2f}GB")
         self._print(f"Peak Reserved: {max_reserved:.2f}GB")
+        self._print(f"Baseline Memory: {self.baseline_memory:.2f}GB")
         
-        if len(self.memory_history) >= 2:
-            total_increase = self.memory_history[-1]['allocated_gb'] - self.memory_history[0]['allocated_gb']
-            self._print(f"Total Memory Increase: {total_increase:+.2f}GB")
+        if len(self.memory_history) < 2:
+            self._print("=========================\n")
+            return
         
-        # 显示最大内存增长的阶段
-        max_increase = 0
-        max_stage = ""
-        for i in range(1, len(self.memory_history)):
-            increase = self.memory_history[i]['allocated_gb'] - self.memory_history[i-1]['allocated_gb']
-            if increase > max_increase:
-                max_increase = increase
-                max_stage = self.memory_history[i]['stage']
+        # 显示top-k最大内存增长的阶段
+        top_k = 3
+        if len(self.memory_history) < top_k:
+            top_k = len(self.memory_history)
+
+        total_increase = allocated_gbs[-1] - allocated_gbs[0]
+        self._print(f"Total Memory Increase: {total_increase:+.2f}GB")
         
-        if max_increase > 0:
-            self._print(f"Largest Memory Increase: {max_increase:.2f}GB at stage '{max_stage}'")
+        # 计算每个阶段的内存增长
+        increases = np.diff(allocated_gbs)
+        stages = [s['stage'] for s in self.memory_history[1:]]
+        
+        # 找到top_k最大增长
+        top_indices = np.argsort(increases)[::-1][:top_k]  # 降序排列，取前top_k个
+        
+        self._print("Top Memory Increases:")
+        for i, idx in enumerate(top_indices, 1):
+            if idx < len(stages) and increases[idx] > 0:
+                self._print(f"  #{i}: {increases[idx]:.2f}GB at stage '{stages[idx]}'")
+
         self._print("=========================\n")
     
     def cleanup(self):
