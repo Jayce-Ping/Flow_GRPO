@@ -1037,8 +1037,7 @@ These two numbers should be equal
 
         profiler.cleanup_and_snapshot(f"epoch_{epoch}_end")
         # Clear tensor accumulation info in profiler to save memory
-        profiler.tensor_tracker.clear_stats("sampling")
-        profiler.tensor_tracker.clear_stats("training")
+        profiler.tensor_tracker.clear_stats()
         epoch += 1
         
 if __name__ == "__main__":

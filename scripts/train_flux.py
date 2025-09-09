@@ -825,8 +825,7 @@ These two numbers should be equal
         # samples["rewards"]["avg"] = samples["rewards"]["avg"].unsqueeze(1).repeat(1, num_train_timesteps)
 
         # gather rewards across processes
-        gathered_rewards = {key: accelerator.gather(value) for key, value in samples["rewards"].items()}
-        gathered_rewards = {key: value.cpu().numpy() for key, value in gathered_rewards.items()}
+        gathered_rewards = {key: accelerator.gather(value).cpu().numpy() for key, value in samples["rewards"].items()}
 
         # log rewards and images
         if accelerator.is_main_process:
