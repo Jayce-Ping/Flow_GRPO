@@ -655,7 +655,6 @@ These two numbers should be equal
     if accelerator.is_main_process:
         print(f"Reward dict: {config.reward_fn}")
     reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
-    eval_reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
     if config.enable_mem_log:
         memory_profiler.snapshot("after_loading_reward_fn")
     # ------------------------------------------- Train!------------------------------------------
@@ -712,7 +711,7 @@ These two numbers should be equal
                 accelerator,
                 logging_platform,
                 global_step,
-                eval_reward_fn, executor,
+                reward_fn, executor,
                 autocast,
                 ema,
                 transformer_trainable_parameters
