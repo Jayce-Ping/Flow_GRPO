@@ -1,10 +1,10 @@
-export CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,1
 export WANDB_API_KEY="66795f41320baafdbf8b4a19b62dce232ded0c2e"
-# export WANDB_MODE=disabled
+export WANDB_MODE=disabled
 
 accelerate launch \
     --config_file scripts/accelerate_configs/deepspeed_zero2.yaml \
-    --num_processes=7 \
+    --num_processes=2 \
     --main_process_port 29501 \
     scripts/train_flux_flexible.py \
-    --config config/grpo.py:grid_consistency_clip_flux
+    --config config/grpo.py:subfig_clip_flux_2gpu

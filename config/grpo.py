@@ -21,6 +21,8 @@ def compressibility():
     config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
     config.max_sequence_length = 512
 
+    config.enable_mem_log = True
+
     config.use_lora = True
     config.sample.use_sliding_window = False
 
@@ -542,9 +544,9 @@ def test_flux():
 def subfig_clip_flux_2gpu():
     gpu_number = 2
     config = compressibility()
-    config.logging_platform = "swanlab"
+    # config.logging_platform = "swanlab"
     
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_leq_4")
 
     config.sample.use_sliding_window = True
     config.sample.window_size = 2
@@ -559,8 +561,8 @@ def subfig_clip_flux_2gpu():
     config.resolution = 1024
 
     config.sample.batch_size = 1
-    config.sample.num_image_per_prompt = 24
-    config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
+    config.sample.num_image_per_prompt = 16
+    config.sample.unique_sample_num_per_epoch = 24 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -593,8 +595,8 @@ def subfig_clip_flux_2gpu():
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
-    config.save_freq = 10 # epoch
-    config.eval_freq = 10
+    config.save_freq = 0 # epoch
+    config.eval_freq = 0
     config.save_dir = 'logs/subfig_clipT/flux_2gpu'
     config.reward_fn = {
         "subfig_clipT": 1.0,
@@ -862,8 +864,8 @@ def grid_consistency_clip_flux():
     config.save_dir = '/root/autodl-tmp/checkpoints/flowgrpo/grid-consistency-subclip/flux-7gpu-train-half-leq-4'
     config.reward_fn = {
         "grid_layout": 1.0,
-        "consistency_score": 1,
-        "subfig_clipT" : 4
+        "consistency_score": 0.3,
+        "subfig_clipT" : 0.7
     }
     def agg_fn(grid_layout, consistency_score, subfig_clipT):
         return grid_layout * (consistency_score + subfig_clipT)
