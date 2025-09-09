@@ -48,9 +48,11 @@ def denoising_sde_step_with_logprob(
 
     # Convert noise_level to a tensor with shape (batch_size, 1, 1)
     if isinstance(noise_level, float) or isinstance(noise_level, int):
-        noise_level = torch.tensor([noise_level], device=sample.device, dtype=sample.dtype).repeat(sample.shape[0])
+        noise_level = torch.tensor([noise_level], device=sample.device, dtype=sample.dtype).expand(sample.shape[0])
     elif isinstance(noise_level, list):
         noise_level = torch.tensor(noise_level, device=sample.device, dtype=sample.dtype)
+    elif isinstance(noise_level, torch.Tensor):
+        noise_level = noise_level.to(device=sample.device, dtype=sample.dtype)
 
     step_index = [scheduler.index_for_timestep(t) for t in timestep]
     prev_step_index = [step + 1 for step in step_index]

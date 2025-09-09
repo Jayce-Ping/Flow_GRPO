@@ -917,7 +917,7 @@ These two numbers should be equal
         #################### TRAINING ####################
         for inner_epoch in range(config.train.num_inner_epochs):
             # shuffle samples along batch dimension
-            perm = torch.randperm(total_batch_size, device=accelerator.device)
+            perm = torch.randperm(total_batch_size)
             samples = [samples[i] for i in perm]
 
             # train
