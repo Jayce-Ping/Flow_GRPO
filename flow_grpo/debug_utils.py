@@ -326,7 +326,7 @@ class GPUMemoryTracker:
     def snapshot(self, stage_name: str):
         """记录当前显存使用快照"""
         if not self.accelerator.is_local_main_process:
-            return
+            return None, 0
             
         torch.cuda.empty_cache()
         allocated = torch.cuda.memory_allocated() / 1024**3
@@ -344,16 +344,16 @@ class GPUMemoryTracker:
         if self.baseline_memory is None:
             self.baseline_memory = allocated
 
+        increase = snapshot['allocated_gb'] - (self.last_snapshot['allocated_gb'] if self.last_snapshot else 0)
         self.last_snapshot = snapshot
-            
-        return snapshot
-    
+
+        return snapshot, increase
+
     def print_current(self, stage_name: str):
         """打印当前显存使用"""
-        snapshot = self.snapshot(stage_name)
+        snapshot, increase = self.snapshot(stage_name)
         if snapshot and self.accelerator.is_local_main_process:
             # increase = snapshot['allocated_gb'] - self.baseline_memory if self.baseline_memory else 0
-            increase = snapshot['allocated_gb'] - (self.last_snapshot['allocated_gb'] if self.last_snapshot else 0)
             increase_to_base_line = snapshot['allocated_gb'] - self.baseline_memory if self.baseline_memory else 0
             self._print(f"[{stage_name}] GPU Memory Usage:"
                        f"    Allocated: {snapshot['allocated_gb']:.2f}GB, "

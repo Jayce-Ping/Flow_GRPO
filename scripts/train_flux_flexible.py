@@ -506,9 +506,6 @@ def main(_):
     # set seed (device_specific is very important to get different prompts on different devices)
     set_seed(config.seed, device_specific=True)
 
-    # Initialize memory profiler
-    profiler = MemoryProfiler(accelerator, enable_tensor_accumulation=True, log_file='./memory_profiler.log')
-
     # -------------------------------------------------Set up online log-----------------------------------
     if not config.project_name:
         config.project_name = 'FlowGRPO-Flux'
@@ -525,6 +522,14 @@ def main(_):
     signal.signal(signal.SIGINT, safe_exit)
     
     logger.info(f"\n{config}")
+
+    # -----------------------------------------------Set up memory profiler-----------------------------------
+    # Initialize memory profiler
+    meme_log_file = 'memory.log'
+    # clean up old log file
+    if accelerator.is_main_process and os.path.exists(meme_log_file):
+        os.remove(meme_log_file)
+    profiler = MemoryProfiler(accelerator, enable_tensor_accumulation=True, log_file=meme_log_file)
 
     # --------------------------------------Load pipeline----------------------------------
     pipeline, text_encoders, tokenizers = load_pipeline(config, accelerator)
