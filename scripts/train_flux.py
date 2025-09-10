@@ -81,7 +81,7 @@ def compute_log_prob(
         config : Namespace
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     latents = sample["latents"][:, j]
-    time_steps = sample["timesteps"][:, j]
+    timestep = sample["timesteps"][:, j]
     num_inference_steps = config.sample.num_steps
 
     batch_size = latents.shape[0]
@@ -93,7 +93,7 @@ def compute_log_prob(
     device = latents.device
     dtype = latents.dtype
 
-    noise_levels = sample["noise_levels"][:, j]
+    noise_level = sample["noise_levels"][:, j]
 
     if transformer.module.config.guidance_embeds:
         guidance = torch.tensor([config.sample.guidance_scale], device=device)
@@ -115,7 +115,7 @@ def compute_log_prob(
      # Predict the noise residual
     model_pred = transformer(
         hidden_states=latents,
-        timestep=time_steps / 1000,
+        timestep=timestep / 1000,
         guidance=guidance,
         pooled_projections=sample["pooled_prompt_embeds"],
         encoder_hidden_states=sample["prompt_embeds"],
@@ -129,9 +129,9 @@ def compute_log_prob(
     prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
         scheduler=pipeline.scheduler,
         model_output=model_pred.float(),
-        timestep=time_steps,
+        timestep=timestep,
         sample=latents.float(),
-        noise_level=noise_levels,
+        noise_level=noise_level,
         prev_sample=sample["next_latents"][:, j].float(),
     )
 

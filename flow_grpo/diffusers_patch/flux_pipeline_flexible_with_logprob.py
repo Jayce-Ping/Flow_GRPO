@@ -21,8 +21,6 @@ def compute_log_prob(
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     latents = sample["latents"][:, j]
     timestep = sample["timesteps"][:, j]
-    sigma = sample['sigmas'][:, j]
-    next_sigma = sample['next_sigmas'][:, j]
     noise_level = sample["noise_levels"][:, j]
 
     num_inference_steps = config.sample.num_steps
@@ -30,8 +28,8 @@ def compute_log_prob(
     batch_size = latents.shape[0]
 
     num_channels_latents = pipeline.transformer.config.in_channels // 4
-    height = sample["height"]
-    width = sample["width"]
+    height = sample["heights"][j]
+    width = sample["widths"][j]
     device = latents.device
     dtype = latents.dtype
 
@@ -51,7 +49,7 @@ def compute_log_prob(
         generator=None,
         latents=latents
     )
-
+    # set the scheduler, shift timesteps/sigmas according to image size (image_seq_len)
     sigmas_unshifted = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
     if hasattr(pipeline.scheduler.config, "use_flow_sigmas") and pipeline.scheduler.config.use_flow_sigmas:
         sigmas_unshifted = None
@@ -134,7 +132,13 @@ def pipeline_with_logprob(
     callback_on_step_end_tensor_inputs: List[str] = ["latents"],
     max_sequence_length: int = 512,
     noise_level: Optional[float] = None,
-):
+) -> Tuple[
+        torch.FloatTensor,
+        List[torch.FloatTensor],
+        torch.LongTensor,
+        torch.LongTensor,
+        List[torch.FloatTensor]
+    ]:
     height = height or pipeline.default_sample_size * pipeline.vae_scale_factor
     width = width or pipeline.default_sample_size * pipeline.vae_scale_factor
 
@@ -203,6 +207,8 @@ def pipeline_with_logprob(
         generator,
         latents,
     )
+
+    # 5. Prepare scheduler, shift timesteps/sigmas according to image size (image_seq_len)
     sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
     if hasattr(pipeline.scheduler.config, "use_flow_sigmas") and pipeline.scheduler.config.use_flow_sigmas:
         sigmas = None
@@ -267,7 +273,7 @@ def pipeline_with_logprob(
             latents, log_prob, prev_latents_mean, std_dev_t = denoising_sde_step_with_logprob(
                 scheduler=pipeline.scheduler,
                 model_output=noise_pred.float(),
-                timestep=t.unsqueeze(0).repeat(latents.shape[0]),
+                timestep=timestep,
                 sample=latents.float(),
                 noise_level=current_noise_level,
                 prev_sample=None,

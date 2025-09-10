@@ -111,6 +111,8 @@ def pipeline_with_logprob(
         generator,
         latents,
     )
+
+    # 5. Prepare scheduler, shift timesteps/sigmas according to image size (image_seq_len)
     sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
     if hasattr(pipeline.scheduler.config, "use_flow_sigmas") and pipeline.scheduler.config.use_flow_sigmas:
         sigmas = None

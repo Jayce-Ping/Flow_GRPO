@@ -752,42 +752,69 @@ These two numbers should be equal
                 return_tensors="pt",
             ).input_ids.to(accelerator.device)
 
-            # assert here batch size is 1
-            height = prompt_metadata[0].get('height', config.resolution)
-            width = prompt_metadata[0].get('width', config.resolution)
+            heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
+            widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
 
             # sample
             if config.sample.same_latent:
                 # Same seed for same prompt
-                generator = create_generator(prompts, base_seed=epoch)
+                generators = create_generator(prompts, base_seed=epoch)
             else:
                 # Different initial latent seed
-                generator = None
-            with autocast():
-                with torch.no_grad():
-                    images, all_latents, _, _, all_log_probs = pipeline_with_logprob(
-                        pipeline,
-                        prompt_embeds=prompt_embeds,
-                        pooled_prompt_embeds=pooled_prompt_embeds,
-                        num_inference_steps=config.sample.num_steps,
-                        guidance_scale=config.sample.guidance_scale,
-                        output_type="pt",
-                        height=height,
-                        width=width,
-                        generator=generator
-                )
+                generators = None
 
-            all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
-            all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
+            # If all heights and widths are the same, we can batch them together
+            if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
+                with autocast():
+                    with torch.no_grad():
+                        images, all_latents, _, _, all_log_probs = pipeline_with_logprob(
+                            pipeline,
+                            prompt_embeds=prompt_embeds,
+                            pooled_prompt_embeds=pooled_prompt_embeds,
+                            num_inference_steps=config.sample.num_steps,
+                            guidance_scale=config.sample.guidance_scale,
+                            output_type="pt",
+                            height=heights[0],
+                            width=widths[0],
+                            generator=generators
+                    )
+                
+                all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, C, H, W)
+                all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
+            else:
+                # Different sizes, have to do one by one
+                images = []
+                all_latents = []
+                all_log_probs = []
+                for index in range(len(prompts)):
+                    with autocast():
+                        with torch.no_grad():
+                            this_image, this_all_latents, _, _, this_all_log_probs = pipeline_with_logprob(
+                                pipeline,
+                                prompt_embeds=prompt_embeds[index].unsqueeze(0),
+                                pooled_prompt_embeds=pooled_prompt_embeds[index].unsqueeze(0),
+                                num_inference_steps=config.sample.num_steps,
+                                guidance_scale=config.sample.guidance_scale,
+                                output_type="pt",
+                                height=heights[index],
+                                width=widths[index],
+                                generator=generators[index] if generators is not None else None
+                        )
+                    images.append(this_image.squeeze(0))  # (C, H, W)
+                    all_latents.append(this_all_latents.squeeze(0))  # (window_size + 1, C, H, W)
+                    all_log_probs.append(this_all_log_probs.squeeze(0))  # (window_size, )
+                
+                images = torch.stack(images, dim=0)
+                all_latents = torch.stack(all_latents, dim=0)  # (batch_size, window_size + 1, C, H, W)
+                all_log_probs = torch.stack(all_log_probs, dim=0)  # (batch_size, window_size)
 
+            # Get timesteps, sigmas, noise_levels for later policy ratio calculation
             timesteps = pipeline.scheduler.get_window_timesteps()  # (window_size, )
             noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps], device=accelerator.device).unsqueeze(0)  # (1, window_size)
             timesteps = timesteps.unsqueeze(0).expand(config.sample.batch_size, -1)  # (batch_size, window_size)
             noise_levels = noise_levels.expand(config.sample.batch_size, -1)  # (batch_size, window_size)
-            sigmas = pipeline.scheduler.get_window_sigmas(window_size=config.sample.window_size+1) # (window_size + 1, )
-            sigmas = torch.as_tensor(sigmas, device=accelerator.device).unsqueeze(0).expand(config.sample.batch_size, -1)  # (batch_size, window_size + 1)
 
-            # compute rewards asynchronously
+            # Compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
             # yield to to make sure reward computation starts
             time.sleep(0)
@@ -802,14 +829,12 @@ These two numbers should be equal
 
             samples.append(
                 {
-                    "height": height,
-                    "width": width,
+                    "heights": heights,
+                    "widths": widths,
                     "prompt_ids": prompt_ids,
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
                     'timesteps': timesteps,  # each entry is the timestep t
-                    'sigmas': sigmas[:, :-1],
-                    'next_sigmas': sigmas[:, 1:],
                     "noise_levels": noise_levels,
                     "latents": all_latents[:, :-1],  # each entry is the latent at timestep t - 1 (init latents for 0)
                     "next_latents": all_latents[:, 1:],  # each entry is the latent at timestep t
