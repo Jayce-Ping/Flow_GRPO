@@ -6,8 +6,8 @@ setup(
     packages=find_packages(),
     python_requires=">=3.10",
     install_requires=[
-        "torch==2.6.0",
-        "torchvision==0.21.0",
+        "torch==2.8.0",
+        "torchvision==0.23.0",
         "torchaudio",
         "transformers==4.40.0",
         "accelerate==1.4.0",
