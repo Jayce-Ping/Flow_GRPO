@@ -780,10 +780,9 @@ These two numbers should be equal
             all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
             all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
 
-            timesteps = pipeline.scheduler.get_window_timesteps()  # (window_size,)
-            sigmas = pipeline.scheduler.get_window_sigmas(window_size = config.sample.window_size + 1).unsqueeze(0)  # (1, window_size + 1)
-            sigmas = sigmas.expand(config.sample.batch_size, -1)  # (batch_size, window_size + 1)
-            noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps]).unsqueeze(0)  # (1, window_size)
+            timesteps = pipeline.scheduler.get_window_timesteps()  # (window_size, )
+            noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps], device=accelerator.device).unsqueeze(0)  # (1, window_size)
+            timesteps = timesteps.unsqueeze(0).expand(config.sample.batch_size, -1)  # (batch_size, window_size)
             noise_levels = noise_levels.expand(config.sample.batch_size, -1)  # (batch_size, window_size)
 
             # compute rewards asynchronously
@@ -806,8 +805,7 @@ These two numbers should be equal
                     "prompt_ids": prompt_ids,
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
-                    'sigmas': sigmas[:, :-1], # each entry is the sigma at timestep t - 1 
-                    'next_sigmas': sigmas[:, 1:], # each entry is the sigma at timestep t
+                    'timesteps': timesteps,  # each entry is the timestep t
                     "noise_levels": noise_levels,
                     "latents": all_latents[:, :-1],  # each entry is the latent at timestep t - 1 (init latents for 0)
                     "next_latents": all_latents[:, 1:],  # each entry is the latent at timestep t
