@@ -6,94 +6,103 @@ import numpy as np
 import math
 from typing import Optional, Union
 
+from diffusers import FluxPipeline, FluxTransformer2DModel
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
-from diffusers import FluxPipeline, FluxTransformer2DModel
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
-from .denoising_step_with_logprob import denoising_sde_step_with_logprob
+from ..scheduler import FlowMatchSlidingWindowScheduler
 
-def compute_log_prob(
-        transformer : FluxTransformer2DModel,
-        pipeline : FluxPipeline,
-        sample : dict[str, torch.Tensor],
-        j : int,
-        config : Namespace
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    latents = sample["latents"][:, j]
-    timestep = sample["timesteps"][:, j]
-    noise_level = sample["noise_levels"][:, j]
+def denoising_sde_step_with_logprob(
+    scheduler: FlowMatchSlidingWindowScheduler,
+    model_output: torch.FloatTensor,
+    timestep: Union[float, list[float], torch.FloatTensor],
+    sample: torch.FloatTensor,
+    noise_level: Union[int, float, list[float], torch.FloatTensor] = 0.7,
+    prev_sample: Optional[torch.FloatTensor] = None,
+    generator: Optional[Union[torch.Generator, list[torch.Generator]]] = None
+) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    """
+    Predict the sample from the previous timestep by **reversing** the SDE. This function propagates the flow
+    process from the learned model outputs (most often the predicted velocity). Specially, when noise_level is zero, the process becomes deterministic.
 
-    num_inference_steps = config.sample.num_steps
+    Args:
+        model_output (`torch.FloatTensor`):
+            The direct output from learned flow model.
+        timestep (`float` | `list[float]` | `torch.FloatTensor`):
+            The current discrete timestep(s) in the diffusion chain, with batch dimension.
+        sample (`torch.FloatTensor`):
+            A current instance of a sample created by the diffusion process.
+        noise_level (`int` | `float` | `list[float]` | `torch.FloatTensor`, *optional*, defaults to 0.7):
+            The noise level parameter, can be different for each sample in the batch. This parameter controls the standard deviation of the noise added to the denoised sample.
+        prev_sample (`torch.FloatTensor`):
+            The next insance of the sample. If given, calculate the log_prob using given `prev_sample` as predicted value.
+        generator (`torch.Generator`, *optional*):
+            A random number generator for SDE solving. If not given, a random generator will be used.
+    """
+    # bf16 can overflow here when compute prev_sample_mean, we must convert all variable to fp32
+    model_output = model_output.float()
+    sample = sample.float()
+    if prev_sample is not None:
+        prev_sample = prev_sample.float()
 
-    batch_size = latents.shape[0]
+    if isinstance(timestep, float) or isinstance(timestep, int):
+        # Convert single value to a tensor with shape (batch_size,)
+        timestep = [timestep] * sample.shape[0]
 
-    num_channels_latents = pipeline.transformer.config.in_channels // 4
-    height = sample["heights"][j]
-    width = sample["widths"][j]
-    device = latents.device
-    dtype = latents.dtype
+    # Convert noise_level to a tensor with shape (batch_size, 1, 1)
+    if isinstance(noise_level, float) or isinstance(noise_level, int):
+        noise_level = torch.tensor([noise_level], device=sample.device, dtype=sample.dtype).expand(sample.shape[0])
+    elif isinstance(noise_level, list):
+        noise_level = torch.tensor(noise_level, device=sample.device, dtype=sample.dtype)
+    elif isinstance(noise_level, torch.Tensor):
+        noise_level = noise_level.to(device=sample.device, dtype=sample.dtype)
 
-    if transformer.module.config.guidance_embeds:
-        guidance = torch.tensor([config.sample.guidance_scale], device=device)
-        guidance = guidance.expand(latents.shape[0])
-    else:
-        guidance = None
+    step_index = [scheduler.index_for_timestep(t) for t in timestep]
+    prev_step_index = [step + 1 for step in step_index]
+    # sigmas is a decreasing sequence from 1 to 0, sigma=1 means pure noise, sigma=0 means pure data
+    # sigma here has shape (batch_size, 1, 1)
+    sigma = scheduler.sigmas[step_index].view(-1, *([1] * (len(sample.shape) - 1)))
+    sigma_prev = scheduler.sigmas[prev_step_index].view(-1, *([1] * (len(sample.shape) - 1)))
+    sigma_max = scheduler.sigmas[1].item()
+    dt = sigma_prev - sigma # dt is negative, (batch_size, 1, 1)
 
-    latents, image_ids = pipeline.prepare_latents(
-        batch_size,
-        num_channels_latents,
-        height,
-        width,
-        dtype,
-        device,
-        generator=None,
-        latents=latents
-    )
-    # set the scheduler, shift timesteps/sigmas according to image size (image_seq_len)
-    sigmas_unshifted = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
-    if hasattr(pipeline.scheduler.config, "use_flow_sigmas") and pipeline.scheduler.config.use_flow_sigmas:
-        sigmas_unshifted = None
+    noise_level = noise_level.view(-1, *([1] * (len(sample.shape) - 1)))
 
-    image_seq_len = latents.shape[1]
-
-    mu = calculate_shift(
-        image_seq_len,
-        pipeline.scheduler.config.get("base_image_seq_len", 256),
-        pipeline.scheduler.config.get("max_image_seq_len", 4096),
-        pipeline.scheduler.config.get("base_shift", 0.5),
-        pipeline.scheduler.config.get("max_shift", 1.15),
-    )
-    _, _ = retrieve_timesteps(
-        pipeline.scheduler,
-        num_inference_steps,
-        device,
-        sigmas=sigmas_unshifted,
-        mu=mu,
-    )
-
-     # Predict the noise residual
-    model_pred = transformer(
-        hidden_states=latents,
-        timestep=timestep / 1000,
-        guidance=guidance,
-        pooled_projections=sample["pooled_prompt_embeds"],
-        encoder_hidden_states=sample["prompt_embeds"],
-        txt_ids=torch.zeros(sample["prompt_embeds"].shape[1], 3).to(device=device, dtype=dtype),
-        img_ids=image_ids,
-        return_dict=False,
-    )[0]
+    std_dev_t = torch.sqrt(sigma / (1 - torch.where(sigma == 1, sigma_max, sigma))) * noise_level # (batch_size, 1, 1)
     
-    # compute the log prob of next_latents given latents under the current model
-    # Here, use determistic denoising for normal diffusion process.
-    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
-        scheduler=pipeline.scheduler,
-        model_output=model_pred.float(),
-        timestep=timestep,
-        sample=latents.float(),
-        noise_level=noise_level,
-        prev_sample=sample["next_latents"][:, j].float(),
+    # our sde
+    # Equation (9):
+    #              sigma <-> t
+    #        noise_level <-> a below Equation (9) - gives sigma_t = sqrt(t/(1-t))*a in the paper - corresponsds to std_dev_t = sqrt(sigma/(1-sigma))*noise_level here
+    #                 dt <-> -\delta_t
+    #       model_output <-> v_\theta(x_t, t)
+    #             sample <-> x_t
+    #        prev_sample <-> x_{t+\delta_t}
+    #          std_dev_t <-> sigma_t
+
+    prev_sample_mean = sample * (1 + std_dev_t**2 / (2 * sigma) * dt) + model_output * (1 + std_dev_t**2 * (1 - sigma) / (2 * sigma)) * dt
+    
+    if prev_sample is None:
+        # Non-determistic step, add noise to it
+        variance_noise = randn_tensor(
+            model_output.shape,
+            generator=generator,
+            device=model_output.device,
+            dtype=model_output.dtype,
+        )
+        # Last term of Equation (9)
+        prev_sample = prev_sample_mean + std_dev_t * torch.sqrt(-1 * dt) * variance_noise
+
+    log_prob = (
+        -((prev_sample.detach() - prev_sample_mean) ** 2) / (2 * ((std_dev_t * torch.sqrt(-1 * dt)) ** 2))
+        - torch.log(std_dev_t * torch.sqrt(-1 * dt))
+        - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
     )
 
+    # mean along all but batch dimension
+    log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
+    
+    # Returns x_{t+\delta_t}, log_prob, x_{t+\delta_t} mean, sigma_t
     return prev_sample, log_prob, prev_sample_mean, std_dev_t
 
 
@@ -109,6 +118,95 @@ def calculate_shift(
     mu = image_seq_len * m + b
     return mu
 
+
+def compute_log_prob(
+        transformer : FluxTransformer2DModel,
+        pipeline : FluxPipeline,
+        sample : dict[str, torch.Tensor],
+        j : int,
+        config : Namespace
+    ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    # 1. Prepare parameters
+    latents = sample["latents"][:, j]
+    num_inference_steps = config.sample.num_steps
+    scheduler = pipeline.scheduler
+    timestep_index = scheduler.left_boundary + j # timestep index in the scheduler.timesteps
+
+    batch_size = latents.shape[0]
+    num_channels_latents = pipeline.transformer.config.in_channels // 4
+    height = sample["heights"][j]
+    width = sample["widths"][j]
+    device = latents.device
+    dtype = latents.dtype
+
+    # 2. Prepare image_ids
+    latents, image_ids = pipeline.prepare_latents(
+        batch_size,
+        num_channels_latents,
+        height,
+        width,
+        dtype,
+        device,
+        generator=None,
+        latents=latents
+    )
+    # 3. Set the scheduler, shift timesteps/sigmas according to image size (image_seq_len)
+    sigmas_unshifted = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas_unshifted is None else sigmas_unshifted
+    if hasattr(pipeline.scheduler.config, "use_flow_sigmas") and pipeline.scheduler.config.use_flow_sigmas:
+        # FluxPipeline.scheduler is FlowMatchEulerDiscreteScheduler, which has no such attribute, so sigmas_unshifted=None it is
+        sigmas_unshifted = None
+
+    image_seq_len = latents.shape[1]
+    mu = calculate_shift(
+        image_seq_len,
+        pipeline.scheduler.config.get("base_image_seq_len", 256),
+        pipeline.scheduler.config.get("max_image_seq_len", 4096),
+        pipeline.scheduler.config.get("base_shift", 0.5),
+        pipeline.scheduler.config.get("max_shift", 1.15),
+    )
+    timesteps, num_inference_steps = retrieve_timesteps(
+        pipeline.scheduler,
+        num_inference_steps,
+        device,
+        sigmas=sigmas_unshifted,
+        mu=mu,
+    )
+    timestep = timesteps[timestep_index].expand(latents.shape[0])
+
+    # 4. Prepare guidance and predict the noise residual
+    if transformer.module.config.guidance_embeds:
+        guidance = torch.tensor([config.sample.guidance_scale], device=device)
+        guidance = guidance.expand(latents.shape[0])
+    else:
+        guidance = None
+
+     # Predict the noise residual
+    model_pred = transformer(
+        hidden_states=latents,
+        timestep=timestep / 1000, # which is scheduler.sigmas[timestep_index] exactly
+        guidance=guidance,
+        pooled_projections=sample["pooled_prompt_embeds"],
+        encoder_hidden_states=sample["prompt_embeds"],
+        txt_ids=torch.zeros(sample["prompt_embeds"].shape[1], 3).to(device=device, dtype=dtype),
+        img_ids=image_ids,
+        return_dict=False,
+    )[0]
+    
+    # 5. Compute log prob
+    # Compute the log prob of next_latents given latents under the current model
+    # Here, use determistic denoising for normal diffusion process.
+    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
+        scheduler=pipeline.scheduler,
+        model_output=model_pred.float(),
+        timestep=timestep,
+        sample=latents.float(),
+        noise_level=config.noise_level,
+        prev_sample=sample["next_latents"][:, j].float(),
+    )
+
+    return prev_sample, log_prob, prev_sample_mean, std_dev_t
+
+
 @torch.no_grad()
 def pipeline_with_logprob(
     pipeline,
@@ -119,7 +217,7 @@ def pipeline_with_logprob(
     height: Optional[int] = None,
     width: Optional[int] = None,
     num_inference_steps: int = 28,
-    sigmas: Optional[List[float]] = None,
+    sigmas_unshifted: Optional[List[float]] = None,
     guidance_scale: float = 3.5,
     generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
     latents: Optional[torch.FloatTensor] = None,
@@ -135,8 +233,6 @@ def pipeline_with_logprob(
 ) -> Tuple[
         torch.FloatTensor,
         List[torch.FloatTensor],
-        torch.LongTensor,
-        torch.LongTensor,
         List[torch.FloatTensor]
     ]:
     height = height or pipeline.default_sample_size * pipeline.vae_scale_factor
@@ -209,9 +305,11 @@ def pipeline_with_logprob(
     )
 
     # 5. Prepare scheduler, shift timesteps/sigmas according to image size (image_seq_len)
-    sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
+    sigmas_unshifted = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas_unshifted is None else sigmas_unshifted
     if hasattr(pipeline.scheduler.config, "use_flow_sigmas") and pipeline.scheduler.config.use_flow_sigmas:
-        sigmas = None
+        # FluxPipeline.scheduler is FlowMatchEulerDiscreteScheduler, which has no such attribute, so sigmas_unshifted=None it is
+        sigmas_unshifted = None
+
     image_seq_len = latents.shape[1]
     mu = calculate_shift(
         image_seq_len,
@@ -224,9 +322,10 @@ def pipeline_with_logprob(
         pipeline.scheduler,
         num_inference_steps,
         device,
-        sigmas=sigmas,
+        sigmas=sigmas_unshifted,
         mu=mu,
     )
+    # FlowMatchEulerDiscreteScheduler has order 1, which gives num_warmup_steps=0
     num_warmup_steps = max(len(timesteps) - num_inference_steps * pipeline.scheduler.order, 0)
     pipeline._num_timesteps = len(timesteps)
 
@@ -236,12 +335,10 @@ def pipeline_with_logprob(
         guidance = guidance.expand(latents.shape[0])
     else:
         guidance = None
-    
-    # 6. Prepare image embeddings
+
+    # 6. Denoising loop
     all_latents = []
     all_log_probs = []
-
-    # 7. Denoising loop
     pipeline.scheduler.set_begin_index(0)
     with pipeline.progress_bar(total=num_inference_steps) as progress_bar:
         for i, t in enumerate(timesteps):
@@ -298,4 +395,4 @@ def pipeline_with_logprob(
     # Offload all models
     pipeline.maybe_free_model_hooks()
 
-    return images, all_latents, latent_image_ids, text_ids, all_log_probs
+    return images, all_latents, all_log_probs

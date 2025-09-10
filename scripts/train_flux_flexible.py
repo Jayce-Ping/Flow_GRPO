@@ -131,7 +131,7 @@ def eval(pipeline : FluxPipeline,
                 height = heights[i]
                 width = widths[i]
                 with autocast():
-                    imgs, _, _, _, _ = pipeline_with_logprob(
+                    imgs, _, _ = pipeline_with_logprob(
                         pipeline,
                         prompt_embeds=prompt_embeds[i].unsqueeze(0),
                         pooled_prompt_embeds=pooled_prompt_embeds[i].unsqueeze(0),
@@ -156,7 +156,7 @@ def eval(pipeline : FluxPipeline,
         else:
             # Batch inference if all sizes are the same
             with autocast():
-                images, _, _, _, _ = pipeline_with_logprob(
+                images, _, _, = pipeline_with_logprob(
                     pipeline,
                     prompt_embeds=prompt_embeds,
                     pooled_prompt_embeds=pooled_prompt_embeds,
@@ -767,7 +767,7 @@ These two numbers should be equal
             if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
                 with autocast():
                     with torch.no_grad():
-                        images, all_latents, _, _, all_log_probs = pipeline_with_logprob(
+                        images, all_latents, all_log_probs = pipeline_with_logprob(
                             pipeline,
                             prompt_embeds=prompt_embeds,
                             pooled_prompt_embeds=pooled_prompt_embeds,
@@ -789,7 +789,7 @@ These two numbers should be equal
                 for index in range(len(prompts)):
                     with autocast():
                         with torch.no_grad():
-                            this_image, this_all_latents, _, _, this_all_log_probs = pipeline_with_logprob(
+                            this_image, this_all_latents, this_all_log_probs = pipeline_with_logprob(
                                 pipeline,
                                 prompt_embeds=prompt_embeds[index].unsqueeze(0),
                                 pooled_prompt_embeds=pooled_prompt_embeds[index].unsqueeze(0),
@@ -807,12 +807,6 @@ These two numbers should be equal
                 images = torch.stack(images, dim=0)
                 all_latents = torch.stack(all_latents, dim=0)  # (batch_size, window_size + 1, C, H, W)
                 all_log_probs = torch.stack(all_log_probs, dim=0)  # (batch_size, window_size)
-
-            # Get timesteps, sigmas, noise_levels for later policy ratio calculation
-            timesteps = pipeline.scheduler.get_window_timesteps()  # (window_size, )
-            noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps], device=accelerator.device).unsqueeze(0)  # (1, window_size)
-            timesteps = timesteps.unsqueeze(0).expand(config.sample.batch_size, -1)  # (batch_size, window_size)
-            noise_levels = noise_levels.expand(config.sample.batch_size, -1)  # (batch_size, window_size)
 
             # Compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
@@ -834,8 +828,6 @@ These two numbers should be equal
                     "prompt_ids": prompt_ids,
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
-                    'timesteps': timesteps,  # each entry is the timestep t
-                    "noise_levels": noise_levels,
                     "latents": all_latents[:, :-1],  # each entry is the latent at timestep t - 1 (init latents for 0)
                     "next_latents": all_latents[:, 1:],  # each entry is the latent at timestep t
                     "log_probs": all_log_probs,
