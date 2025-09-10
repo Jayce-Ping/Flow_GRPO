@@ -849,13 +849,12 @@ These two numbers should be equal
 
         # gather rewards across processes
         gathered_rewards = {key: accelerator.gather(value).cpu().numpy() for key, value in samples["rewards"].items()}
-
         # log rewards and images
         if accelerator.is_main_process:
             logging_platform.log(
                 {
                     "epoch": epoch,
-                    **{f"reward_{key}": value.mean() for key, value in gathered_rewards.items() if '_strict_accuracy' not in key and '_accuracy' not in key},
+                    **{f"reward_{key}": value.mean() for key, value in gathered_rewards.items()},
                 },
                 step=global_step,
             )

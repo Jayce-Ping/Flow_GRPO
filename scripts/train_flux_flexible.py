@@ -784,6 +784,8 @@ These two numbers should be equal
             noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps], device=accelerator.device).unsqueeze(0)  # (1, window_size)
             timesteps = timesteps.unsqueeze(0).expand(config.sample.batch_size, -1)  # (batch_size, window_size)
             noise_levels = noise_levels.expand(config.sample.batch_size, -1)  # (batch_size, window_size)
+            sigmas = pipeline.scheduler.get_window_sigmas(window_size=config.sample.window_size+1) # (window_size + 1, )
+            sigmas = torch.as_tensor(sigmas, device=accelerator.device).unsqueeze(0).expand(config.sample.batch_size, -1)  # (batch_size, window_size + 1)
 
             # compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
@@ -806,6 +808,8 @@ These two numbers should be equal
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
                     'timesteps': timesteps,  # each entry is the timestep t
+                    'sigmas': sigmas[:, :-1],
+                    'next_sigmas': sigmas[:, 1:],
                     "noise_levels": noise_levels,
                     "latents": all_latents[:, :-1],  # each entry is the latent at timestep t - 1 (init latents for 0)
                     "next_latents": all_latents[:, 1:],  # each entry is the latent at timestep t
@@ -818,27 +822,13 @@ These two numbers should be equal
                 memory_profiler.track_samples(samples, f"sampling")
                 memory_profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
 
-        # # 1. Gather all rewards across processes one by one for each sample - may be slow but saves memory
-        gathered_rewards = [
-            {key: accelerator.gather(sample["rewards"][key]).cpu().numpy() for key in sample["rewards"].keys()}
-            for sample in samples
-        ]
-        # gathered_rewards : List[Dict] -> Dict[List]
+        # Gather rewards across processes
         gathered_rewards = {
-            key: np.concatenate([gr[key] for gr in gathered_rewards], axis=0)
-            for key in gathered_rewards[0].keys()
+            key: accelerator.gather(
+                torch.cat([s["rewards"][key] for s in samples], dim=0)
+            ).cpu().numpy()
+            for key in samples[0]["rewards"].keys()
         }
-
-        # 2. Gather rewards across processes at once for all samples - may be faster but uses more memory
-        # gathered_rewards = {
-        #     key: accelerator.gather(
-        #         torch.cat(
-        #             [s["rewards"][key] for s in samples],
-        #             dim=0
-        #         )
-        #     ).cpu().numpy()
-        #     for key in samples[0]["rewards"].keys()
-        # }
 
         # log rewards and images
         if accelerator.is_main_process:
@@ -891,15 +881,15 @@ These two numbers should be equal
 
         # ungather advantages; we only need to keep the entries corresponding to the samples on this process
         advantages = torch.as_tensor(advantages)
-        all_advantages = (
+        advantages = (
             advantages.reshape(accelerator.num_processes, -1, *advantages.shape[1:])[accelerator.process_index]
             .to(accelerator.device)
         )
         for i, sample in enumerate(samples):
-            sample['advantages'] = all_advantages[i]
+            sample['advantages'] = advantages[i]
 
         if accelerator.is_local_main_process:
-            print("advantages: ", all_advantages.abs().mean())
+            print("advantages: ", advantages.abs().mean())
 
         # clean up to save memory
         del gathered_rewards
