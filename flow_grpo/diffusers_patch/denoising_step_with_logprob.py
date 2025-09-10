@@ -2,7 +2,7 @@
 # We adapt it from flow to flow matching.
 
 import math
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 import torch
 
 from diffusers.utils.torch_utils import randn_tensor
@@ -17,7 +17,7 @@ def denoising_sde_step_with_logprob(
     noise_level: Union[int, float, list[float], torch.FloatTensor] = 0.7,
     prev_sample: Optional[torch.FloatTensor] = None,
     generator: Optional[Union[torch.Generator, list[torch.Generator]]] = None
-):
+) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
     """
     Predict the sample from the previous timestep by **reversing** the SDE. This function propagates the flow
     process from the learned model outputs (most often the predicted velocity). Specially, when noise_level is zero, the process becomes deterministic.
@@ -46,14 +46,6 @@ def denoising_sde_step_with_logprob(
         # Convert single value to a tensor with shape (batch_size,)
         timestep = [timestep] * sample.shape[0]
 
-    # Convert noise_level to a tensor with shape (batch_size, 1, 1)
-    if isinstance(noise_level, float) or isinstance(noise_level, int):
-        noise_level = torch.tensor([noise_level], device=sample.device, dtype=sample.dtype).expand(sample.shape[0])
-    elif isinstance(noise_level, list):
-        noise_level = torch.tensor(noise_level, device=sample.device, dtype=sample.dtype)
-    elif isinstance(noise_level, torch.Tensor):
-        noise_level = noise_level.to(device=sample.device, dtype=sample.dtype)
-
     step_index = [scheduler.index_for_timestep(t) for t in timestep]
     prev_step_index = [step + 1 for step in step_index]
     # sigmas is a decreasing sequence from 1 to 0, sigma=1 means pure noise, sigma=0 means pure data
@@ -63,7 +55,8 @@ def denoising_sde_step_with_logprob(
     sigma_max = scheduler.sigmas[1].item()
     dt = sigma_prev - sigma # dt is negative, (batch_size, 1, 1)
 
-    noise_level = noise_level.view(-1, *([1] * (len(sample.shape) - 1)))
+    # Convert noise_level to a tensor with shape (batch_size, 1, 1)
+    noise_level = torch.as_tensor(noise_level).view(-1, *([1] * (len(sample.shape) - 1)))
 
     std_dev_t = torch.sqrt(sigma / (1 - torch.where(sigma == 1, sigma_max, sigma))) * noise_level # (batch_size, 1, 1)
     
