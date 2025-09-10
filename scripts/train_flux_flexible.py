@@ -482,8 +482,6 @@ def main(_):
     # basic Accelerate and logging setup
     config = FLAGS.config
 
-    assert config.sample.batch_size == 1 and config.train.batch_size == 1, "Only batch size 1 is supported for flexible size training"
-
     # number of timesteps within each trajectory to train on
     if config.sample.use_sliding_window:
         num_train_timesteps = config.sample.window_size 

@@ -151,7 +151,7 @@ def compute_log_prob(
         latents=latents
     )
     # 3. Set the scheduler, shift timesteps/sigmas according to image size (image_seq_len)
-    sigmas_unshifted = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas_unshifted is None else sigmas_unshifted
+    sigmas_unshifted = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
     if hasattr(pipeline.scheduler.config, "use_flow_sigmas") and pipeline.scheduler.config.use_flow_sigmas:
         # FluxPipeline.scheduler is FlowMatchEulerDiscreteScheduler, which has no such attribute, so sigmas_unshifted=None it is
         sigmas_unshifted = None
@@ -171,7 +171,7 @@ def compute_log_prob(
         sigmas=sigmas_unshifted,
         mu=mu,
     )
-    timestep = timesteps[timestep_index].expand(latents.shape[0])
+    timestep = timesteps[timestep_index]
 
     # 4. Prepare guidance and predict the noise residual
     if transformer.module.config.guidance_embeds:
@@ -183,7 +183,7 @@ def compute_log_prob(
      # Predict the noise residual
     model_pred = transformer(
         hidden_states=latents,
-        timestep=timestep / 1000, # which is scheduler.sigmas[timestep_index] exactly
+        timestep=timestep.expand(latents.shape[0]) / 1000, # which is scheduler.sigmas[timestep_index] exactly
         guidance=guidance,
         pooled_projections=sample["pooled_prompt_embeds"],
         encoder_hidden_states=sample["prompt_embeds"],
@@ -198,9 +198,9 @@ def compute_log_prob(
     prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
         scheduler=pipeline.scheduler,
         model_output=model_pred.float(),
-        timestep=timestep,
+        timestep=timestep.unsqueeze(0).repeat(latents.shape[0]),
         sample=latents.float(),
-        noise_level=config.noise_level,
+        noise_level=config.sample.noise_level,
         prev_sample=sample["next_latents"][:, j].float(),
     )
 
@@ -217,7 +217,7 @@ def pipeline_with_logprob(
     height: Optional[int] = None,
     width: Optional[int] = None,
     num_inference_steps: int = 28,
-    sigmas_unshifted: Optional[List[float]] = None,
+    sigmas: Optional[List[float]] = None,
     guidance_scale: float = 3.5,
     generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
     latents: Optional[torch.FloatTensor] = None,
@@ -305,10 +305,9 @@ def pipeline_with_logprob(
     )
 
     # 5. Prepare scheduler, shift timesteps/sigmas according to image size (image_seq_len)
-    sigmas_unshifted = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas_unshifted is None else sigmas_unshifted
+    sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
     if hasattr(pipeline.scheduler.config, "use_flow_sigmas") and pipeline.scheduler.config.use_flow_sigmas:
-        # FluxPipeline.scheduler is FlowMatchEulerDiscreteScheduler, which has no such attribute, so sigmas_unshifted=None it is
-        sigmas_unshifted = None
+        sigmas = None
 
     image_seq_len = latents.shape[1]
     mu = calculate_shift(
@@ -322,7 +321,7 @@ def pipeline_with_logprob(
         pipeline.scheduler,
         num_inference_steps,
         device,
-        sigmas=sigmas_unshifted,
+        sigmas=sigmas,
         mu=mu,
     )
     # FlowMatchEulerDiscreteScheduler has order 1, which gives num_warmup_steps=0
@@ -370,7 +369,7 @@ def pipeline_with_logprob(
             latents, log_prob, prev_latents_mean, std_dev_t = denoising_sde_step_with_logprob(
                 scheduler=pipeline.scheduler,
                 model_output=noise_pred.float(),
-                timestep=timestep,
+                timestep=t.unsqueeze(0).repeat(latents.shape[0]),
                 sample=latents.float(),
                 noise_level=current_noise_level,
                 prev_sample=None,
