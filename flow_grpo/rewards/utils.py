@@ -48,33 +48,60 @@ def tensor_list_to_pil_image(tensor_list: List[torch.Tensor]) -> List[Image.Imag
     if not tensor_list:
         return []
 
-    batch = torch.stack([
-        t if t.dim() == 3 else t.squeeze(0)
-        for t in tensor_list
-    ], dim=0)
-    # Normalize, to uint8
-    batch = (batch * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
-    # NCHW -> NHWC
-    if batch.shape[1] == 3:
-        batch = batch.transpose(0, 2, 3, 1)
-    return [Image.fromarray(img) for img in batch]
+    # If all image tensors have the same shape, stack them directly
+    if all(tensor.shape == tensor_list[0].shape for tensor in tensor_list):
+        batch = torch.stack([
+            t if t.dim() == 3 else t.squeeze(0)
+            for t in tensor_list
+        ], dim=0)
+        # Normalize, to uint8
+        batch = (batch * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+        # NCHW -> NHWC
+        if batch.shape[1] == 3:
+            batch = batch.transpose(0, 2, 3, 1)
+        return [Image.fromarray(img) for img in batch]
+    else:
+        # Process each tensor individually
+        images = []
+        for t in tensor_list:
+            if t.dim() == 4 and t.shape[0] == 1:
+                t = t.squeeze(0)
+            img = (t * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+            if img.shape[0] == 3:
+                img = img.transpose(1, 2, 0)  # CHW -> HWC
+            images.append(Image.fromarray(img))
+        return images
 
 def numpy_list_to_pil_image(numpy_list: List[np.ndarray]) -> List[Image.Image]:
     if not numpy_list:
         return []
-    # Stack to batch
-    batch = np.stack([
-        arr if arr.ndim == 3 else arr.squeeze(0)
-        for arr in numpy_list
-    ], axis=0)
-    # Normalize, to uint8
-    if batch.max() <= 1.0:
-        batch = (batch * 255).round()
-    batch = np.clip(batch, 0, 255).astype(np.uint8)
-    # NCHW -> NHWC
-    if batch.shape[1] == 3:
-        batch = batch.transpose(0, 2, 3, 1)
-    return [Image.fromarray(img) for img in batch]
+    # If all image arrays have the same shape, stack them directly
+    if all(arr.shape == numpy_list[0].shape for arr in numpy_list):
+        batch = np.stack([
+            arr if arr.ndim == 3 else arr.squeeze(0)
+            for arr in numpy_list
+        ], axis=0)
+        # Normalize, to uint8
+        if batch.max() <= 1.0:
+            batch = (batch * 255).round()
+        batch = np.clip(batch, 0, 255).astype(np.uint8)
+        # NCHW -> NHWC
+        if batch.shape[1] == 3:
+            batch = batch.transpose(0, 2, 3, 1)
+        return [Image.fromarray(img) for img in batch]
+    else:
+        # Process each array individually
+        images = []
+        for arr in numpy_list:
+            if arr.ndim == 4 and arr.shape[0] == 1:
+                arr = arr.squeeze(0)
+            if arr.max() <= 1.0:
+                arr = (arr * 255).round()
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+            if arr.shape[0] == 3:
+                arr = arr.transpose(1, 2, 0)  # CHW -> HWC
+            images.append(Image.fromarray(arr))
+        return images
 
 
 # -------------------------------------Grid Utils-------------------------------------
