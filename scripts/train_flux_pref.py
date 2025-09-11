@@ -840,7 +840,7 @@ These two numbers should be equal
                 memory_profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
 
         prompt_ids = accelerator.gather(torch.cat([s["prompt_ids"] for s in samples], dim=0))
-        # TODO: images donot have same size, cannot be concatenated, save in a temp dir instead
+        # Images do not have same size, cannot be concatenated, save in a temp dir instead
         temp_dir = os.path.join(config.save_dir, 'temp_train_images')
         os.makedirs(temp_dir, exist_ok=True)
         for s in samples:
