@@ -180,23 +180,27 @@ def get_yes_cond_prob_from_completion(completion : openai.ChatCompletion, canoni
             # Sum all possible cases together
             # 'yes', 'Yes', 'YES', 'yes ',....
             # 'no', 'No', 'NO',....
-            token_probs = {t.token: torch.exp(t.logprob, dtype=torch.float64).item() for t in logprobs.content[0].top_logprobs}
-            yes_prob_sum = 0.0
-            no_prob_sum = 0.0
-            for token, prob in token_probs.items():
-                token_stripped = token.strip().lower()
-                if token_stripped == "yes":
-                    yes_logprob_sum += prob
-                elif token_stripped == "no":
-                    no_prob_sum += prob
-
-            total = yes_logprob_sum + no_prob_sum
+            token_probs = {t.token: np.exp(t.logprob, dtype=np.float64) for t in logprobs.content[0].top_logprobs}
+            
+            # Vectorized computation
+            tokens = np.array(list(token_probs.keys()))
+            probs = np.array(list(token_probs.values()))
+            
+            # Strip and lower the tokens for matching
+            tokens_stripped = np.array([token.strip().lower() for token in tokens])
+            
+            yes_mask = tokens_stripped == "yes"
+            no_mask = tokens_stripped == "no"
+            
+            yes_prob_sum = probs[yes_mask].sum()
+            no_prob_sum = probs[no_mask].sum()
+            
+            total = yes_prob_sum + no_prob_sum
 
             if total == 0.0:
                 yes_cond_prob = 0.0
             else:
-                yes_cond_prob = yes_logprob_sum / total
-
+                yes_cond_prob = yes_prob_sum / total
     else:
         # log_prob cannot be derived here. Return 0.0.
         # TODO
