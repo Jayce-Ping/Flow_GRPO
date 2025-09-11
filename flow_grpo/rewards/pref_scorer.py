@@ -48,10 +48,39 @@ def pref_score():
 
     return _fn
 
+
+def build_messages(image1 : Image.Image, image2 : Image.Image, prompt: str):
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are an evaluator. Compare two images and decide whether the first image "
+                "demonstrates better overall consistency than the second image. "
+                "Consistency includes: "
+                "- Theme Consistency (same topic or scenario across sub-images) "
+                "- Style Consistency (colors, rendering style coherent) "
+                "- Logical Consistency (actions or objects connect logically without contradictions). "
+                "Answer strictly with 'Yes' or 'No'. Do not provide explanations."
+            ),
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": f"Image description: {prompt}"},
+                {"type": "image_url", "image_url": {"url": pil_image_to_base64(image1)}},
+                {"type": "image_url", "image_url": {"url": pil_image_to_base64(image2)}},
+                {"type": "text", "text": "Question: Does the first image have better consistency than the second image?"}
+            ],
+        },
+    ]
+    return messages
+
+
 class PrefScorer:
     def __init__(
             self,
-            client: Union[OpenAI, AsyncOpenAI],
+            client: AsyncOpenAI,
             model='Qwen2.5-VL-7B-Instruct',
             criteria_path='prompt_consistency_criterion.json',
             async_mode=True,
@@ -100,8 +129,8 @@ class PrefScorer:
         async def compare_image_pair(image1, image2):
             async with global_semaphore:
                 # Symmetric comparison for better reliability
-                completion1 = await self.compare_image(image1, image2)
-                completion2 = await self.compare_image(image2, image1)
+                completion1 = await self.compare_image(image1, image2, prompt)
+                completion2 = await self.compare_image(image2, image1, prompt)
                 prob1 = get_yes_cond_prob_from_completion(completion1, canonicalize=True)
                 prob2 = get_yes_cond_prob_from_completion(completion2, canonicalize=True)
                 return int(prob1 > prob2), int(prob2 > prob1)
@@ -121,20 +150,10 @@ class PrefScorer:
             self,
             image1 : Image.Image,
             image2 : Image.Image,
-            criteria_text : str = "",
+            prompt : str = "",
             top_logprobs: int = 20
         ) -> openai.ChatCompletion:
-        messages = [
-            {
-                "role": "user",
-                "content":
-                [
-                    {"type": "image_url", "image_url": {"url": pil_image_to_base64(image1)}},
-                    {"type": "image_url", "image_url": {"url": pil_image_to_base64(image2)}},
-                    {"type": "text", "text": f"From the perspective of consistency, is the first image better than the second one? Answer with 'Yes' or 'No'."},
-                ]
-            }
-        ]
+        messages = build_messages(image1, image2, prompt)
         for attempt in range(self.max_retries):
             try:
                 completion = await self.client.chat.completions.create(
