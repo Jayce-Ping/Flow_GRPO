@@ -926,6 +926,9 @@ These two numbers should be equal
             del sample["rewards"]
             del sample["prompt_ids"]
             del sample["image"]
+        
+        # clean up temp dir
+        shutil.rmtree(temp_dir)
 
         total_batch_size = len(samples)
 
