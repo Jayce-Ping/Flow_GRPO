@@ -811,8 +811,8 @@ These two numbers should be equal
                                 generator=generators[index] if generators is not None else None
                         )
                     images.append(this_image.squeeze(0).cpu().numpy())  # add (C, H, W)
-                    all_latents.append(this_all_latents.squeeze(0))  # add (window_size + 1, C, H, W)
-                    all_log_probs.append(this_all_log_probs.squeeze(0))  # add (window_size, )
+                    all_latents.append(this_all_latents[0])  # add (window_size + 1, C, H, W)
+                    all_log_probs.append(this_all_log_probs[0])  # add (window_size, )
                 
                 # images: List[Tensor(C, H, W)] with length batch_size
                 # all_latents: List[Tensor(window_size + 1, C, H, W)] with length batch_size
@@ -839,8 +839,7 @@ These two numbers should be equal
                 memory_profiler.track_samples(samples, f"sampling")
                 memory_profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
 
-        prompt_ids = accelerator.gather(torch.cat([s["prompt_ids"] for s in samples], dim=0))
-        # TODO: images donot have same size, cannot be concatenated, save in a temp dir instead
+        # Images do not have same size, cannot be concatenated, save in a temp dir instead
         temp_dir = os.path.join(config.save_dir, 'temp_train_images')
         os.makedirs(temp_dir, exist_ok=True)
         for s in samples:
@@ -853,9 +852,11 @@ These two numbers should be equal
         gathered_images = [os.path.join(temp_dir, f) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
         gathered_images = [Image.open(f) for f in gathered_images]
 
+        prompt_ids = accelerator.gather(torch.cat([s["prompt_ids"] for s in samples], dim=0))
         prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
         # The rewards itself contains rewards from all processes because images and prompts are gathered
         pref_rewards, _ = executor.submit(reward_fn, gathered_images, prompts, [{}]*len(prompts)).result()  # dummy metadata
+        print("pref_rewards shape", np.array(pref_rewards).shape)
         gathered_rewards = {
             'avg': np.array(pref_rewards),
             'pref_score': np.array(pref_rewards),
@@ -875,6 +876,9 @@ These two numbers should be equal
 
         # per-prompt mean/std tracking
         if config.per_prompt_stat_tracking:
+            print("Prompt ids shape:", prompt_ids.shape)
+            print("Number of prompts:", len(prompts))
+            print("Number of images": len(gathered_images))
             # gather the prompts across processes
             advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
             if accelerator.is_local_main_process:
@@ -926,6 +930,9 @@ These two numbers should be equal
             del sample["rewards"]
             del sample["prompt_ids"]
             del sample["image"]
+        
+        # clean up temp dir
+        shutil.rmtree(temp_dir)
 
         total_batch_size = len(samples)
 
