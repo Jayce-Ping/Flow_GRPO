@@ -110,7 +110,7 @@ def eval(pipeline : FluxPipeline,
                 pipeline,
                 prompt_embeds=prompt_embeds,
                 pooled_prompt_embeds=pooled_prompt_embeds,
-                num_inference_steps=config.sample.eval_num_steps,
+                num_inference_steps=config.eval_numsteps,
                 guidance_scale=config.sample.guidance_scale,
                 output_type="pt",
                 height=config.resolution,
@@ -569,7 +569,7 @@ These two numbers should be equal
     # Create a regular DataLoader
     test_dataloader = DataLoader(
         test_dataset,
-        batch_size=config.test_batch_size,
+        batch_size=config.test.batch_size,
         collate_fn=collate_fn,
         shuffle=False,
         num_workers=8,

@@ -40,14 +40,11 @@ def get_config():
     config.sample = sample = ml_collections.ConfigDict()
     # number of sampler inference steps for collecting dataset.
     sample.num_steps = 40
-    # number of sampler inference steps for evaluation.
-    sample.eval_num_steps = 40
     # classifier-free guidance weight. 1.0 is no guidance.
     sample.guidance_scale = 4.5
     # batch size (per GPU!) to use for sampling.
     sample.batch_size = 1
     sample.num_image_per_prompt = 1
-    sample.test_batch_size = 1
     # number of batches to sample per epoch. the total number of samples per epoch is `num_batches_per_epoch *
     # batch_size * num_gpus`.
     sample.num_batches_per_epoch = 2
@@ -57,6 +54,13 @@ def get_config():
     sample.noise_level = 0.7
     # Whether to use the same noise for the same prompt
     sample.same_latent = False
+
+    ###### Evaluation ######
+    config.test = test = ml_collections.ConfigDict()
+    # batch size (per GPU!) to use for evaluation.
+    test.batch_size = 1
+    # number of sampler inference steps for evaluation.
+    test.num_steps = 40
     
     ###### Training ######
     config.train = train = ml_collections.ConfigDict()
