@@ -1,0 +1,161 @@
+import os
+import re
+import json
+from socket import timeout
+from typing import List, Tuple, Union
+from io import BytesIO
+import base64
+import logging
+import asyncio
+from itertools import combinations
+import math
+import time
+
+import torch
+import numpy as np
+import openai
+from openai import OpenAI, AsyncOpenAI
+from PIL import Image
+from flow_grpo.rewards.utils import pil_image_to_base64, divide_image, extract_grid_info
+from flow_grpo.rewards.utils import get_yes_cond_prob_from_completion
+
+# VLLM log filter
+logging.getLogger("vllm").setLevel(logging.ERROR)
+logging.getLogger().setLevel(logging.ERROR)
+
+
+def pref_score():
+    client = AsyncOpenAI(
+        api_key='dummy-key',
+        base_url='http://127.0.0.1:8000/v1'
+    )
+
+    scorer = PrefScorer(
+        client=client,
+        model='Qwen2.5-VL-7B-Instruct',
+        criteria_path='dataset/T2IS/prompt_consistency_criterion.json',
+        max_concurrent=12, # Adjust based on the system's capabilities (especially when using vllm as local model server)
+    )
+
+    def _fn(images, prompts, metadatas):
+        if isinstance(images, torch.Tensor):
+            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+            images = images.transpose(0, 2, 3, 1)  # NCHW -> NHWC
+            images = [Image.fromarray(image) for image in images]
+        
+        scores = asyncio.run(scorer(images, prompts, metadatas))
+        return scores, {}
+
+    return _fn
+
+class PrefScorer:
+    def __init__(
+            self,
+            client: Union[OpenAI, AsyncOpenAI],
+            model='Qwen2.5-VL-7B-Instruct',
+            criteria_path='prompt_consistency_criterion.json',
+            async_mode=True,
+            max_concurrent=12,  # 2x2 grid has 6 pair of images to compare. 12 for at most 2 batches at once.
+            max_retries=10,
+            timeout=60
+        ):
+        self.client = client
+        self.model = model
+        self.async_mode = async_mode
+        self.max_concurrent = max_concurrent
+        self.max_retries = max_retries
+        self.timeout = timeout
+
+        with open(criteria_path, 'r') as f:
+            self.criteria_data = json.load(f)
+
+    async def __call__(self, images : list[Image.Image], prompts : list[str], metadata: list[dict]) -> Union[list[float], np.ndarray]:
+        # Group images and metadata by their prompts
+        prompt_to_images = {}
+        prompt_to_metadata = {}
+        prompt_to_pos = {}
+        for i, (img, prompt, meta) in enumerate(zip(images, prompts, metadata)):
+            if prompt not in prompt_to_images:
+                prompt_to_images[prompt] = []
+                prompt_to_metadata[prompt] = []
+                prompt_to_pos[prompt] = []
+            prompt_to_images[prompt].append(img)
+            prompt_to_metadata[prompt].append(meta)
+            prompt_to_pos[prompt].append(i)
+
+        # Process each group of images with the same prompt
+        all_scores = np.zeros(len(images), dtype=float)
+        for prompt, imgs in prompt_to_images.items():
+            meta = prompt_to_metadata[prompt][0] # Assume all metadata are the same for the same prompt
+            group_rewards = await self.compute_group_rewards(prompt, imgs, meta)
+            all_scores[prompt_to_pos[prompt]] = group_rewards
+
+        return all_scores
+        
+
+    async def compute_group_rewards(self, prompt : str, images : list[Image.Image], metadata: dict) -> Union[list[float], np.ndarray]:
+        # Create a global semaphore for overall concurrency control
+        global_semaphore = asyncio.Semaphore(self.max_concurrent)
+        
+        async def compare_image_pair(image1, image2):
+            async with global_semaphore:
+                # Symmetric comparison for better reliability
+                completion1 = await self.compare_image(image1, image2)
+                completion2 = await self.compare_image(image2, image1)
+                prob1 = get_yes_cond_prob_from_completion(completion1, canonicalize=True)
+                prob2 = get_yes_cond_prob_from_completion(completion2, canonicalize=True)
+                return int(prob1 > prob2), int(prob2 > prob1)
+
+        # Process all images concurrently
+        comparison_array = np.zeros((len(images), len(images)), dtype=int)
+        for i,j in combinations(range(len(images)), 2):
+            win1, win2 = await compare_image_pair(images[i], images[j])
+            comparison_array[i, j] = win1
+            comparison_array[j, i] = win2
+        
+        # Sum up wins for each image
+        scores = comparison_array.sum(axis=1)
+        return scores
+    
+    async def compare_image(
+            self,
+            image1 : Image.Image,
+            image2 : Image.Image,
+            criteria_text : str = "",
+            top_logprobs: int = 20
+        ) -> openai.ChatCompletion:
+        messages = [
+            {
+                "role": "user",
+                "content":
+                [
+                    {"type": "image_url", "image_url": {"url": pil_image_to_base64(image1)}},
+                    {"type": "image_url", "image_url": {"url": pil_image_to_base64(image2)}},
+                    {"type": "text", "text": f"From the perspective of consistency, is the first image better than the second one? Answer with 'Yes' or 'No'."},
+                ]
+            }
+        ]
+        for attempt in range(self.max_retries):
+            try:
+                completion = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.0, # Deterministic result, no use for logprobs, actually.
+                    max_completion_tokens=1,
+                    logprobs=True,
+                    top_logprobs=top_logprobs,
+                    timeout=self.timeout
+                )
+            except Exception as e:
+                print(f"API error on attempt {attempt+1}/{self.max_retries}: {e}")
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                else:
+                    completion = None
+
+        return completion
+    
+
+
+def main():
+    reward_fn = pref_score()

@@ -23,15 +23,15 @@ from collections import defaultdict
 from concurrent import futures
 from diffusers import FluxPipeline, FluxTransformer2DModel
 from diffusers.utils.torch_utils import is_compiled_module
+from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
 from functools import partial
 from ml_collections import config_flags
 from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftModel
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
-
 from flow_grpo.rewards.rewards import multi_score
-from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import pipeline_with_logprob
-from flow_grpo.diffusers_patch.denoising_step_with_logprob import denoising_sde_step_with_logprob
+from flow_grpo.rewards.pref_scorer import pref_score
+from flow_grpo.diffusers_patch.flux_pipeline_flexible_with_logprob import calculate_shift, pipeline_with_logprob, denoising_sde_step_with_logprob, compute_log_prob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
@@ -68,69 +68,6 @@ def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generat
         generators.append(gen)
     return generators
 
-def compute_log_prob(
-        transformer : FluxTransformer2DModel,
-        pipeline : FluxPipeline,
-        sample : dict[str, torch.Tensor],
-        j : int,
-        config : Namespace
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    latents = sample["latents"][:, j]
-    timestep = sample["timesteps"][:, j]
-    num_inference_steps = config.sample.num_steps
-
-    batch_size = latents.shape[0]
-    image_seq_len = latents.shape[1]
-
-    num_channels_latents = pipeline.transformer.config.in_channels // 4
-    height = sample.get("height", config.resolution)
-    width = sample.get("width", config.resolution)
-    device = latents.device
-    dtype = latents.dtype
-
-    noise_level = sample["noise_levels"][:, j]
-
-    if transformer.module.config.guidance_embeds:
-        guidance = torch.tensor([config.sample.guidance_scale], device=device)
-        guidance = guidance.expand(latents.shape[0])
-    else:
-        guidance = None
-
-    latents, image_ids = pipeline.prepare_latents(
-        batch_size,
-        num_channels_latents,
-        height,
-        width,
-        dtype,
-        device,
-        generator=None,
-        latents=latents
-    )
- 
-     # Predict the noise residual
-    model_pred = transformer(
-        hidden_states=latents,
-        timestep=timestep / 1000,
-        guidance=guidance,
-        pooled_projections=sample["pooled_prompt_embeds"],
-        encoder_hidden_states=sample["prompt_embeds"],
-        txt_ids=torch.zeros(sample["prompt_embeds"].shape[1], 3).to(device=device, dtype=dtype),
-        img_ids=image_ids,
-        return_dict=False,
-    )[0]
-    
-    # compute the log prob of next_latents given latents under the current model
-    # Here, use determistic denoising for normal diffusion process.
-    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
-        scheduler=pipeline.scheduler,
-        model_output=model_pred.float(),
-        timestep=timestep,
-        sample=latents.float(),
-        noise_level=noise_level,
-        prev_sample=sample["next_latents"][:, j].float(),
-    )
-
-    return prev_sample, log_prob, prev_sample_mean, std_dev_t
 
 @torch.no_grad()
 def eval(pipeline : FluxPipeline,
@@ -148,9 +85,12 @@ def eval(pipeline : FluxPipeline,
          transformer_trainable_parameters,
          log_sample_num : int = 90 # 108 as max in wandb/swanlab
     ):
+    """
+        TODO: pref-based rewards is relative, how to evaluate its absolute performance?
+    """
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
-
+    
     log_data = {
         'images': [],
         'prompts': [],
@@ -162,6 +102,7 @@ def eval(pipeline : FluxPipeline,
             disable=not accelerator.is_local_main_process,
             position=0,
         ):
+
         prompts, prompt_metadata = test_batch
         prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
             prompts,
@@ -170,23 +111,66 @@ def eval(pipeline : FluxPipeline,
             max_sequence_length=config.max_sequence_length,
             device=accelerator.device
         )
-        with autocast():
-            images, _, _, _, _ = pipeline_with_logprob(
-                pipeline,
-                prompt_embeds=prompt_embeds,
-                pooled_prompt_embeds=pooled_prompt_embeds,
-                num_inference_steps=config.sample.eval_num_steps,
-                guidance_scale=config.sample.guidance_scale,
-                output_type="pt",
-                height=config.resolution,
-                width=config.resolution, 
-                noise_level=0,
-            )
-        future = executor.submit(reward_fn, images, prompts, prompt_metadata)
-        # yield to to make sure reward computation starts
-        time.sleep(0)
-        # all_futures.append(future)
-        rewards, reward_metadata = future.result()
+        heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
+        widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
+        if not all(h == heights[0] for h in heights) or not all(w == widths[0] for w in widths):
+            # Split the batch if there are different sizes
+            rewards = {}
+            images = []
+            for i in tqdm(
+                range(len(prompts)),
+                desc="Eval: per sample",
+                leave=False,
+                position=1,
+                disable=not accelerator.is_local_main_process,
+            ):
+                prompt = [prompts[i]]
+                prompt_meta = [prompt_metadata[i]]
+                height = heights[i]
+                width = widths[i]
+                with autocast():
+                    imgs, _, _ = pipeline_with_logprob(
+                        pipeline,
+                        prompt_embeds=prompt_embeds[i].unsqueeze(0),
+                        pooled_prompt_embeds=pooled_prompt_embeds[i].unsqueeze(0),
+                        num_inference_steps=config.sample.eval_num_steps,
+                        guidance_scale=config.sample.guidance_scale,
+                        output_type="pt",
+                        height=height,
+                        width=width,
+                        noise_level=0,
+                    )
+
+                future = executor.submit(reward_fn, imgs, prompt, prompt_meta)
+                # yield to to make sure reward computation starts
+                time.sleep(0)
+                reward, reward_metadata = future.result()
+                for key, value in reward.items():
+                    if key not in rewards:
+                        rewards[key] = []
+                    rewards[key].extend(value)
+
+                images.extend(imgs)
+        else:
+            # Batch inference if all sizes are the same
+            with autocast():
+                images, _, _, = pipeline_with_logprob(
+                    pipeline,
+                    prompt_embeds=prompt_embeds,
+                    pooled_prompt_embeds=pooled_prompt_embeds,
+                    num_inference_steps=config.sample.eval_num_steps,
+                    guidance_scale=config.sample.guidance_scale,
+                    output_type="pt",
+                    height=heights[0],
+                    width=widths[0],
+                    noise_level=0,
+                )
+        
+            future = executor.submit(reward_fn, images, prompts, prompt_metadata)
+            # yield to to make sure reward computation starts
+            time.sleep(0)
+            # all_futures.append(future)
+            rewards, reward_metadata = future.result()
         
         # -------------------------------Collect log data--------------------------------
         if len(log_data["prompts"]) < log_sample_num // accelerator.num_processes:
@@ -426,7 +410,6 @@ def setup_wandb_log(accelerator, config):
             config.run_name = unique_id
         else:
             config.run_name += "_" + unique_id
-            
         if accelerator.is_main_process:
             run = wandb.init(
                 project=config.project_name,
@@ -493,11 +476,10 @@ def set_online_log(accelerator, config):
     
     return run, logging_platform
 
-
 def main(_):
     # basic Accelerate and logging setup
     config = FLAGS.config
-    
+
     # number of timesteps within each trajectory to train on
     if config.sample.use_sliding_window:
         num_train_timesteps = config.sample.window_size 
@@ -538,7 +520,7 @@ def main(_):
     
     logger.info(f"\n{config}")
 
-    # -------------------------------------------------Set up memory profiler-----------------------------------
+    # -----------------------------------------------Set up memory profiler-----------------------------------
     if config.enable_mem_log:
         # Initialize memory profiler
         time_stamp = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
@@ -546,8 +528,7 @@ def main(_):
         # clean up old log file
         if accelerator.is_main_process and os.path.exists(meme_log_file):
             os.remove(meme_log_file)
-
-        memory_profiler = MemoryProfiler(accelerator=accelerator, log_file=meme_log_file)
+        memory_profiler = MemoryProfiler(accelerator, enable_tensor_accumulation=True, log_file=meme_log_file)
 
     # --------------------------------------Load pipeline----------------------------------
     pipeline, text_encoders, tokenizers = load_pipeline(config, accelerator)
@@ -557,7 +538,7 @@ def main(_):
         # Register model to profiler
         memory_profiler.register_model(transformer, "transformer")
         memory_profiler.snapshot("after_model_loading")
-
+    
     transformer_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
 
     # This ema setting affects the previous 20 × 8 = 160 steps on average.
@@ -627,8 +608,7 @@ These two numbers should be equal
         train_dataset,
         batch_sampler=train_sampler,
         num_workers=1,
-        collate_fn=collate_fn,
-        # persistent_workers=True
+        collate_fn=collate_fn
     )
 
     # Create a regular DataLoader
@@ -659,16 +639,16 @@ These two numbers should be equal
     # executor to perform callbacks asynchronously. this is beneficial for the llava callbacks which makes a request to a
     # remote server running llava inference.
     executor = futures.ThreadPoolExecutor(max_workers=8)
-    
+
     if config.enable_mem_log:
         memory_profiler.snapshot("after_accelerator_prepare")
-    
     # -----------------------------------------Reward fn-----------------------------------------
     # prepare prompt and reward fn
     if accelerator.is_main_process:
         print(f"Reward dict: {config.reward_fn}")
-    reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
-    
+    # reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
+    reward_fn = pref_score()
+    eval_reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
     if config.enable_mem_log:
         memory_profiler.snapshot("after_loading_reward_fn")
     # ------------------------------------------- Train!------------------------------------------
@@ -725,13 +705,15 @@ These two numbers should be equal
                 accelerator,
                 logging_platform,
                 global_step,
-                reward_fn, executor,
+                eval_reward_fn,
+                executor,
                 autocast,
                 ema,
                 transformer_trainable_parameters
             )
             if config.enable_mem_log:
                 memory_profiler.snapshot(f"epoch_{epoch}_after_eval")
+    
         if config.save_freq > 0 and epoch % config.save_freq == 0 and accelerator.is_main_process:
             save_ckpt(config.save_dir, transformer, global_step, accelerator, ema, transformer_trainable_parameters, config)
 
@@ -739,6 +721,7 @@ These two numbers should be equal
         pipeline.transformer.eval()
         train_sampler.set_epoch(epoch)
         train_iter = iter(train_dataloader)
+
         samples = []
         prompts = []
         for i in tqdm(
@@ -748,7 +731,6 @@ These two numbers should be equal
             position=0,
         ):
             prompts, prompt_metadata = next(train_iter)
-
             prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
                 prompts,
                 text_encoders,
@@ -764,83 +746,105 @@ These two numbers should be equal
                 return_tensors="pt",
             ).input_ids.to(accelerator.device)
 
+            heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
+            widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
+
             # sample
             if config.sample.same_latent:
                 # Same seed for same prompt
-                generator = create_generator(prompts, base_seed=epoch)
+                generators = create_generator(prompts, base_seed=epoch)
             else:
                 # Different initial latent seed
-                generator = None
-            with autocast():
-                with torch.no_grad():
-                    images, all_latents, image_ids, text_ids, all_log_probs = pipeline_with_logprob(
-                        pipeline,
-                        prompt_embeds=prompt_embeds,
-                        pooled_prompt_embeds=pooled_prompt_embeds,
-                        num_inference_steps=config.sample.num_steps,
-                        guidance_scale=config.sample.guidance_scale,
-                        output_type="pt",
-                        height=config.resolution,
-                        width=config.resolution,
-                        generator=generator
-                )
+                generators = None
 
-            all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, 16, 96, 96)
-            all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
-
-            timesteps = pipeline.scheduler.get_window_timesteps()  # (window_size, )
-            noise_levels = torch.as_tensor([pipeline.scheduler.get_noise_level_for_timestep(t) for t in timesteps], device=accelerator.device)  # (window_size, )
-            timesteps = timesteps.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
-            noise_levels = noise_levels.repeat(config.sample.batch_size, 1)  # (batch_size, window_size)
-
-            # compute rewards asynchronously
-            rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
-            # yield to to make sure reward computation starts
-            time.sleep(0)
-
-            # Wait for reward computation directly
-            rewards, rewards_metadata = rewards.result()
-
-            rewards = {
-                key: torch.as_tensor(value, device=accelerator.device).float()
-                for key, value in rewards.items()
-            }
+            # If all heights and widths are the same, we can batch them together
+            if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
+                with autocast():
+                    with torch.no_grad():
+                        images, all_latents, all_log_probs = pipeline_with_logprob(
+                            pipeline,
+                            prompt_embeds=prompt_embeds,
+                            pooled_prompt_embeds=pooled_prompt_embeds,
+                            num_inference_steps=config.sample.num_steps,
+                            guidance_scale=config.sample.guidance_scale,
+                            output_type="pt",
+                            height=heights[0],
+                            width=widths[0],
+                            generator=generators
+                    )
+                
+                all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, C, H, W)
+                all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
+            else:
+                # Different sizes, have to do one by one
+                images = []
+                all_latents = []
+                all_log_probs = []
+                for index in range(len(prompts)):
+                    with autocast():
+                        with torch.no_grad():
+                            this_image, this_all_latents, this_all_log_probs = pipeline_with_logprob(
+                                pipeline,
+                                prompt_embeds=prompt_embeds[index].unsqueeze(0),
+                                pooled_prompt_embeds=pooled_prompt_embeds[index].unsqueeze(0),
+                                num_inference_steps=config.sample.num_steps,
+                                guidance_scale=config.sample.guidance_scale,
+                                output_type="pt",
+                                height=heights[index],
+                                width=widths[index],
+                                generator=generators[index] if generators is not None else None
+                        )
+                    images.append(this_image.squeeze(0))  # (C, H, W)
+                    all_latents.append(this_all_latents.squeeze(0))  # (window_size + 1, C, H, W)
+                    all_log_probs.append(this_all_log_probs.squeeze(0))  # (window_size, )
+                
+                images = torch.stack(images, dim=0)
+                all_latents = torch.stack(all_latents, dim=0)  # (batch_size, window_size + 1, C, H, W)
+                all_log_probs = torch.stack(all_log_probs, dim=0)  # (batch_size, window_size)
 
             samples.append(
                 {
+                    "heights": heights,
+                    "widths": widths,
+                    "prompts": prompts,
                     "prompt_ids": prompt_ids,
                     "prompt_embeds": prompt_embeds,
                     "pooled_prompt_embeds": pooled_prompt_embeds,
-                    "timesteps": timesteps,
-                    "noise_levels": noise_levels,
+                    'images': images,
                     "latents": all_latents[:, :-1],  # each entry is the latent at timestep t - 1 (init latents for 0)
                     "next_latents": all_latents[:, 1:],  # each entry is the latent at timestep t
                     "log_probs": all_log_probs,
-                    "rewards": rewards
                 }
             )
+
             if config.enable_mem_log:
                 memory_profiler.track_samples(samples, f"sampling")
                 memory_profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
 
-        # collate samples into dict where each entry has shape (num_batches_per_epoch * sample.batch_size, ...)
-        samples = {
-            k: torch.cat([s[k] for s in samples], dim=0)
-            if not isinstance(samples[0][k], dict)
-            else {
-                sub_key: torch.cat([s[k][sub_key] for s in samples], dim=0)
-                for sub_key in samples[0][k]
+        # Gather all prompts and images and compute pref-based rewards
+        prompts = sum([s["prompts"] for s in samples], [])
+        images = torch.cat([s["images"] for s in samples], dim=0)
+        rewards, rewards_metadata = executor.submit(reward_fn, images, prompts, None).result()
+        for i, sample in enumerate(samples):
+            batch_size = sample["images"].shape[0]
+            sample["rewards"] = {
+                key: torch.as_tensor(value[i * batch_size: (i + 1) * batch_size], device=accelerator.device)
+                for key, value in rewards.items()
             }
-            for k in samples[0].keys()
-        }
-        # for key, value in samples.items():
-        #     if isinstance(value, torch.Tensor):
-        #         print(key, 'has shape', value.shape)
 
-        # gather rewards across processes
-        gathered_rewards = {key: accelerator.gather(value).cpu().numpy() for key, value in samples["rewards"].items()}
+        # Gather rewards across processes
+        gathered_rewards = {
+            key: accelerator.gather(
+                torch.cat([s["rewards"][key] for s in samples], dim=0)
+            ).cpu().numpy()
+            for key in samples[0]["rewards"].keys()
+        }
+
         # log rewards and images
         if accelerator.is_main_process:
+            print(f"Epoch {epoch} rewards: ")
+            for key, value in gathered_rewards.items():
+                print(f"  {key}: {value.mean():.4f} ± {value.std():.4f}")
             logging_platform.log(
                 {
                     "epoch": epoch,
@@ -852,32 +856,33 @@ These two numbers should be equal
         # per-prompt mean/std tracking
         if config.per_prompt_stat_tracking:
             # gather the prompts across processes
-            prompt_ids = accelerator.gather(samples["prompt_ids"]).cpu().numpy()
+            prompt_ids = torch.cat([s["prompt_ids"] for s in samples], dim=0)
+            prompt_ids = accelerator.gather(prompt_ids).cpu().numpy()
             prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
             advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
             if accelerator.is_local_main_process:
                 print("len(prompts)", len(prompts))
                 print("len unique prompts", len(set(prompts)))
 
-            (
-                avg_group_size,
-                trained_prompt_num,
-                avg_group_std,
-                global_std,
-                zero_std_ratio
-            ) = stat_tracker.get_stats()
+                (
+                    avg_group_size,
+                    trained_prompt_num,
+                    avg_group_std,
+                    global_std,
+                    zero_std_ratio
+                ) = stat_tracker.get_stats()
 
-            if accelerator.is_main_process:
-                logging_platform.log(
-                    {
-                        "avg_group_size": avg_group_size,
-                        "trained_prompt_num": trained_prompt_num,
-                        "avg_group_std": avg_group_std,
-                        "global_std": global_std,
-                        "zero_std_ratio": zero_std_ratio,
-                    },
-                    step=global_step,
-                )
+                if accelerator.is_main_process:
+                    logging_platform.log(
+                        {
+                            "avg_group_size": avg_group_size,
+                            "trained_prompt_num": trained_prompt_num,
+                            "avg_group_std": avg_group_std,
+                            "global_std": global_std,
+                            "zero_std_ratio": zero_std_ratio,
+                        },
+                        step=global_step,
+                    )
             # !!! Notice here, after every advantage calculation, the tracker is cleared so that no history is saved.
             # So comment the following clear code if `config.sample.use_history=True` is set
             stat_tracker.clear()
@@ -886,48 +891,39 @@ These two numbers should be equal
 
         # ungather advantages; we only need to keep the entries corresponding to the samples on this process
         advantages = torch.as_tensor(advantages)
-        samples["advantages"] = (
+        advantages = (
             advantages.reshape(accelerator.num_processes, -1, *advantages.shape[1:])[accelerator.process_index]
             .to(accelerator.device)
         )
+        for i, sample in enumerate(samples):
+            sample['advantages'] = advantages[i]
+
         if accelerator.is_local_main_process:
-            # for key, value in gathered_rewards.items():
-            #     print(key, ": ", value)
+            print("advantages: ", advantages.abs().mean())
 
-            print("advantages: ", samples["advantages"].abs().mean())
+        # clean up to save memory
+        del gathered_rewards
+        for sample in samples:
+            del sample["rewards"]
+            del sample["prompt_ids"]
+        
+        total_batch_size = len(samples)
 
-        del samples["rewards"]
-        del samples["prompt_ids"]
-
-        total_batch_size, num_timesteps = samples["timesteps"].shape
-
-        # A assertion to ensure the number of timesteps is consistent
-        assert num_timesteps == num_train_timesteps
         if config.enable_mem_log:
             memory_profiler.snapshot(f"epoch_{epoch}_before_training")
+
         #################### TRAINING ####################
         for inner_epoch in range(config.train.num_inner_epochs):
             # shuffle samples along batch dimension
             perm = torch.randperm(total_batch_size)
-            samples = {k: v[perm] for k, v in samples.items()}
-
-            # rebatch for training
-            samples_batched = {
-                k: v.reshape(-1, total_batch_size // config.sample.num_batches_per_epoch, *v.shape[1:])
-                for k, v in samples.items()
-            }
-
-            # dict of lists -> list of dicts for easier iteration
-            samples_batched = [
-                dict(zip(samples_batched, x)) for x in zip(*samples_batched.values())
-            ]
+            samples = [samples[i] for i in perm]
 
             # train
             pipeline.transformer.train()
             info = defaultdict(list)
 
             for i, sample in tqdm(
-                list(enumerate(samples_batched)),
+                list(enumerate(samples)),
                 desc=f"Epoch {epoch}.{inner_epoch}: training",
                 position=0,
                 disable=not accelerator.is_local_main_process,
@@ -941,7 +937,7 @@ These two numbers should be equal
                 ):
                     if config.enable_mem_log and i % 10 == 0:
                         memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_before_forward")
-                
+
                     with accelerator.accumulate(transformer):
                         with autocast():
                             prev_sample, log_prob, prev_sample_mean, std_dev_t = compute_log_prob(transformer, pipeline, sample, j, config)
@@ -1027,6 +1023,7 @@ These two numbers should be equal
                             )
                         optimizer.step()
                         optimizer.zero_grad()
+
                         if config.enable_mem_log and i % 10 == 0:
                             memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_after_backward")
 
@@ -1050,12 +1047,12 @@ These two numbers should be equal
                     ema.step(transformer_trainable_parameters, global_step)
             # make sure we did an optimization step at the end of the inner epoch
             # assert accelerator.sync_gradients
-        
+
         if config.enable_mem_log:
             memory_profiler.cleanup_and_snapshot(f"epoch_{epoch}_end")
             # Clear tensor accumulation info in profiler to save memory
             memory_profiler.tensor_tracker.clear_stats()
-        
+
         epoch += 1
         
 if __name__ == "__main__":

@@ -29,11 +29,6 @@ from ml_collections import config_flags
 from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftModel
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
-from transformers.integrations.deepspeed import (
-    is_deepspeed_zero3_enabled,
-    set_hf_deepspeed_config,
-    unset_hf_deepspeed_config,
-)
 
 from flow_grpo.rewards.rewards import multi_score
 from flow_grpo.diffusers_patch.flux_pipeline_flexible_with_logprob import calculate_shift, pipeline_with_logprob, denoising_sde_step_with_logprob, compute_log_prob
@@ -635,11 +630,6 @@ These two numbers should be equal
     # for deepspeed zero
     if accelerator.state.deepspeed_plugin:
         accelerator.state.deepspeed_plugin.deepspeed_config['train_micro_batch_size_per_gpu'] = config.sample.batch_size
-
-    if is_deepspeed_zero3_enabled():
-        # Using deepspeed zero3 will cause the model parameter `weight.shape` to be empty.
-        unset_hf_deepspeed_config()
-        set_hf_deepspeed_config(accelerator.state.deepspeed_plugin.dschf)
 
     # Prepare everything with our `accelerator`.
     transformer, optimizer, test_dataloader = accelerator.prepare(transformer, optimizer, test_dataloader)
