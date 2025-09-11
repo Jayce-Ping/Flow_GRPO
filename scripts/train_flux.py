@@ -30,8 +30,7 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
 from flow_grpo.rewards.rewards import multi_score
-from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import pipeline_with_logprob
-from flow_grpo.diffusers_patch.denoising_step_with_logprob import denoising_sde_step_with_logprob
+from flow_grpo.diffusers_patch.flux_pipeline_with_logprob import pipeline_with_logprob, compute_log_prob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
@@ -67,70 +66,6 @@ def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generat
         gen = torch.Generator().manual_seed(seed)
         generators.append(gen)
     return generators
-
-def compute_log_prob(
-        transformer : FluxTransformer2DModel,
-        pipeline : FluxPipeline,
-        sample : dict[str, torch.Tensor],
-        j : int,
-        config : Namespace
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    latents = sample["latents"][:, j]
-    timestep = sample["timesteps"][:, j]
-    num_inference_steps = config.sample.num_steps
-
-    batch_size = latents.shape[0]
-    image_seq_len = latents.shape[1]
-
-    num_channels_latents = pipeline.transformer.config.in_channels // 4
-    height = sample.get("height", config.resolution)
-    width = sample.get("width", config.resolution)
-    device = latents.device
-    dtype = latents.dtype
-
-    noise_level = sample["noise_levels"][:, j]
-
-    if transformer.module.config.guidance_embeds:
-        guidance = torch.tensor([config.sample.guidance_scale], device=device)
-        guidance = guidance.expand(latents.shape[0])
-    else:
-        guidance = None
-
-    latents, image_ids = pipeline.prepare_latents(
-        batch_size,
-        num_channels_latents,
-        height,
-        width,
-        dtype,
-        device,
-        generator=None,
-        latents=latents
-    )
- 
-     # Predict the noise residual
-    model_pred = transformer(
-        hidden_states=latents,
-        timestep=timestep / 1000,
-        guidance=guidance,
-        pooled_projections=sample["pooled_prompt_embeds"],
-        encoder_hidden_states=sample["prompt_embeds"],
-        txt_ids=torch.zeros(sample["prompt_embeds"].shape[1], 3).to(device=device, dtype=dtype),
-        img_ids=image_ids,
-        return_dict=False,
-    )[0]
-    
-    # compute the log prob of next_latents given latents under the current model
-    # Here, use determistic denoising for normal diffusion process.
-    prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
-        scheduler=pipeline.scheduler,
-        model_output=model_pred.float(),
-        timestep=timestep,
-        sample=latents.float(),
-        noise_level=noise_level,
-        prev_sample=sample["next_latents"][:, j].float(),
-    )
-
-    return prev_sample, log_prob, prev_sample_mean, std_dev_t
 
 @torch.no_grad()
 def eval(pipeline : FluxPipeline,

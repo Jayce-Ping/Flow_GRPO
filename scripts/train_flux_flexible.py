@@ -477,16 +477,9 @@ def main(_):
     # basic Accelerate and logging setup
     config = FLAGS.config
 
-    if config.train.batch_size != 1:
-        # we always accumulate gradients across timesteps; we want config.train.gradient_accumulation_steps to be the
-        # number of *samples* we accumulate across, so we need to multiply by the number of training timesteps to get
-        # the total number of optimizer steps to accumulate across.
-        logger.info("Only batch size 1 is supported for flexible size training: "
-                    "Overriding config.train.gradient_accumulation_steps by multiplying it with config.train.batch_size"
-                    " and setting config.train.batch_size to 1")
-        config.train.gradient_accumulation_steps = config.train.gradient_accumulation_steps * config.train.batch_size
-        config.train.batch_size = 1
-
+    # Flexible training only supports batch size 1, so
+    # update gradient_accumulation_steps, and update train.batch_size to 1 later for logger info
+    gradient_accumulation_steps = config.train.gradient_accumulation_steps * config.train.batch_size
 
     # number of timesteps within each trajectory to train on
     if config.sample.use_sliding_window:
@@ -503,10 +496,23 @@ def main(_):
     accelerator = Accelerator(
         mixed_precision=config.mixed_precision,
         project_config=accelerator_config,
-        gradient_accumulation_steps=config.train.gradient_accumulation_steps * num_train_timesteps,
+        # we always accumulate gradients across timesteps; we want config.train.gradient_accumulation_steps to be the
+        # number of *samples* we accumulate across, so we need to multiply by the number of training timesteps to get
+        # the total number of optimizer steps to accumulate across.
+        gradient_accumulation_steps=gradient_accumulation_steps * num_train_timesteps,
     )
     # set seed (device_specific is very important to get different prompts on different devices)
     set_seed(config.seed, device_specific=True)
+
+    if config.train.batch_size != 1:
+        # Print a warning message and override config
+        logger.info(
+            "Only batch size 1 is supported for flexible size training: "
+            f"Overriding config.train.gradient_accumulation_steps by multiplying it with config.train.batch_size {config.train.gradient_accumulation_steps}*{config.train.batch_size}={gradient_accumulation_steps}"
+            f" and setting config.train.batch_size to 1")
+        
+        config.train.batch_size = 1
+        config.train.gradient_accumulation_steps = gradient_accumulation_steps
 
     # -------------------------------------------------Set up online log-----------------------------------
     if not config.project_name:
@@ -845,7 +851,7 @@ These two numbers should be equal
 
         # Gather rewards across all samples
         gathered_rewards = {
-            key: torch.cat([sample['rewards'][key] for sample in samples], dim=0)
+            key: torch.as_tensor([sample['rewards'][key] for sample in samples], device=accelerator.device)
             for key in samples[0]['rewards'].keys()
         }
         # Gather rewards across processes
