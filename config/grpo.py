@@ -9,9 +9,9 @@ spec = spec_from_file_location('base', os.path.join(os.path.dirname(__file__), "
 base = module_from_spec(spec)
 spec.loader.exec_module(base)
 
-
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
-SD3_MODEL_PATH = "/raid/data_qianh/jcy/hugging/models/stable-diffusion-3.5-medium"
+SD3_MODEL_PATH = "stabilityai/stable-diffusion-3.5-medium"
+SAVE_DIR = 'logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -113,7 +113,7 @@ def test_flux():
     config.sample.noise_level = 0.9
     config.save_freq = 0 # epoch
     config.eval_freq = 10
-    config.save_dir = 'logs/test_run'
+    config.save_dir = os.path.join(SAVE_DIR, 'test-flux')
     config.reward_fn = {
         "pickscore": 1.0,
     }
@@ -180,7 +180,7 @@ def subfig_clip_flux_2gpu():
     config.sample.noise_level = 0.9
     config.save_freq = 0 # epoch
     config.eval_freq = 0
-    config.save_dir = 'logs/subfig_clipT/flux_2gpu'
+    config.save_dir = os.path.join(SAVE_DIR, f'subfig_clipT_flux_{gpu_number}gpu')
     config.reward_fn = {
         "subfig_clipT": 1.0,
     }
@@ -193,11 +193,17 @@ def subfig_clip_flux_2gpu():
 def pickscore_flux_8gpu():
     gpu_number=8
     config = compressibility()
-    config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_leq_4")
+    config.prompt_fn = "geneval"
+    config.logging_platform = 'swanlab'
+
+    config.sample.use_sliding_window = True
+    config.sample.window_size = 1
+    config.sample.left_boundary = 1
 
     # flux
-    config.test.num_steps = 28
-    config.test.batch_size = 16 # This bs is a special design, the test set has a total of 2048, to make gpu_num*bs*n as close as possible to 2048, because when the number of samples cannot be divided evenly by the number of cards, multi-card will fill the last batch to ensure each card has the same number of samples, affecting gradient synchronization.
+    config.test.num_steps = 6
+    config.test.batch_size = 32 # This bs is a special design, the test set has a total of 2048, to make gpu_num*bs*n as close as possible to 2048, because when the number of samples cannot be divided evenly by the number of cards, multi-card will fill the last batch to ensure each card has the same number of samples, affecting gradient synchronization.
 
     config.pretrained.model = FLUX_MODEL_PATH
     config.sample.num_steps = 6
@@ -224,14 +230,13 @@ def pickscore_flux_8gpu():
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
-    config.save_freq = 30 # epoch
-    config.eval_freq = 30
-    config.save_dir = 'logs/pickscore/flux-group24-8gpu'
+    config.save_freq = 0 # epoch
+    config.eval_freq = 0
+    config.save_dir = os.path.join(SAVE_DIR, f'pickscore_flux_{gpu_number}gpu')
     config.reward_fn = {
         "pickscore": 1.0,
     }
     
-    config.prompt_fn = "general_ocr"
 
     config.per_prompt_stat_tracking = True
     return config
@@ -312,9 +317,7 @@ def grid_consistency_clip_flux():
     
     config.aggregate_fn = agg_fn
 
-    # config.save_dir = 'logs/grid-consistency-subclip/flux-7gpu-train-half-leq-4'
-    # config.save_dir = '/scratch/users/astar/ares/cp3jia/checkpoints/flow-grpo/grid-consistency-subclip/flux-7gpu-train-leq-4'
-    config.save_dir = '/root/autodl-tmp/checkpoints/flowgrpo/grid-consistency-subclip/flux-7gpu-train-half-leq-4'
+    config.save_dir = os.path.join(SAVE_DIR, f'grid_consistency_clip_flux_{gpu_number}gpu')
 
     return config
 
