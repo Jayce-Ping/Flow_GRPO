@@ -477,12 +477,23 @@ def main(_):
     # basic Accelerate and logging setup
     config = FLAGS.config
 
+    if config.train.batch_size != 1:
+        # we always accumulate gradients across timesteps; we want config.train.gradient_accumulation_steps to be the
+        # number of *samples* we accumulate across, so we need to multiply by the number of training timesteps to get
+        # the total number of optimizer steps to accumulate across.
+        logger.info("Only batch size 1 is supported for flexible size training: "
+                    "Overriding config.train.gradient_accumulation_steps by multiplying it with config.train.batch_size"
+                    " and setting config.train.batch_size to 1")
+        config.train.gradient_accumulation_steps = config.train.gradient_accumulation_steps * config.train.batch_size
+        config.train.batch_size = 1
+
+
     # number of timesteps within each trajectory to train on
     if config.sample.use_sliding_window:
         num_train_timesteps = config.sample.window_size 
     else:
         num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
-
+    
     accelerator_config = ProjectConfiguration(
         project_dir=os.path.join(config.logdir, config.run_name),
         automatic_checkpoint_naming=True,
@@ -492,9 +503,6 @@ def main(_):
     accelerator = Accelerator(
         mixed_precision=config.mixed_precision,
         project_config=accelerator_config,
-        # we always accumulate gradients across timesteps; we want config.train.gradient_accumulation_steps to be the
-        # number of *samples* we accumulate across, so we need to multiply by the number of training timesteps to get
-        # the total number of optimizer steps to accumulate across.
         gradient_accumulation_steps=config.train.gradient_accumulation_steps * num_train_timesteps,
     )
     # set seed (device_specific is very important to get different prompts on different devices)
@@ -766,9 +774,14 @@ These two numbers should be equal
                             width=widths[0],
                             generator=generators
                     )
-                
-                all_latents = torch.stack(all_latents, dim=1)  # (batch_size, window_size + 1, C, H, W)
-                all_log_probs = torch.stack(all_log_probs, dim=1)  # shape after stack (batch_size, window_size)
+                    # images: (batch_size, C, H, W) -> List[Tensor(C, H, W)] with length batch_size
+                    # all_latents: List[Tensor(batch_size C, H, W)] with length windowsize+1 -> List[Tensor(window_size + 1, C, H, W)] with length batch_size
+                    # all_log_probs: List[Tensor(batch_size)] with length window_size -> List[Tensor(window_size) with length batch_size
+                    images = list(images.unbind(0)) # List[Tensor(C, H, W)] with length batch_size
+                    all_latents = torch.stack(all_latents, dim=1) # (batch_size, window_size + 1, C, H, W)
+                    all_latents = list(all_latents.unbind(0)) # List[Tensor(window_size + 1, C, H, W)] with length batch_size
+                    all_log_probs = torch.stack(all_log_probs, dim=1) # (batch_size, window_size)
+                    all_log_probs = list(all_log_probs.unbind(0)) # List[Tensor(window_size)] with length batch_size
             else:
                 # Different sizes, have to do one by one
                 images = []
@@ -788,13 +801,13 @@ These two numbers should be equal
                                 width=widths[index],
                                 generator=generators[index] if generators is not None else None
                         )
-                    images.append(this_image.squeeze(0))  # (C, H, W)
-                    all_latents.append(this_all_latents.squeeze(0))  # (window_size + 1, C, H, W)
-                    all_log_probs.append(this_all_log_probs.squeeze(0))  # (window_size, )
+                    images.append(this_image.squeeze(0))  # add (C, H, W)
+                    all_latents.append(this_all_latents.squeeze(0))  # add (window_size + 1, C, H, W)
+                    all_log_probs.append(this_all_log_probs.squeeze(0))  # add (window_size, )
                 
-                images = torch.stack(images, dim=0)
-                all_latents = torch.stack(all_latents, dim=0)  # (batch_size, window_size + 1, C, H, W)
-                all_log_probs = torch.stack(all_log_probs, dim=0)  # (batch_size, window_size)
+                # images: List[Tensor(C, H, W)] with length batch_size
+                # all_latents: List[Tensor(window_size + 1, C, H, W)] with length batch_size
+                # all_log_probs: List[Tensor(window_size)] with length batch_size
 
             # Compute rewards asynchronously
             rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
@@ -805,34 +818,40 @@ These two numbers should be equal
             rewards, rewards_metadata = rewards.result()
 
             rewards = {
-                key: torch.as_tensor(value, device=accelerator.device).float()
-                for key, value in rewards.items()
+                k: torch.tensor(v, device=accelerator.device)
+                for k, v in rewards.items()
             }
-
-            samples.append(
-                {
-                    "heights": heights,
-                    "widths": widths,
-                    "prompt_ids": prompt_ids,
-                    "prompt_embeds": prompt_embeds,
-                    "pooled_prompt_embeds": pooled_prompt_embeds,
-                    "latents": all_latents[:, :-1],  # each entry is the latent at timestep t - 1 (init latents for 0)
-                    "next_latents": all_latents[:, 1:],  # each entry is the latent at timestep t
-                    "log_probs": all_log_probs,
-                    "rewards": rewards
-                }
+            
+            samples.extend(
+                [
+                    {
+                        'height': heights[index],
+                        'width': widths[index],
+                        'prompt_ids': prompt_ids[index].unsqueeze(0), # Keep batch dimension as 1
+                        'prompt_embeds': prompt_embeds[index].unsqueeze(0),
+                        'pooled_prompt_embeds': pooled_prompt_embeds[index].unsqueeze(0),
+                        'latents': all_latents[index][:-1].unsqueeze(0),
+                        'next_latents': all_latents[index][1:].unsqueeze(0),
+                        'log_probs': all_log_probs[index].unsqueeze(0),
+                        'rewards': {score_name: score_value[index] for score_name, score_value in rewards.items()},
+                    }
+                    for index in range(len(prompts))
+                ]
             )
 
             if config.enable_mem_log:
                 memory_profiler.track_samples(samples, f"sampling")
                 memory_profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
 
+        # Gather rewards across all samples
+        gathered_rewards = {
+            key: torch.cat([sample['rewards'][key] for sample in samples], dim=0)
+            for key in samples[0]['rewards'].keys()
+        }
         # Gather rewards across processes
         gathered_rewards = {
-            key: accelerator.gather(
-                torch.cat([s["rewards"][key] for s in samples], dim=0)
-            ).cpu().numpy()
-            for key in samples[0]["rewards"].keys()
+            key: accelerator.gather(value).cpu().numpy()
+            for key, value in gathered_rewards.items()
         }
 
         # log rewards and images
@@ -894,6 +913,8 @@ These two numbers should be equal
             sample['advantages'] = advantages[i]
 
         if accelerator.is_local_main_process:
+            print("len samples", len(samples))
+            print("advantages has shape", advantages.shape)
             print("advantages: ", advantages.abs().mean())
 
         # clean up to save memory
@@ -901,7 +922,7 @@ These two numbers should be equal
         for sample in samples:
             del sample["rewards"]
             del sample["prompt_ids"]
-        
+
         total_batch_size = len(samples)
 
         if config.enable_mem_log:
@@ -913,7 +934,8 @@ These two numbers should be equal
             perm = torch.randperm(total_batch_size)
             samples = [samples[i] for i in perm]
 
-            # train
+            assert config.train.batch_size == 1, "Only batch size 1 is supported for flexible size training"
+
             pipeline.transformer.train()
             info = defaultdict(list)
 

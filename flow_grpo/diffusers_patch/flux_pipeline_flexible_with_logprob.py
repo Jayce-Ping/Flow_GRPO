@@ -41,8 +41,8 @@ def compute_log_prob(
 
     batch_size = latents.shape[0]
     num_channels_latents = pipeline.transformer.config.in_channels // 4
-    height = sample["heights"][j]
-    width = sample["widths"][j]
+    height = sample["height"]
+    width = sample["width"]
     device = latents.device
     dtype = latents.dtype
 
