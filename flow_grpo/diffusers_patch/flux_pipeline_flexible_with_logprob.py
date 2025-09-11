@@ -79,6 +79,9 @@ def compute_log_prob(
         mu=mu,
     )
     timestep = timesteps[timestep_index]
+    # This is for more general purpose of noise_level constrol, like decreasing noise_level across timesteps
+    # If not, it should be always equal to config.sample.noise_level
+    noise_level = pipeline.scheduler.get_noise_level_for_timestep(timestep)
 
     # 4. Prepare guidance and predict the noise residual
     if transformer.module.config.guidance_embeds:
@@ -107,7 +110,7 @@ def compute_log_prob(
         model_output=model_pred.float(),
         timestep=timestep.unsqueeze(0).repeat(latents.shape[0]),
         sample=latents.float(),
-        noise_level=config.sample.noise_level,
+        noise_level=noise_level,
         prev_sample=sample["next_latents"][:, j].float(),
     )
 

@@ -7,6 +7,77 @@ import torch
 import numpy as np
 import openai
 
+# -------------------------------------Image Utils-------------------------------------
+
+def pil_image_to_base64(image, format="JPEG"):
+    buffered = BytesIO()
+    image.save(buffered, format="JPEG")
+    encoded_image_text = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    base64_qwen = f"data:image/{format.lower()};base64,{encoded_image_text}"
+    return base64_qwen
+
+def tensor_to_pil_image(tensor: torch.Tensor) -> List[Image.Image]:
+    if len(tensor.shape) == 3:
+        tensor = tensor.unsqueeze(0)
+    
+    images = (tensor * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+    images = images.transpose(0, 2, 3, 1)  # NCHW -> NHWC
+    images = [Image.fromarray(image) for image in images]
+    images = images
+    return images
+
+def numpy_to_pil_image(array: np.ndarray) -> List[Image.Image]:
+    if len(array.shape) == 3:
+        array = array[np.newaxis, ...]
+    
+    # Clip and convert to uint8
+    if array.max() <= 1.0:
+        array = (array * 255).round()
+    array = np.clip(array, 0, 255).astype(np.uint8)
+
+    # Convert from NCHW to NHWC if needed
+    if array.shape[1] == 3:  # NCHW format
+        array = array.transpose(0, 2, 3, 1)  # NCHW -> NHWC
+
+    images = [Image.fromarray(image) for image in array]
+    images = images
+    return images
+
+
+def tensor_list_to_pil_image(tensor_list: List[torch.Tensor]) -> List[Image.Image]:
+    if not tensor_list:
+        return []
+
+    batch = torch.stack([
+        t if t.dim() == 3 else t.squeeze(0)
+        for t in tensor_list
+    ], dim=0)
+    # Normalize, to uint8
+    batch = (batch * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+    # NCHW -> NHWC
+    if batch.shape[1] == 3:
+        batch = batch.transpose(0, 2, 3, 1)
+    return [Image.fromarray(img) for img in batch]
+
+def numpy_list_to_pil_image(numpy_list: List[np.ndarray]) -> List[Image.Image]:
+    if not numpy_list:
+        return []
+    # Stack to batch
+    batch = np.stack([
+        arr if arr.ndim == 3 else arr.squeeze(0)
+        for arr in numpy_list
+    ], axis=0)
+    # Normalize, to uint8
+    if batch.max() <= 1.0:
+        batch = (batch * 255).round()
+    batch = np.clip(batch, 0, 255).astype(np.uint8)
+    # NCHW -> NHWC
+    if batch.shape[1] == 3:
+        batch = batch.transpose(0, 2, 3, 1)
+    return [Image.fromarray(img) for img in batch]
+
+
+# -------------------------------------Grid Utils-------------------------------------
 def divide_prompt(prompt):
     # seqis like ". [TOP-LEFT]:"
     match_sep = re.compile(r"\.\s+[A-Z0-9-\[\]]+:")
@@ -17,13 +88,6 @@ def divide_prompt(prompt):
         for p in re.split('|'.join(map(re.escape, seps)), prompt)
     ]
     return sub_prompts
-
-def pil_image_to_base64(image, format="JPEG"):
-    buffered = BytesIO()
-    image.save(buffered, format="JPEG")
-    encoded_image_text = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    base64_qwen = f"data:image/{format.lower()};base64,{encoded_image_text}"
-    return base64_qwen
 
 def divide_image(image, grid_info : tuple[int, int]):
     assert len(grid_info) == 2, "grid_info must be a tuple of two integers (a, b)"
@@ -64,6 +128,7 @@ def extract_grid_info(prompt) -> tuple[int, int]:
     return (int(match[0][0]), int(match[0][1]))
 
 
+# -------------------------------------OpenAI Utils------------------------------------
 def get_yes_cond_prob_from_completion(completion : openai.ChatCompletion, canonicalize=False) -> float:
     if completion is None:
         return 0.0

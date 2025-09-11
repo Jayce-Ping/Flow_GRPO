@@ -808,9 +808,9 @@ These two numbers should be equal
                                 generator=generators[index] if generators is not None else None
                         )
                     images.append(this_image.squeeze(0))  # add (C, H, W)
-                    all_latents.append(this_all_latents.squeeze(0))  # add (window_size + 1, C, H, W)
-                    all_log_probs.append(this_all_log_probs.squeeze(0))  # add (window_size, )
-                
+                    all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (window_size + 1, C, H, W)
+                    all_log_probs.append(torch.stack(this_all_log_probs, dim=1).squeeze(0))  # add (window_size, )
+
                 # images: List[Tensor(C, H, W)] with length batch_size
                 # all_latents: List[Tensor(window_size + 1, C, H, W)] with length batch_size
                 # all_log_probs: List[Tensor(window_size)] with length batch_size

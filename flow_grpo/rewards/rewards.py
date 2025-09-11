@@ -7,6 +7,7 @@ from PIL import Image
 import numpy as np
 import torch
 from openai import OpenAI, AsyncOpenAI
+from utils import tensor_list_to_pil_image, tensor_to_pil_image, numpy_to_pil_image, numpy_list_to_pil_image
 
 def jpeg_incompressibility():
     def _fn(images, prompts, metadata):
@@ -293,13 +294,25 @@ def multi_score(
             score_fns[score_name] = factory()
 
     def _fn(
-        images : List[Image.Image],
+        images : List[Image.Image] | torch.Tensor | np.ndarray | List[torch.Tensor] | List[np.ndarray],
         prompts : List[str],
         metadata: List[dict]
     ) -> Tuple[dict[str, np.ndarray], dict]:
         total_scores = []
         score_details = {}
-        
+
+        # Convert images to PIL format if they are tensors or numpy arrays
+        if isinstance(images, torch.Tensor):
+            images = tensor_to_pil_image(images)
+        elif isinstance(images, np.ndarray):
+            images = numpy_to_pil_image(images)
+        elif isinstance(images, list) and all(isinstance(img, torch.Tensor) for img in images):
+            images = tensor_list_to_pil_image(images)
+        elif isinstance(images, list) and all(isinstance(img, np.ndarray) for img in images):
+            images = numpy_list_to_pil_image(images)
+
+        assert all(isinstance(img, Image.Image) for img in images), "All images must be a list of PIL Image, or a numpy array / torch Tensor, or a list of them."
+
         for score_name, weight in score_dict.items():
             scores, rewards = score_fns[score_name](images, prompts, metadata)
 
