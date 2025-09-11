@@ -786,7 +786,7 @@ These two numbers should be equal
                     # images: (batch_size, C, H, W) -> List[Tensor(C, H, W)] with length batch_size
                     # all_latents: List[Tensor(batch_size C, H, W)] with length windowsize+1 -> List[Tensor(window_size + 1, C, H, W)] with length batch_size
                     # all_log_probs: List[Tensor(batch_size)] with length window_size -> List[Tensor(window_size) with length batch_size
-                    images = list(images.unbind(0)) # List[Tensor(C, H, W)] with length batch_size
+                    images = [img.cpu().numpy() for img in images] # List[np.ndarray(C, H, W)] with length batch_size
                     all_latents = torch.stack(all_latents, dim=1) # (batch_size, window_size + 1, C, H, W)
                     all_latents = list(all_latents.unbind(0)) # List[Tensor(window_size + 1, C, H, W)] with length batch_size
                     all_log_probs = torch.stack(all_log_probs, dim=1) # (batch_size, window_size)
@@ -810,7 +810,7 @@ These two numbers should be equal
                                 width=widths[index],
                                 generator=generators[index] if generators is not None else None
                         )
-                    images.append(this_image.squeeze(0))  # add (C, H, W)
+                    images.append(this_image.squeeze(0).cpu().numpy())  # add (C, H, W)
                     all_latents.append(this_all_latents.squeeze(0))  # add (window_size + 1, C, H, W)
                     all_log_probs.append(this_all_log_probs.squeeze(0))  # add (window_size, )
                 
@@ -823,8 +823,8 @@ These two numbers should be equal
                     {
                         'height': heights[index],
                         'width': widths[index],
-                        'image': images[index].unsqueeze(0),  # Keep batch dimension as 1
-                        'prompt_ids': prompt_ids[index].unsqueeze(0),
+                        'image': images[index],
+                        'prompt_ids': prompt_ids[index].unsqueeze(0), # Keep batch dimension as 1
                         'prompt_embeds': prompt_embeds[index].unsqueeze(0),
                         'pooled_prompt_embeds': pooled_prompt_embeds[index].unsqueeze(0),
                         'latents': all_latents[index][:-1].unsqueeze(0),
@@ -840,10 +840,22 @@ These two numbers should be equal
                 memory_profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
 
         prompt_ids = accelerator.gather(torch.cat([s["prompt_ids"] for s in samples], dim=0))
-        images = accelerator.gather(torch.cat([s["image"] for s in samples], dim=0))
+        # TODO: images donot have same size, cannot be concatenated, save in a temp dir instead
+        temp_dir = os.path.join(config.save_dir, 'temp_train_images')
+        os.makedirs(temp_dir, exist_ok=True)
+        for s in samples:
+            img = s["image"]
+            img_id = f"{accelerator.process_index * len(samples) + i}.jpg"
+            pil = Image.fromarray((img.transpose(1, 2, 0) * 255).astype(np.uint8))
+            pil.save(os.path.join(temp_dir, img_id))
+        
+        accelerator.wait_for_everyone()
+        gathered_images = [os.path.join(temp_dir, f) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
+        gathered_images = [Image.open(f) for f in gathered_images]
+
         prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
         # The rewards itself contains rewards from all processes because images and prompts are gathered
-        pref_rewards, _ = executor.submit(reward_fn, images, prompts, [{}]*len(prompts)).result()  # dummy metadata
+        pref_rewards, _ = executor.submit(reward_fn, gathered_images, prompts, [{}]*len(prompts)).result()  # dummy metadata
         gathered_rewards = {
             'avg': np.array(pref_rewards),
             'pref_score': np.array(pref_rewards),
@@ -913,6 +925,7 @@ These two numbers should be equal
         for sample in samples:
             del sample["rewards"]
             del sample["prompt_ids"]
+            del sample["image"]
 
         total_batch_size = len(samples)
 
