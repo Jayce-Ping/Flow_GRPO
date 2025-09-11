@@ -112,7 +112,6 @@ def eval(pipeline : FluxPipeline,
         widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
         if not all(h == heights[0] for h in heights) or not all(w == widths[0] for w in widths):
             # Split the batch if there are different sizes
-            rewards = {}
             images = []
             for i in tqdm(
                 range(len(prompts)),
@@ -138,16 +137,7 @@ def eval(pipeline : FluxPipeline,
                         noise_level=0,
                     )
 
-                future = executor.submit(reward_fn, imgs, prompt, prompt_meta)
-                # yield to to make sure reward computation starts
-                time.sleep(0)
-                reward, reward_metadata = future.result()
-                for key, value in reward.items():
-                    if key not in rewards:
-                        rewards[key] = []
-                    rewards[key].extend(value)
-
-                images.extend(imgs)
+                images.append(imgs.squeeze(0))  # (C, H, W)
         else:
             # Batch inference if all sizes are the same
             with autocast():
@@ -162,12 +152,12 @@ def eval(pipeline : FluxPipeline,
                     width=widths[0],
                     noise_level=0,
                 )
-        
-            future = executor.submit(reward_fn, images, prompts, prompt_metadata)
-            # yield to to make sure reward computation starts
-            time.sleep(0)
-            # all_futures.append(future)
-            rewards, reward_metadata = future.result()
+        # reward_fn accepts torch.Tensor (B, C, H, W) or List[torch.Tensor(C, H, W)]
+        future = executor.submit(reward_fn, images, prompts, prompt_metadata)
+        # yield to to make sure reward computation starts
+        time.sleep(0)
+        # all_futures.append(future)
+        rewards, reward_metadata = future.result()
         
         # -------------------------------Collect log data--------------------------------
         if len(log_data["prompts"]) < log_sample_num // accelerator.num_processes:
