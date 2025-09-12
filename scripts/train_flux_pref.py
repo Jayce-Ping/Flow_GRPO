@@ -114,6 +114,7 @@ def eval(pipeline : FluxPipeline,
         widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
         if not all(h == heights[0] for h in heights) or not all(w == widths[0] for w in widths):
             # Split the batch if there are different sizes
+            rewards = {}
             images = []
             for i in tqdm(
                 range(len(prompts)),
@@ -139,7 +140,16 @@ def eval(pipeline : FluxPipeline,
                         noise_level=0,
                     )
 
-                images.append(imgs.squeeze(0))  # (C, H, W)
+                future = executor.submit(reward_fn, imgs, prompt, prompt_meta)
+                # yield to to make sure reward computation starts
+                time.sleep(0)
+                reward, reward_metadata = future.result()
+                for key, value in reward.items():
+                    if key not in rewards:
+                        rewards[key] = []
+                    rewards[key].extend(value)
+
+                images.extend(imgs)
         else:
             # Batch inference if all sizes are the same
             with autocast():
@@ -154,12 +164,12 @@ def eval(pipeline : FluxPipeline,
                     width=widths[0],
                     noise_level=0,
                 )
-        # reward_fn accepts torch.Tensor (B, C, H, W) or List[torch.Tensor(C, H, W)]
-        future = executor.submit(reward_fn, images, prompts, prompt_metadata)
-        # yield to to make sure reward computation starts
-        time.sleep(0)
-        # all_futures.append(future)
-        rewards, reward_metadata = future.result()
+        
+            future = executor.submit(reward_fn, images, prompts, prompt_metadata)
+            # yield to to make sure reward computation starts
+            time.sleep(0)
+            # all_futures.append(future)
+            rewards, reward_metadata = future.result()
         
         # -------------------------------Collect log data--------------------------------
         if len(log_data["prompts"]) < log_sample_num // accelerator.num_processes:
@@ -650,7 +660,7 @@ These two numbers should be equal
     if accelerator.is_main_process:
         print(f"Reward dict: {config.reward_fn}")
     eval_reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
-    reward_fn = pref_score()
+    pref_reward_fn = pref_score()
 
     if config.enable_mem_log:
         memory_profiler.snapshot("after_loading_reward_fn")
@@ -725,7 +735,6 @@ These two numbers should be equal
         train_iter = iter(train_dataloader)
 
         samples = []
-        prompts = []
         for i in tqdm(
             range(train_sampler.num_batches_per_epoch),
             desc=f"Epoch {epoch}: sampling",
@@ -822,7 +831,7 @@ These two numbers should be equal
                         'next_latents': all_latents[index][1:].unsqueeze(0),
                         'log_probs': all_log_probs[index].unsqueeze(0),
                     }
-                    for index in range(len(prompts))
+                    for index in range(len(gathered_prompts))
                 ]
             )
 
@@ -830,6 +839,8 @@ These two numbers should be equal
                 memory_profiler.track_samples(samples, f"sampling")
                 memory_profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
 
+        # ---------------------------Compute rewards---------------------------
+        # Since the Pref-reward is computed within the whole group, we need to group images with the same prompt together
         # Images do not have same size, cannot be concatenated, save in a temp dir instead
         temp_dir = os.path.join(config.save_dir, 'temp_train_images')
         os.makedirs(temp_dir, exist_ok=True)
@@ -843,13 +854,29 @@ These two numbers should be equal
         gathered_images = [Image.open(os.path.join(temp_dir, f)) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
 
         # Gather all prompts
-        prompt_ids = accelerator.gather(torch.cat([s["prompt_ids"] for s in samples], dim=0))
-        prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
-        # The rewards itself contains rewards from all processes because images and prompts are gathered
-        pref_rewards, _ = executor.submit(reward_fn, gathered_images, prompts, [{}]*len(prompts)).result()  # dummy metadata
+        gathered_prompt_ids = accelerator.gather(torch.cat([s["prompt_ids"] for s in samples], dim=0))
+        gathered_prompts = tokenizers[1].batch_decode(gathered_prompt_ids, skip_special_tokens=True)
+        gathered_pref_rewards = np.zeros((len(gathered_prompts),))  # placeholder to fill in later
+        prompt_to_pos = defaultdict(list)
+        for i, prompt in enumerate(gathered_prompts):
+            prompt_to_pos[prompt].append(i)
+        
+        # Split into num_processes chunks to distribute the reward computation
+        dist_prompts = list(prompt_to_pos.keys())[accelerator.process_index::accelerator.num_processes]
+        for prompt in dist_prompts:
+            images = [gathered_images[i] for i in prompt_to_pos[prompt]]
+            group_size = len(images)
+            # compute reward for each prompt
+            rewards, _ = executor.submit(pref_reward_fn, images, [prompt]*group_size, [{}]*group_size).result()
+            gathered_pref_rewards[prompt_to_pos[prompt]] = rewards
+        
+        # Gather all pref rewards
+        gathered_pref_rewards = accelerator.gather(torch.as_tensor(gathered_pref_rewards, device=accelerator.device)).cpu().numpy()
+        gathered_pref_rewards = gathered_pref_rewards.reshape(accelerator.num_processes, -1).sum(axis=0)
+
         gathered_rewards = {
-            'avg': np.array(pref_rewards),
-            'pref_score': np.array(pref_rewards),
+            'avg': np.array(gathered_pref_rewards),
+            'pref_score': np.array(gathered_pref_rewards),
         }
         # log rewards and images
         if accelerator.is_main_process:
@@ -864,13 +891,14 @@ These two numbers should be equal
                 step=global_step,
             )
 
+        # ----------------------------------Compute advantages----------------------------------
         # per-prompt mean/std tracking
         if config.per_prompt_stat_tracking:
             # gather the prompts across processes
-            advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
+            advantages = stat_tracker.update(gathered_prompts, gathered_rewards['avg'])
             if accelerator.is_local_main_process:
-                print("len(prompts)", len(prompts))
-                print("len unique prompts", len(set(prompts)))
+                print("len(prompts)", len(gathered_prompts))
+                print("len unique prompts", len(set(gathered_prompts)))
 
                 (
                     avg_group_size,

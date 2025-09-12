@@ -721,7 +721,6 @@ These two numbers should be equal
         train_iter = iter(train_dataloader)
 
         samples = []
-        prompts = []
         for i in tqdm(
             range(train_sampler.num_batches_per_epoch),
             desc=f"Epoch {epoch}: sampling",
