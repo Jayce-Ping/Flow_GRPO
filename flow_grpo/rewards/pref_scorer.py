@@ -83,17 +83,16 @@ class PrefScorer:
             client: AsyncOpenAI,
             model='Qwen2.5-VL-7B-Instruct',
             criteria_path='prompt_consistency_criterion.json',
-            async_mode=True,
-            max_concurrent=60,
+            max_concurrent=100,
             max_retries=10,
             timeout=60
         ):
         self.client = client
         self.model = model
-        self.async_mode = async_mode
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
         self.timeout = timeout
+        self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
         with open(criteria_path, 'r') as f:
             self.criteria_data = json.load(f)
@@ -171,12 +170,12 @@ class PrefScorer:
             prompt : str = "",
             top_logprobs: int = 20
         ) -> openai.ChatCompletion:
-        global_semaphore = asyncio.Semaphore(self.max_concurrent)
         
         messages = build_messages(image1, image2, prompt)
+        completion = None
         for attempt in range(self.max_retries):
             try:
-                async with global_semaphore:
+                async with self.global_semaphore:
                     completion = await self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
@@ -191,8 +190,6 @@ class PrefScorer:
                 print(f"API error on attempt {attempt+1}/{self.max_retries}: {e}")
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
-                else:
-                    completion = None
 
         return completion
     

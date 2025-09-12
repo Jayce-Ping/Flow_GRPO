@@ -34,6 +34,7 @@ class GridLayoutScorer:
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
         self.timeout = timeout
+        self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
         self.client = client
 
@@ -56,10 +57,9 @@ class GridLayoutScorer:
             image : Image.Image,
             metadata : dict,
             top_logprobs: int = 20,
-            threshold = 0.9,
+            use_prob: bool = False,
+            threshold = 0.5,
         ) -> float:
-        # Create a global semaphore for overall concurrency control
-        global_semaphore = asyncio.Semaphore(self.max_concurrent)
         grid_info = extract_grid_info(prompt)
         messages = [
             {
@@ -71,10 +71,10 @@ class GridLayoutScorer:
                 ]
             }
         ]
-
+        completion = None
         for attempt in range(self.max_retries):
             try:
-                async with global_semaphore:
+                async with self.global_semaphore:
                     completion = await self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
@@ -89,19 +89,19 @@ class GridLayoutScorer:
                 print(f"API error on attempt {attempt+1}/{self.max_retries}: {e}")
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
-                else:
-                    completion = None
 
         if completion is None:
             return 0.0
-        else:
-            content = completion.choices[0].message.content.strip().lower()
-            if 'yes' in content:
-                return 1.0
-            else:
-                return 0.0
+
+        if use_prob:
             yes_prob = get_yes_cond_prob_from_completion(completion, canonicalize=True)
             if yes_prob > threshold:
                 return 1.0
             else:
                 return 0.0
+
+        content = completion.choices[0].message.content.strip().lower()
+        if 'yes' in content:
+            return 1.0
+        else:
+            return 0.0

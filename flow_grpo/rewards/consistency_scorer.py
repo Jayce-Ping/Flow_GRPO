@@ -38,6 +38,7 @@ class ConsistencyScorer:
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
         self.timeout = timeout
+        self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
         with open(criteria_path, 'r') as f:
             self.criteria_data = json.load(f)
@@ -103,7 +104,6 @@ class ConsistencyScorer:
         """
         Async version of compute_image_consistency with concurrency control.
         """
-        global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
         async def process_image_pair(image1, image2):
             messages = [
@@ -119,7 +119,7 @@ class ConsistencyScorer:
             ]
             for attempt in range(self.max_retries):
                 try:
-                    async with global_semaphore:
+                    async with self.global_semaphore:
                         completion = await self.client.chat.completions.create(
                             model=self.model,
                             messages=messages,
