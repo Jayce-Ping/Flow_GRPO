@@ -40,18 +40,10 @@ class GridLayoutScorer:
     @torch.no_grad()
     async def __call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict]) -> list[float]:
         assert len(prompts) == len(images), "Length of prompts and images must match"
-
-        # Create a global semaphore for overall concurrency control
-        global_semaphore = asyncio.Semaphore(self.max_concurrent)
-
-        # Process all images concurrently
-        async def process_single_image(prompt, image, metadata):
-            async with global_semaphore:
-                return await self.compute_layout_score(prompt, image, metadata)
-
+        
         # Process all images concurrently
         tasks = [
-            process_single_image(prompt, image, metadata) 
+            self.compute_layout_score(prompt, image, metadata) 
             for prompt, image, metadata in zip(prompts, images, metadatas)
         ]
 
@@ -66,6 +58,8 @@ class GridLayoutScorer:
             top_logprobs: int = 20,
             threshold = 0.9,
         ) -> float:
+        # Create a global semaphore for overall concurrency control
+        global_semaphore = asyncio.Semaphore(self.max_concurrent)
         grid_info = extract_grid_info(prompt)
         messages = [
             {
@@ -80,19 +74,20 @@ class GridLayoutScorer:
 
         for attempt in range(self.max_retries):
             try:
-                completion = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=1e-6, # Low temperature may cause issue here.
-                    max_completion_tokens=1,
-                    logprobs=True,
-                    top_logprobs=top_logprobs,
-                    timeout=self.timeout
-                )
+                async with global_semaphore:
+                    completion = await self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        temperature=1e-6, # Low temperature may cause issue here.
+                        max_completion_tokens=1,
+                        logprobs=True,
+                        top_logprobs=top_logprobs,
+                        timeout=self.timeout
+                    )
             except Exception as e:
                 print(f"API error on attempt {attempt+1}/{self.max_retries}: {e}")
                 if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
+                    await asyncio.sleep(2 ** attempt)
                 else:
                     completion = None
 

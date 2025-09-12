@@ -84,7 +84,7 @@ class PrefScorer:
             model='Qwen2.5-VL-7B-Instruct',
             criteria_path='prompt_consistency_criterion.json',
             async_mode=True,
-            max_concurrent=12,  # 2x2 grid has 6 pair of images to compare. 12 for at most 2 batches at once.
+            max_concurrent=60,
             max_retries=10,
             timeout=60
         ):
@@ -99,6 +99,7 @@ class PrefScorer:
             self.criteria_data = json.load(f)
 
     async def __call__(self, images : list[Image.Image], prompts : list[str], metadata: list[dict]) -> Union[list[float], np.ndarray]:
+        assert len(images) == len(prompts) == len(metadata), "Length of images, prompts, and metadata must be the same."
         # Group images and metadata by their prompts
         prompt_to_images = {}
         prompt_to_metadata = {}
@@ -112,38 +113,55 @@ class PrefScorer:
             prompt_to_metadata[prompt].append(meta)
             prompt_to_pos[prompt].append(i)
 
-        # Process each group of images with the same prompt
+        # Process each group of images with the same prompt concurrently
         all_scores = np.zeros(len(images), dtype=float)
+        
+        # Create tasks for each prompt group
+        tasks = []
         for prompt, imgs in prompt_to_images.items():
-            meta = prompt_to_metadata[prompt][0] # Assume all metadata are the same for the same prompt
-            group_rewards = await self.compute_group_rewards(prompt, imgs, meta)
+            meta = prompt_to_metadata[prompt][0]
+            task = self.compute_group_rewards(prompt, imgs, meta)
+            tasks.append((prompt, task))
+        
+        # Execute all groups concurrently
+        results = await asyncio.gather(*[task for _, task in tasks])
+        
+        # Assign results back to all_scores
+        for (prompt, _), group_rewards in zip(tasks, results):
             all_scores[prompt_to_pos[prompt]] = group_rewards
 
         return all_scores
         
 
     async def compute_group_rewards(self, prompt : str, images : list[Image.Image], metadata: dict) -> Union[list[float], np.ndarray]:
-        # Create a global semaphore for overall concurrency control
-        global_semaphore = asyncio.Semaphore(self.max_concurrent)
-        
         async def compare_image_pair(image1, image2):
-            async with global_semaphore:
-                # Symmetric comparison for better reliability
-                completion1 = await self.compare_image(image1, image2, prompt)
-                completion2 = await self.compare_image(image2, image1, prompt)
-                prob1 = get_yes_cond_prob_from_completion(completion1, canonicalize=True)
-                prob2 = get_yes_cond_prob_from_completion(completion2, canonicalize=True)
-                return int(prob1 > prob2), int(prob2 > prob1)
+            # Symmetric comparison for better reliability
+            completion1 = await self.compare_image(image1, image2, prompt)
+            completion2 = await self.compare_image(image2, image1, prompt)
+            prob1 = get_yes_cond_prob_from_completion(completion1, canonicalize=True)
+            prob2 = get_yes_cond_prob_from_completion(completion2, canonicalize=True)
+            return int(prob1 > prob2), int(prob2 > prob1)
 
-        # Process all images concurrently
+        # Process all image pairs concurrently
         comparison_array = np.zeros((len(images), len(images)), dtype=int)
-        for i,j in combinations(range(len(images)), 2):
-            win1, win2 = await compare_image_pair(images[i], images[j])
+        tasks = []
+        pairs = []
+        
+        for i, j in combinations(range(len(images)), 2):
+            task = compare_image_pair(images[i], images[j])
+            tasks.append(task)
+            pairs.append((i, j))
+        
+        # Execute all comparisons concurrently
+        results = await asyncio.gather(*tasks)
+        
+        # Fill the comparison array
+        for (i, j), (win1, win2) in zip(pairs, results):
             comparison_array[i, j] = win1
             comparison_array[j, i] = win2
         
         # Sum up wins for each image
-        scores = comparison_array.sum(axis=1)
+        scores = comparison_array.sum(axis=1) / (max(1, len(images)-1))  # Normalize to [0, 1]
         return scores
     
     async def compare_image(
@@ -153,18 +171,21 @@ class PrefScorer:
             prompt : str = "",
             top_logprobs: int = 20
         ) -> openai.ChatCompletion:
+        global_semaphore = asyncio.Semaphore(self.max_concurrent)
+        
         messages = build_messages(image1, image2, prompt)
         for attempt in range(self.max_retries):
             try:
-                completion = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=0.0, # Deterministic result, no use for logprobs, actually.
-                    max_completion_tokens=1,
-                    logprobs=True,
-                    top_logprobs=top_logprobs,
-                    timeout=self.timeout
-                )
+                async with global_semaphore:
+                    completion = await self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        temperature=0.0, # Deterministic result, no use for logprobs, actually.
+                        max_completion_tokens=1,
+                        logprobs=True,
+                        top_logprobs=top_logprobs,
+                        timeout=self.timeout
+                    )
             except Exception as e:
                 print(f"API error on attempt {attempt+1}/{self.max_retries}: {e}")
                 if attempt < self.max_retries - 1:
