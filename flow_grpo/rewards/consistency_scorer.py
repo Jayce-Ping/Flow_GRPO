@@ -29,7 +29,6 @@ class ConsistencyScorer:
             client: AsyncOpenAI,
             model='Qwen2.5-VL-7B-Instruct',
             criteria_path='prompt_consistency_criterion.json',
-            async_mode=True,
             max_concurrent=60,
             max_retries=10,
             timeout=60

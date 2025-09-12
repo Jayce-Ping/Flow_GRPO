@@ -34,7 +34,7 @@ def pref_score():
         client=client,
         model='Qwen2.5-VL-7B-Instruct',
         criteria_path='dataset/T2IS/prompt_consistency_criterion.json',
-        max_concurrent=12, # Adjust based on the system's capabilities (especially when using vllm as local model server)
+        max_concurrent=60, # Adjust based on the system's capabilities (especially when using vllm as local model server)
     )
 
     def _fn(images, prompts, metadatas):

@@ -26,7 +26,7 @@ class GridLayoutScorer:
             self,
             client : AsyncOpenAI,
             model='Qwen2.5-VL-7B-Instruct',
-            max_concurrent=12,
+            max_concurrent=60,
             max_retries=10,
             timeout=60
         ):
@@ -40,7 +40,7 @@ class GridLayoutScorer:
     @torch.no_grad()
     async def __call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict]) -> list[float]:
         assert len(prompts) == len(images), "Length of prompts and images must match"
-        
+
         # Process all images concurrently
         tasks = [
             self.compute_layout_score(prompt, image, metadata) 
