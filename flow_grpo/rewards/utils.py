@@ -2,6 +2,8 @@ import re
 import base64
 from io import BytesIO
 from typing import List, Union
+from itertools import permutations, combinations, chain
+
 from PIL import Image
 import torch
 import numpy as np
@@ -210,3 +212,81 @@ def get_yes_cond_prob_from_completion(completion : openai.ChatCompletion, canoni
 
 
 
+
+
+# -------------------------------------Reward Computation Utils--------------------
+def is_symmetric_matrix(matrix: np.ndarray):
+    """
+        Check if the matrix is symmetric
+        Args:
+            matrix: square numpy array
+        Returns:
+            bool: True if symmetric, False otherwise
+    """
+    matrix = np.array(matrix)
+    if matrix.shape[0] != matrix.shape[1]:
+        # Must be square
+        return False
+
+    return np.all(matrix == matrix.T)
+
+def is_antisymmetric_matrix(matrix: np.ndarray, diagonal_zero=True):
+    """
+        Check if the matrix is anti-symmetric
+        Args:
+            matrix: square numpy array
+            diagonal_zero: if True, check if diagonal elements are zero, else ignore diagonal
+        Returns:
+            bool: True if anti-symmetric, False otherwise
+    """
+    matrix = np.array(matrix)
+    n = matrix.shape[0]
+    if matrix.shape[0] != matrix.shape[1]:
+        # Must be square
+        return False
+
+    summation = matrix.T + matrix
+    if diagonal_zero:
+        # Check if all elements are zero
+        return np.all(summation == 0)
+    else:
+        # Assign diagonal to zero and check
+        summation[np.diag_indices_from(summation)] = 0
+        if np.any(summation != 0):
+            return False
+
+    return True
+
+def is_transitive_matrix(matrix: np.ndarray, return_violations=False):
+    """
+        Check if the matrix is transitive
+        Args:
+            matrix: square numpy array with binary values (0 or 1)
+        Returns:
+            bool: True if transitive, False otherwise
+    """
+    matrix = np.array(matrix)
+    n = len(matrix)
+    if matrix.shape[0] != matrix.shape[1]:
+        # Must be square
+        return False
+    
+    if not np.all(np.isin(matrix, [0, 1])):
+        # Must be binary
+        raise ValueError("`transitiveMatrixQ` requires matrix must be binary (0 or 1)")
+
+    # Check transitivity: if A[i][j] == 1 and A[j][k] == 1, then A[i][k] must be 1
+    violations = []
+    for i,j,k in permutations(range(n), 3):
+        # Check all 3-tuples
+        if matrix[i][j] == 1 and matrix[j][k] == 1 and matrix[i][k] != 1:
+            if not return_violations:
+                return False
+
+            violations.append((i,j,k))
+
+
+    if return_violations:
+        return len(violations) == 0, violations
+
+    return len(violations) == 0

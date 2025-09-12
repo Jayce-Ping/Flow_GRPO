@@ -11,13 +11,12 @@ from flow_grpo.rewards.utils import tensor_list_to_pil_image, tensor_to_pil_imag
 
 def jpeg_incompressibility():
     def _fn(images, prompts, metadata):
-        if isinstance(images, torch.Tensor):
-            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
-            images = images.transpose(0, 2, 3, 1)  # NCHW -> NHWC
-        images = [Image.fromarray(image) for image in images]
+
         buffers = [io.BytesIO() for _ in images]
+
         for image, buffer in zip(images, buffers):
             image.save(buffer, format="JPEG", quality=95)
+
         sizes = [buffer.tell() / 1000 for buffer in buffers]
         return np.array(sizes), {}
 
@@ -38,25 +37,20 @@ def aesthetic_score():
     scorer = AestheticScorer(dtype=torch.float32).cuda()
 
     def _fn(images, prompts, metadata):
-        if isinstance(images, torch.Tensor):
-            images = (images * 255).round().clamp(0, 255).to(torch.uint8)
-        else:
-            images = images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
-            images = torch.tensor(images, dtype=torch.uint8)
         scores = scorer(images)
         return scores, {}
 
     return _fn
 
-def clip_score():
+def clip_score(device):
     from flow_grpo.rewards.clip_scorer import ClipScorer
 
-    scorer = ClipScorer(dtype=torch.float32).cuda()
+    scorer = ClipScorer(dtype=torch.float32).to(device)
 
-    def _fn(images, prompts, metadata):
-        if not isinstance(images, torch.Tensor):
-            images = images.transpose(0, 3, 1, 2)  # NHWC -> NCHW
-            images = torch.tensor(images, dtype=torch.uint8)/255.0
+    def _fn(images: List[Image.Image], prompts: List[str], metadata: List[dict]) -> Tuple[np.ndarray, dict]:
+        # Convert PIL images to pixel tensors in [0, 1] range
+        images = np.stack([np.array(img) / 255.0 for img in images])
+        images = torch.tensor(images, dtype=torch.float32).to(device)
         scores = scorer(images, prompts)
         return scores, {}
 
@@ -86,11 +80,7 @@ def pickscore_score(device):
 
     scorer = PickScoreScorer(dtype=torch.float32, device=device)
 
-    def _fn(images, prompts, metadata):
-        if isinstance(images, torch.Tensor):
-            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
-            images = images.transpose(0, 2, 3, 1)  # NCHW -> NHWC
-            images = [Image.fromarray(image) for image in images]
+    def _fn(images : List[Image.Image], prompts : List[str], metadata : List[dict]) -> Tuple[List[float], dict]:
         scores = scorer(prompts, images)
         return scores, {}
 
@@ -102,10 +92,7 @@ def imagereward_score(device):
     scorer = ImageRewardScorer(dtype=torch.float32, device=device)
 
     def _fn(images, prompts, metadata):
-        if isinstance(images, torch.Tensor):
-            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
-            images = images.transpose(0, 2, 3, 1)  # NCHW -> NHWC
-            images = [Image.fromarray(image) for image in images]
+
         prompts = [prompt for prompt in prompts]
         scores = scorer(prompts, images)
         return scores, {}
@@ -126,13 +113,7 @@ def grid_layout_score():
         model='Qwen2.5-VL-7B-Instruct',
         max_concurrent=60, # Adjust based on the system's capabilities (especially when using vllm as local model server)
     )
-    def _fn(images, prompts, metadatas):
-        if isinstance(images, torch.Tensor):
-            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
-            images = images.transpose(0, 2, 3, 1)
-        
-            images = [Image.fromarray(image) for image in images]
-
+    def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[List[float], dict]:
         scores = asyncio.run(scorer(images, prompts, metadatas))
         return scores, {}
 
@@ -154,12 +135,8 @@ def consistency_score():
         max_concurrent=60, # Adjust based on the system's capabilities (especially when using vllm as local model server)
     )
 
-    def _fn(images, prompts, metadatas):
-        if isinstance(images, torch.Tensor):
-            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
-            images = images.transpose(0, 2, 3, 1)  # NCHW -> NHWC
-            images = [Image.fromarray(image) for image in images]
-        
+    def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[List[float], dict]:
+
         scores = asyncio.run(scorer(images, prompts, metadatas))
         return scores, {}
 
@@ -170,13 +147,7 @@ def subfig_clipT_score(device):
 
     scorer = SubfigClipTScorer(device=device)
 
-    def _fn(images, prompts, metadatas):
-        if isinstance(images, torch.Tensor):
-            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
-            images = images.transpose(0, 2, 3, 1)  # NCHW -> NHWC
-            images = [Image.fromarray(image) for image in images]
-
-        
+    def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[np.ndarray, dict]:
         scores = scorer(images, prompts, metadatas)
         return scores, {}
 
@@ -192,11 +163,7 @@ def qwenvl_score(device):
         model_name='QwenVL2.5-7B-Instruct'
     )
 
-    def _fn(images, prompts, metadata):
-        if isinstance(images, torch.Tensor):
-            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
-            images = images.transpose(0, 2, 3, 1)  # NCHW -> NHWC
-            images = [Image.fromarray(image) for image in images]
+    def _fn(images : List[Image.Image], prompts : List[str], metadata : List[dict]):
         prompts = [prompt for prompt in prompts]
         scores = scorer(prompts, images)
         return scores, {}
@@ -208,10 +175,7 @@ def ocr_score(device):
 
     scorer = OcrScorer()
 
-    def _fn(images, prompts, metadata):
-        if isinstance(images, torch.Tensor):
-            images = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
-            images = images.transpose(0, 2, 3, 1)  # NCHW -> NHWC
+    def _fn(images : List[Image.Image], prompts : List[str], metadata : List[dict]):
         scores = scorer(images, prompts)
         # change tensor to list
         return scores, {}
@@ -275,7 +239,6 @@ def multi_score(
         "aesthetic": aesthetic_score,
         "jpeg_compressibility": jpeg_compressibility,
         "clipscore": clip_score,
-        "image_similarity": image_similarity_score,
         "consistency_score": consistency_score,
         "subfig_clipT": subfig_clipT_score,
         "grid_layout": grid_layout_score,
@@ -294,7 +257,7 @@ def multi_score(
             score_fns[score_name] = factory()
 
     def _fn(
-        images : List[Image.Image] | torch.Tensor | np.ndarray | List[torch.Tensor] | List[np.ndarray],
+        images : Union[List[Image.Image], torch.Tensor, np.ndarray, List[torch.Tensor], List[np.ndarray]],
         prompts : List[str],
         metadata: List[dict]
     ) -> Tuple[dict[str, np.ndarray], dict]:

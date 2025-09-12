@@ -28,7 +28,6 @@ class ConsistencyScorer:
             self,
             client: AsyncOpenAI,
             model='Qwen2.5-VL-7B-Instruct',
-            criteria_path='prompt_consistency_criterion.json',
             max_concurrent=60,
             max_retries=10,
             timeout=60
@@ -40,9 +39,6 @@ class ConsistencyScorer:
         self.timeout = timeout
         self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
-        with open(criteria_path, 'r') as f:
-            self.criteria_data = json.load(f)
-
     @torch.no_grad()
     async def __call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict]) -> list[float]:
         assert len(prompts) == len(images), "Length of prompts and images must match"
@@ -50,14 +46,14 @@ class ConsistencyScorer:
         # Create a global semaphore for overall concurrency control
         
         async def process_single_image(prompt, image, metadata):
-            criteria_info = self.criteria_data[metadata['idx']]
+            criteria_info = metadata['criteria']
             dimensions = criteria_info.keys()
-            dimension_scores = {k:0.0 for k in dimensions}
+            dimension_scores = {k: 0.0 for k in dimensions}
             
             # Compute scores for each prompt-image pair from different dimensions
             for dimension in dimensions:
                 # Get criteria for this dimension
-                dimension_criteria = criteria_info[dimension][0]
+                dimension_criteria = criteria_info[dimension]
                 criteria_texts = [c_t for c_t in dimension_criteria.values() if c_t]
 
                 # [criteria1_scores : list[float], criteria2_scores : list[float], ...]
