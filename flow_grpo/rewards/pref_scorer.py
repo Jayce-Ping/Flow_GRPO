@@ -186,6 +186,7 @@ class PrefScorer:
                         top_logprobs=top_logprobs,
                         timeout=self.timeout
                     )
+                break
             except Exception as e:
                 print(f"API error on attempt {attempt+1}/{self.max_retries}: {e}")
                 if attempt < self.max_retries - 1:
