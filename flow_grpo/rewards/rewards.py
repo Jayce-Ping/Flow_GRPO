@@ -131,7 +131,6 @@ def consistency_score():
     scorer = ConsistencyScorer(
         client=client,
         model='Qwen2.5-VL-7B-Instruct',
-        criteria_path='dataset/T2IS/prompt_consistency_criterion.json',
         max_concurrent=60, # Adjust based on the system's capabilities (especially when using vllm as local model server)
     )
 

@@ -97,14 +97,12 @@ class PrefScorer:
             self,
             client: AsyncOpenAI,
             model='Qwen2.5-VL-7B-Instruct',
-            async_mode=True,
-            max_concurrent=300,
+            max_concurrent=60,
             max_retries=10,
             timeout=60
         ):
         self.client = client
         self.model = model
-        self.async_mode = async_mode
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
         self.timeout = timeout
