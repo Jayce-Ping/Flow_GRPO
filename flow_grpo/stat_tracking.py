@@ -9,7 +9,7 @@ class PerPromptStatTracker:
         self.stats = {}
         self.history_prompts = set()
 
-    def update(self, prompts : List[str], rewards : torch.Tensor, type : str = 'grpo'):
+    def update(self, prompts : List[str], rewards : torch.Tensor | np.ndarray, type : str = 'grpo'):
         """
             Add `prompts` and corresponding `rewards` to the tracker and return advantages.
 

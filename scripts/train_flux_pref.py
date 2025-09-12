@@ -831,7 +831,7 @@ These two numbers should be equal
                         'next_latents': all_latents[index][1:].unsqueeze(0),
                         'log_probs': all_log_probs[index].unsqueeze(0),
                     }
-                    for index in range(len(gathered_prompts))
+                    for index in range(len(prompts))
                 ]
             )
 
