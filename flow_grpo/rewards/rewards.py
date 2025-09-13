@@ -152,23 +152,6 @@ def subfig_clipT_score(device):
 
     return _fn
 
-def qwenvl_score(device):
-    from flow_grpo.rewards.qwenvl import QwenVLScorer
-
-    # VLLM local deployment
-    scorer = QwenVLScorer(
-        base_url='http://127.0.0.1:8000/v1',
-        api_key='dummy-key',
-        model_name='QwenVL2.5-7B-Instruct'
-    )
-
-    def _fn(images : List[Image.Image], prompts : List[str], metadata : List[dict]):
-        prompts = [prompt for prompt in prompts]
-        scores = scorer(prompts, images)
-        return scores, {}
-
-    return _fn
-
 def ocr_score(device):
     from flow_grpo.rewards.ocr import OcrScorer
 
@@ -234,7 +217,6 @@ def multi_score(
         "ocr": ocr_score,
         "imagereward": imagereward_score,
         "pickscore": pickscore_score,
-        "qwenvl": qwenvl_score,
         "aesthetic": aesthetic_score,
         "jpeg_compressibility": jpeg_compressibility,
         "clipscore": clip_score,

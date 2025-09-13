@@ -34,6 +34,7 @@ def compressibility():
     config.sample.guidance_scale = 3.5
 
     # Training
+    config.enable_flexible_size = True
     config.train.batch_size = 4
     config.train.gradient_accumulation_steps = 2
 
@@ -64,6 +65,7 @@ def test_flux():
     config.logging_platform = "swanlab"
 
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_all_2by2")
+    config.enable_flexible_size = True
 
     # flux
     config.pretrained.model = FLUX_MODEL_PATH
@@ -129,6 +131,7 @@ def subfig_clip_flux_2gpu():
     # config.logging_platform = "swanlab"
     
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_leq_4")
+    config.enable_flexible_size = True
 
     config.sample.use_sliding_window = True
     config.sample.window_size = 2
@@ -196,6 +199,7 @@ def pickscore_flux_8gpu():
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_leq_4")
     config.prompt_fn = "geneval"
     config.logging_platform = 'swanlab'
+    config.enable_flexible_size = True
 
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
@@ -251,6 +255,7 @@ def grid_consistency_clip_flux():
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
 
+    config.enable_flexible_size = True
     config.resolution = 1024
     config.max_sequence_length = 512
 

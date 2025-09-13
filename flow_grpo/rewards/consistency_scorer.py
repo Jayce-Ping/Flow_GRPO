@@ -40,7 +40,7 @@ class ConsistencyScorer:
         self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
     @torch.no_grad()
-    async def __call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict]) -> list[float]:
+    async def __call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict], canonicalize: bool = False) -> list[float]:
         assert len(prompts) == len(images), "Length of prompts and images must match"
 
         # Create a global semaphore for overall concurrency control
@@ -59,7 +59,7 @@ class ConsistencyScorer:
                 # [criteria1_scores : list[float], criteria2_scores : list[float], ...]
                 criterion_scores = []
                 for ct in criteria_texts:
-                    scores = await self.compute_image_consistency(prompt, image, ct)
+                    scores = await self.compute_image_consistency(prompt, image, ct, canonicalize=canonicalize)
                     criterion_scores.append(scores)
 
                 # Compute the average score within each criterion
@@ -86,16 +86,18 @@ class ConsistencyScorer:
             prompt : str,
             image : Image.Image,
             criteria_text : str,
-            top_logprobs: int = 20
+            top_logprobs: int = 20,
+            canonicalize: bool = False,
         ) -> list[float]:
-        return await self._async_compute_image_consistency(prompt, image, criteria_text, top_logprobs)
+        return await self._async_compute_image_consistency(prompt, image, criteria_text, top_logprobs, canonicalize)
 
     async def _async_compute_image_consistency(
             self,
             prompt: str,
             image: Image.Image,
             criteria_text: str,
-            top_logprobs: int = 20
+            top_logprobs: int = 20,
+            canonicalize: bool = False,
         ) -> list[float]:
         """
         Async version of compute_image_consistency with concurrency control.
@@ -146,4 +148,4 @@ class ConsistencyScorer:
         # Execute all tasks concurrently
         completions = await asyncio.gather(*tasks)
 
-        return [get_yes_cond_prob_from_completion(c, canonicalize=False) for c in completions]
+        return [get_yes_cond_prob_from_completion(c, canonicalize=canonicalize) for c in completions]

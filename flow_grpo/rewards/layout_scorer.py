@@ -95,13 +95,7 @@ class GridLayoutScorer:
 
         if use_prob:
             yes_prob = get_yes_cond_prob_from_completion(completion, canonicalize=True)
-            if yes_prob > threshold:
-                return 1.0
-            else:
-                return 0.0
+            return 1.0 if yes_prob >= threshold else 0.0
 
         content = completion.choices[0].message.content.strip().lower()
-        if 'yes' in content:
-            return 1.0
-        else:
-            return 0.0
+        return 1.0 if "yes" in content else 0.0
