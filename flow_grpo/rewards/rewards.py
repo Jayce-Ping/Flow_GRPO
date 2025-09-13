@@ -108,13 +108,14 @@ def grid_layout_score():
         base_url='http://127.0.0.1:8000/v1'
     )
 
-    scorer = GridLayoutScorer(
-        client=client,
-        model='Qwen2.5-VL-7B-Instruct',
-        max_concurrent=60, # Adjust based on the system's capabilities (especially when using vllm as local model server)
-    )
     def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[List[float], dict]:
-        scores = asyncio.run(scorer(images, prompts, metadatas))
+        # Create the GridLayoutScorer instance inside the function, to create its own semaphore for this call
+        scorer = GridLayoutScorer(
+            client=client,
+            model='Qwen2.5-VL-7B-Instruct',
+            max_concurrent=60, # Adjust based on the system's capabilities (especially when using vllm as local model server)
+        )
+        scores = scorer(images, prompts, metadatas)
         return scores, {}
 
     return _fn
@@ -128,15 +129,14 @@ def consistency_score():
         base_url='http://127.0.0.1:8000/v1'
     )
 
-    scorer = ConsistencyScorer(
-        client=client,
-        model='Qwen2.5-VL-7B-Instruct',
-        max_concurrent=60, # Adjust based on the system's capabilities (especially when using vllm as local model server)
-    )
-
     def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[List[float], dict]:
-
-        scores = asyncio.run(scorer(images, prompts, metadatas))
+        # Create the ConsistencyScorer instance inside the function, to create its own semaphore for this call
+        scorer = ConsistencyScorer(
+            client=client,
+            model='Qwen2.5-VL-7B-Instruct',
+            max_concurrent=60, # Adjust based on the system's capabilities (especially when using vllm as local model server)
+        )
+        scores = scorer(images, prompts, metadatas)
         return scores, {}
 
     return _fn

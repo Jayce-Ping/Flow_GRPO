@@ -30,14 +30,14 @@ def pref_score():
         base_url='http://127.0.0.1:8000/v1'
     )
 
-    scorer = PrefScorer(
-        client=client,
-        model='Qwen2.5-VL-7B-Instruct',
-        max_concurrent=60, # Adjust based on the system's capabilities (especially when using vllm as local model server)
-    )
-
     def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[np.ndarray, dict]:
-        scores = asyncio.run(scorer(images, prompts, metadatas))
+        # Create the PrefScorer instance inside the function to avoid semaphore issues
+        scorer = PrefScorer(
+            client=client,
+            model='Qwen2.5-VL-7B-Instruct',
+            max_concurrent=100, # Adjust based on the system's capabilities (especially when using vllm as local model server)
+        )
+        scores = scorer(images, prompts, metadatas)
         return scores, {}
 
     return _fn
@@ -97,7 +97,7 @@ class PrefScorer:
             self,
             client: AsyncOpenAI,
             model='Qwen2.5-VL-7B-Instruct',
-            max_concurrent=60,
+            max_concurrent=100,
             max_retries=10,
             timeout=60
         ):
@@ -106,9 +106,16 @@ class PrefScorer:
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
         self.timeout = timeout
-        self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
+        # self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
+        self.global_semaphore = None
 
-    async def __call__(self, images : list[Image.Image], prompts : list[str], metadata: list[dict], detailed=True) -> np.ndarray:
+    def __call__(self, images : list[Image.Image], prompts : list[str], metadata: list[dict], detailed=True) -> np.ndarray:
+        return asyncio.run(self.__async_call__(images, prompts, metadata, detailed=detailed))
+
+    async def __async_call__(self, images : list[Image.Image], prompts : list[str], metadata: list[dict], detailed=True) -> np.ndarray:
+        if self.global_semaphore is None:
+            self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
+
         assert len(images) == len(prompts) == len(metadata), "Length of images, prompts, and metadata must be the same."
         # Group images and metadata by their prompts
         prompt_to_images = {}
@@ -187,7 +194,6 @@ class PrefScorer:
             detailed : bool = False,
             top_logprobs: int = 20
         ) -> openai.ChatCompletion:
-        # global_semaphore = asyncio.Semaphore(self.max_concurrent)
         if metadata is not None:
             criteria = metadata.get('criteria', None)
         else:

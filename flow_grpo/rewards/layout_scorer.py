@@ -34,13 +34,20 @@ class GridLayoutScorer:
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
         self.timeout = timeout
-        self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
+        # self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
+        self.global_semaphore = None
 
         self.client = client
 
+    def __call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict]) -> list[float]:
+        return asyncio.run(self.__async_call__(images, prompts, metadatas))
+
     @torch.no_grad()
-    async def __call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict]) -> list[float]:
+    async def __async_call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict]) -> list[float]:
         assert len(prompts) == len(images), "Length of prompts and images must match"
+        # Create the semaphore inside the asyncio.run context
+        if self.global_semaphore is None:
+            self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
         # Process all images concurrently
         tasks = [

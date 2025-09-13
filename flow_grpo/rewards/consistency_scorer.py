@@ -37,14 +37,20 @@ class ConsistencyScorer:
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
         self.timeout = timeout
-        self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
+        # self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
+        self.global_semaphore = None
+
+    def __call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict], canonicalize: bool = False) -> list[float]:
+        return asyncio.run(self.__async_call__(images, prompts, metadatas, canonicalize))
 
     @torch.no_grad()
-    async def __call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict], canonicalize: bool = False) -> list[float]:
+    async def __async_call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict], canonicalize: bool = False) -> list[float]:
         assert len(prompts) == len(images), "Length of prompts and images must match"
 
         # Create a global semaphore for overall concurrency control
-        
+        if self.global_semaphore is None:
+            self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
+
         async def process_single_image(prompt, image, metadata):
             criteria_info = metadata['criteria']
             dimensions = criteria_info.keys()
@@ -59,7 +65,7 @@ class ConsistencyScorer:
                 # [criteria1_scores : list[float], criteria2_scores : list[float], ...]
                 criterion_scores = []
                 for ct in criteria_texts:
-                    scores = await self.compute_image_consistency(prompt, image, ct, canonicalize=canonicalize)
+                    scores = await self._async_compute_image_consistency(prompt, image, ct, canonicalize=canonicalize)
                     criterion_scores.append(scores)
 
                 # Compute the average score within each criterion
@@ -80,16 +86,6 @@ class ConsistencyScorer:
         
         final_scores = await asyncio.gather(*tasks)
         return final_scores
-    
-    async def compute_image_consistency(
-            self,
-            prompt : str,
-            image : Image.Image,
-            criteria_text : str,
-            top_logprobs: int = 20,
-            canonicalize: bool = False,
-        ) -> list[float]:
-        return await self._async_compute_image_consistency(prompt, image, criteria_text, top_logprobs, canonicalize)
 
     async def _async_compute_image_consistency(
             self,
@@ -97,7 +93,7 @@ class ConsistencyScorer:
             image: Image.Image,
             criteria_text: str,
             top_logprobs: int = 20,
-            canonicalize: bool = False,
+            canonicalize: bool = False
         ) -> list[float]:
         """
         Async version of compute_image_consistency with concurrency control.
