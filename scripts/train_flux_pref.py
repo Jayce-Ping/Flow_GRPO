@@ -986,7 +986,7 @@ These two numbers should be equal
             .to(accelerator.device)
         )
         for i, sample in enumerate(samples):
-            sample['advantages'] = advantages[i]
+            sample['advantages'] = advantages[i].unsqueeze(0) # keep batch dimension
 
         if accelerator.is_local_main_process:
             print("len samples", len(samples))
