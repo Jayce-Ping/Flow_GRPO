@@ -471,6 +471,8 @@ def main(_):
     # update gradient_accumulation_steps, and update train.batch_size to 1 later for logger info
     if config.enable_flexible_size:
         gradient_accumulation_steps = config.train.gradient_accumulation_steps * config.train.batch_size
+    else:
+        gradient_accumulation_steps = config.train.gradient_accumulation_steps
 
     # number of timesteps within each trajectory to train on
     if config.sample.use_sliding_window:
