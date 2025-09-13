@@ -30,6 +30,7 @@ from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftMode
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
+from flow_grpo.rewards.utils import tensor_to_pil_image, numpy_to_pil_image, numpy_list_to_pil_image, tensor_list_to_pil_image
 from flow_grpo.rewards.rewards import multi_score
 from flow_grpo.rewards.pref_scorer import pref_score
 from flow_grpo.diffusers_patch.flux_pipeline_flexible_with_logprob import calculate_shift, pipeline_with_logprob, denoising_sde_step_with_logprob, compute_log_prob
@@ -40,7 +41,6 @@ from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDa
 from flow_grpo.datasets.sampler import DistributedKRepeatSampler
 from flow_grpo.scheduler import FlowMatchSlidingWindowScheduler
 from flow_grpo.debug_utils import MemoryProfiler
-from flow_grpo.rewards.utils import tensor_to_pil_image, numpy_to_pil_image, numpy_list_to_pil_image
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -788,7 +788,7 @@ These two numbers should be equal
                     # images: (batch_size, C, H, W) -> List[Tensor(C, H, W)] with length batch_size
                     # all_latents: List[Tensor(batch_size C, H, W)] with length windowsize+1 -> List[Tensor(window_size + 1, C, H, W)] with length batch_size
                     # all_log_probs: List[Tensor(batch_size)] with length window_size -> List[Tensor(window_size) with length batch_size
-                    images = [img.cpu().numpy() for img in images] # List[np.ndarray(C, H, W)] with length batch_size
+                    images = list(images.unbind(0)) # List[Tensor(C, H, W)] with length batch_size
                     all_latents = torch.stack(all_latents, dim=1) # (batch_size, window_size + 1, C, H, W)
                     all_latents = list(all_latents.unbind(0)) # List[Tensor(window_size + 1, C, H, W)] with length batch_size
                     all_log_probs = torch.stack(all_log_probs, dim=1) # (batch_size, window_size)
@@ -812,11 +812,11 @@ These two numbers should be equal
                                 width=widths[index],
                                 generator=generators[index] if generators is not None else None
                         )
-                    images.append(this_image.squeeze(0).cpu().numpy())  # add (C, H, W)
+                    images.append(this_image.squeeze(0))  # add (C, H, W)
                     all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (window_size + 1, C, H, W)
                     all_log_probs.append(torch.stack(this_all_log_probs, dim=1).squeeze(0))  # add (window_size, )
-                
-                # images: List[np.ndaarray(C, H, W)] with length batch_size
+
+                # images: List[Tensor(C, H, W)] with length batch_size
                 # all_latents: List[Tensor(window_size + 1, C, H, W)] with length batch_size
                 # all_log_probs: List[Tensor(window_size)] with length batch_size
             
@@ -843,17 +843,43 @@ These two numbers should be equal
 
         # ---------------------------Compute rewards---------------------------
         # Since the Pref-reward is computed within the whole group, we need to group images with the same prompt together
-        # Images do not have same size, cannot be concatenated, save in a temp dir instead
-        temp_dir = os.path.join(config.save_dir, 'temp_train_images')
-        os.makedirs(temp_dir, exist_ok=True)
-        for i, s in enumerate(samples):
-            img = s["image"]
-            img_id = f"{accelerator.process_index * len(samples) + i}.jpg"
-            pil_img = numpy_to_pil_image(img)[0]
-            pil_img.save(os.path.join(temp_dir, img_id))
-        
-        accelerator.wait_for_everyone()
-        gathered_images = [Image.open(os.path.join(temp_dir, f)) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
+
+        # Image communication
+        approach = 2
+        if approach == 1:
+            # Approach 1: save in a temp dir instead
+            # Slower but saves GPU memory
+            temp_dir = os.path.join(config.save_dir, 'temp_train_images')
+            os.makedirs(temp_dir, exist_ok=True)
+            for i, s in enumerate(samples):
+                img = s["image"]
+                img_id = f"{accelerator.process_index * len(samples) + i}.jpg"
+                pil_img = numpy_to_pil_image(img)[0]
+                pil_img.save(os.path.join(temp_dir, img_id))
+            
+            accelerator.wait_for_everyone()
+            gathered_images = [Image.open(os.path.join(temp_dir, f)) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
+        else:
+            # Approach 2: Flattern, gather and reshape
+            # Get shapes and flatten lengths for each image
+            local_shapes = torch.tensor([list(s['image'].shape) for s in samples], device=accelerator.device, dtype=torch.long) # (B, 3)
+            # Gather shapes and lengths
+            gathered_shapes = accelerator.gather(local_shapes).cpu() # (sum_B, 3)
+            # Flatten and gather images
+            flat_images = torch.cat([s['image'].flatten() for s in samples], dim=0) # (sum_local_length,)
+            gathered_flat_images = accelerator.gather(flat_images).cpu() # (sum_global_length,)
+
+            gathered_images = []
+            offset = 0
+            for shape in gathered_shapes:
+                C, H, W = map(int, shape.tolist())
+                length = C * H * W
+                if length > 0:
+                    img = gathered_flat_images[offset:offset+length].reshape(C, H, W)
+                    gathered_images.append(img)
+                    offset += length
+
+            gathered_images = tensor_list_to_pil_image(gathered_images) # List[PIL.Image]
 
         # Gather all prompts
         gathered_prompt_ids = accelerator.gather(torch.cat([s["prompt_ids"] for s in samples], dim=0))

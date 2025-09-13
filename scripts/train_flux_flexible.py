@@ -30,6 +30,7 @@ from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftMode
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
+from flow_grpo.rewards.utils import tensor_list_to_pil_image, tensor_to_pil_image
 from flow_grpo.rewards.rewards import multi_score
 from flow_grpo.diffusers_patch.flux_pipeline_flexible_with_logprob import calculate_shift, pipeline_with_logprob, denoising_sde_step_with_logprob, compute_log_prob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
@@ -152,6 +153,7 @@ def eval(pipeline : FluxPipeline,
                     width=widths[0],
                     noise_level=0,
                 )
+                images = list(images.unbind(0)) # List[torch.Tensor(C, H, W)]
         # reward_fn accepts torch.Tensor (B, C, H, W) or List[torch.Tensor(C, H, W)]
         future = executor.submit(reward_fn, images, prompts, prompt_metadata)
         # yield to to make sure reward computation starts
@@ -161,7 +163,7 @@ def eval(pipeline : FluxPipeline,
         
         # -------------------------------Collect log data--------------------------------
         if len(log_data["prompts"]) < log_sample_num // accelerator.num_processes:
-            log_data['images'].extend([img.cpu().numpy() for img in images])
+            log_data['images'].extend(images)
             log_data['prompts'].extend(prompts)
             for key, value in rewards.items():
                 if key not in log_data['rewards']:
@@ -209,19 +211,44 @@ def eval(pipeline : FluxPipeline,
     )
 
     # 3. Gather all images
+    use_jpg_compression = True
     # Approach : by saving them in a temp dir
-    temp_dir = os.path.join(config.save_dir, 'temp_eval_images')
-    os.makedirs(temp_dir, exist_ok=True)
-    for i,img in enumerate(log_data['images']):
-        # Save image to temp dir
-        img_id = f"{accelerator.process_index * len(log_data['images']) + i}.jpg"
-        pil = Image.fromarray((img.transpose(1, 2, 0) * 255).astype(np.uint8))
-        pil.save(os.path.join(temp_dir, img_id))
-    
-    accelerator.wait_for_everyone()
-    # The order of images here should be guaranteed by the name of images
-    # NOTE: it provides gathered_images as a list of file paths
-    gathered_images = [os.path.join(temp_dir, f) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
+    if use_jpg_compression:
+        # This approach saves images as JPG files in a temporary directory
+        # Since uploading images with jpg is faster, if we need to do it anyway.
+        temp_dir = os.path.join(config.save_dir, 'temp_eval_images')
+        os.makedirs(temp_dir, exist_ok=True)
+        offset = accelerator.process_index * len(log_data['images'])
+        for i,img in enumerate(log_data['images']):
+            # Save image to temp dir
+            pil_img = tensor_to_pil_image(img)[0]
+            pil_img.save(os.path.join(temp_dir, f"{offset + i}.jpg"))
+        accelerator.wait_for_everyone()
+        # The order of images here should be guaranteed by the name of images
+        # NOTE: it provides gathered_images as a list of file paths
+        gathered_images = [os.path.join(temp_dir, f) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
+    else:
+        # Approach: flatten and gather, then reshape
+        # Get shapes and flatten lengths for each image
+        local_shapes = torch.tensor([list(img.shape) for img in log_data['images']], device=accelerator.device, dtype=torch.long) # (B, 3)
+        # Gather shapes and lengths
+        gathered_shapes = accelerator.gather(local_shapes).cpu() # (sum_B, 3)
+
+        # Flatten and gather images
+        flat_images = torch.cat([img.flatten() for img in log_data['images']], dim=0) # (sum_local_length,)
+        gathered_flat_images = accelerator.gather(flat_images).cpu() # (sum_global_length,)
+
+        gathered_images = []
+        offset = 0
+        for shape in gathered_shapes:
+            C, H, W = map(int, shape.tolist())
+            length = C * H * W
+            if length > 0:
+                img = gathered_flat_images[offset:offset+length].reshape(C, H, W)
+                gathered_images.append(img)
+                offset += length
+
+        gathered_images = tensor_list_to_pil_image(gathered_images) # List[PIL.Image]
 
     if accelerator.is_main_process:
          # Use a fixed generator to log same indices everytime for comparison
@@ -249,7 +276,8 @@ def eval(pipeline : FluxPipeline,
             step=global_step,
         )
         # Clean up temp dir
-        shutil.rmtree(temp_dir)
+        if use_jpg_compression:
+            shutil.rmtree(temp_dir)
 
     if config.train.ema:
         ema.copy_temp_to(transformer_trainable_parameters)
