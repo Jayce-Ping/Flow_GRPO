@@ -36,7 +36,7 @@ def pref_score():
         max_concurrent=60, # Adjust based on the system's capabilities (especially when using vllm as local model server)
     )
 
-    def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[List[float], dict]:
+    def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[np.ndarray, dict]:
         scores = asyncio.run(scorer(images, prompts, metadatas))
         return scores, {}
 
@@ -108,7 +108,7 @@ class PrefScorer:
         self.timeout = timeout
         self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
-    async def __call__(self, images : list[Image.Image], prompts : list[str], metadata: list[dict], detailed=True) -> Union[list[float], np.ndarray]:
+    async def __call__(self, images : list[Image.Image], prompts : list[str], metadata: list[dict], detailed=True) -> np.ndarray:
         assert len(images) == len(prompts) == len(metadata), "Length of images, prompts, and metadata must be the same."
         # Group images and metadata by their prompts
         prompt_to_images = {}
@@ -143,7 +143,7 @@ class PrefScorer:
         return all_scores
         
 
-    async def compute_group_rewards(self, prompt : str, images : list[Image.Image], metadata: dict, return_matrix=False, detailed=True) -> Union[list[float], np.ndarray]:
+    async def compute_group_rewards(self, prompt : str, images : list[Image.Image], metadata: dict, return_matrix=False, detailed=True) -> np.ndarray:
         async def compare_image_pair(image1, image2):
             # Symmetric comparison for better reliability
             completion1 = await self.compare_image(image1, image2, prompt, metadata, detailed=detailed)

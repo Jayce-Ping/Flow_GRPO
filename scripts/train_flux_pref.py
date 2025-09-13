@@ -286,7 +286,7 @@ def eval(pipeline : FluxPipeline,
             step=global_step,
         )
         # Clean up temp dir
-        if use_jpg_compression:
+        if approach == 1:
             shutil.rmtree(temp_dir)
 
     if config.train.ema:
