@@ -4,7 +4,7 @@ import open_clip
 import torch
 import numpy as np
 from PIL import Image
-from flow_grpo.rewards.utils import divide_image, extract_grid_info, divide_prompt
+from flow_grpo.utils import divide_image, extract_grid_info, divide_prompt
 
 class SubfigClipTScorer(torch.nn.Module):
     """

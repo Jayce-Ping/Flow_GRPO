@@ -1,13 +1,14 @@
 import re
 import base64
 from io import BytesIO
-from typing import List, Union
+from typing import List, Union, Optional, Dict
 from itertools import permutations, combinations, chain
 
 from PIL import Image
 import torch
 import numpy as np
 import openai
+from accelerate import Accelerator
 
 # -------------------------------------Image Utils-------------------------------------
 
@@ -214,7 +215,7 @@ def get_yes_cond_prob_from_completion(completion : openai.ChatCompletion, canoni
 
 
 
-# -------------------------------------Reward Computation Utils--------------------
+# -------------------------------------Reward Computation Utils---------------------------------------
 def is_symmetric_matrix(matrix: np.ndarray):
     """
         Check if the matrix is symmetric
@@ -290,3 +291,46 @@ def is_transitive_matrix(matrix: np.ndarray, return_violations=False):
         return len(violations) == 0, violations
 
     return len(violations) == 0
+
+
+# -------------------------------------Tensor Gathering Utils---------------------------------------
+def gather_tensor_list(accelerator: Accelerator, tensor_list: List[torch.Tensor], device: Union[str, torch.device]=torch.device("cpu")) -> List[torch.Tensor]:
+    """
+    Gather a list of tensors from all processes, each process has a list of tensors.
+    Each tensor can have a different shape (e.g., (C, H, W)).
+
+    Args:
+        accelerator (`Accelerator`): Accelerator object
+        tensor_list (`List[torch.Tensor]`): list of tensors to gather, each tensor can have different shape but same dimension,  for example, [(3, 64, 64), (3, 128, 128), ...]
+
+    Returns:
+        gathered_tensors (`List[torch.Tensor]`): tensors from all processes, concatenated in rank order
+    """
+    if not tensor_list:
+        return []
+    
+    assert all(isinstance(t, torch.Tensor) for t in tensor_list), "All elements in tensor_list must be torch.Tensor"
+    assert all(t.dim() == tensor_list[0].dim() for t in tensor_list), "All tensors must have the same number of dimensions"
+
+    # Step1. Convert to tensor and gather shapes
+    local_shapes = torch.tensor([list(t.shape) for t in tensor_list], device=accelerator.device, dtype=torch.long)
+    gathered_shapes = accelerator.gather(local_shapes).cpu()
+
+    # Step 2. Flatten tensors and concatenate
+    local_flat_tensor = torch.cat([t.flatten() for t in tensor_list], dim=0).to(accelerator.device)
+
+    # Step 3. Gather all flattened data
+    gathered_flat_tensor = accelerator.gather(local_flat_tensor)
+
+    # Step 4. Reconstruct tensors based on gathered shapes
+    gathered_tensors = []
+    offset = 0
+    
+    for shape in gathered_shapes:
+        # Remove padding -1 and compute actual shape and size
+        length = int(torch.prod(shape).item())
+        tensor = gathered_flat_tensor[offset:offset+length].reshape(*shape).to(device)
+        gathered_tensors.append(tensor)
+        offset += length
+
+    return gathered_tensors

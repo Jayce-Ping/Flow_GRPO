@@ -16,8 +16,8 @@ import numpy as np
 import openai
 from openai import OpenAI, AsyncOpenAI
 from PIL import Image
-from flow_grpo.rewards.utils import pil_image_to_base64, divide_image, extract_grid_info
-from flow_grpo.rewards.utils import get_yes_cond_prob_from_completion
+from flow_grpo.utils import pil_image_to_base64, divide_image, extract_grid_info
+from flow_grpo.utils import get_yes_cond_prob_from_completion
 
 # VLLM log filter
 logging.getLogger("vllm").setLevel(logging.ERROR)

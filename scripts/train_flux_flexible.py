@@ -30,7 +30,7 @@ from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftMode
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
-from flow_grpo.rewards.utils import tensor_list_to_pil_image, tensor_to_pil_image
+from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, gather_tensor_list
 from flow_grpo.rewards.rewards import multi_score
 from flow_grpo.diffusers_patch.flux_pipeline_flexible_with_logprob import calculate_shift, pipeline_with_logprob, denoising_sde_step_with_logprob, compute_log_prob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
@@ -39,7 +39,7 @@ from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
 from flow_grpo.datasets.sampler import DistributedKRepeatSampler
 from flow_grpo.scheduler import FlowMatchSlidingWindowScheduler
-from flow_grpo.debug_utils import MemoryProfiler
+from flow_grpo.memory_tracker import MemoryProfiler
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -84,6 +84,7 @@ def eval(pipeline : FluxPipeline,
          autocast,
          ema,
          transformer_trainable_parameters,
+         memory_profiler : Optional[MemoryProfiler] = None,
          log_sample_num : int = 90 # 108 as max in wandb/swanlab
     ):
     if config.train.ema:
@@ -94,12 +95,17 @@ def eval(pipeline : FluxPipeline,
         'prompts': [],
         'rewards': defaultdict(list)
     }
-    for test_batch in tqdm(
-            test_dataloader,
+    if memory_profiler is not None:
+        memory_profiler.snapshot("before_eval")
+
+    for i, test_batch in tqdm(
+            enumerate(test_dataloader),
             desc="Eval: ",
             disable=not accelerator.is_local_main_process,
             position=0,
         ):
+        if memory_profiler is not None:
+            memory_profiler.snapshot(f"eval_batch_{i}_start")
 
         prompts, prompt_metadata = test_batch
         prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
@@ -160,7 +166,7 @@ def eval(pipeline : FluxPipeline,
         time.sleep(0)
         # all_futures.append(future)
         rewards, reward_metadata = future.result()
-        
+    
         # -------------------------------Collect log data--------------------------------
         if len(log_data["prompts"]) < log_sample_num // accelerator.num_processes:
             log_data['images'].extend(images)
@@ -170,8 +176,13 @@ def eval(pipeline : FluxPipeline,
                     log_data['rewards'][key] = []
                 
                 log_data['rewards'][key].extend(value)
+        
+        # log memory after reward computation
+        if memory_profiler is not None:
+            memory_profiler.snapshot(f"eval_batch_{i}_end")
 
-
+    if memory_profiler is not None:
+        memory_profiler.snapshot("after_eval_before_gather_log_data")
     # ---------------------------Gather all Log data, with prompt-image-reward tuples--------------------------
     # 1. Gather all rewards and report average
     gathered_rewards = {}
@@ -197,6 +208,9 @@ def eval(pipeline : FluxPipeline,
         for value in zip(*gathered_rewards.values())
     ]
 
+    if memory_profiler is not None:
+        memory_profiler.snapshot("after_gather_rewards")
+
     # 2. Encode prompt to tensors for gpu communication
     prompt_ids = tokenizers[1](
         log_data['prompts'],
@@ -209,6 +223,9 @@ def eval(pipeline : FluxPipeline,
     gathered_prompts = tokenizers[1].batch_decode(
         gathered_prompt_ids, skip_special_tokens=True
     )
+
+    if memory_profiler is not None:
+        memory_profiler.snapshot("after_gather_prompts")
 
     # 3. Gather all images
     use_jpg_compression = True
@@ -229,26 +246,11 @@ def eval(pipeline : FluxPipeline,
         gathered_images = [os.path.join(temp_dir, f) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
     else:
         # Approach: flatten and gather, then reshape
-        # Get shapes and flatten lengths for each image
-        local_shapes = torch.tensor([list(img.shape) for img in log_data['images']], device=accelerator.device, dtype=torch.long) # (B, 3)
-        # Gather shapes and lengths
-        gathered_shapes = accelerator.gather(local_shapes).cpu() # (sum_B, 3)
-
-        # Flatten and gather images
-        flat_images = torch.cat([img.flatten() for img in log_data['images']], dim=0) # (sum_local_length,)
-        gathered_flat_images = accelerator.gather(flat_images).cpu() # (sum_global_length,)
-
-        gathered_images = []
-        offset = 0
-        for shape in gathered_shapes:
-            C, H, W = map(int, shape.tolist())
-            length = C * H * W
-            if length > 0:
-                img = gathered_flat_images[offset:offset+length].reshape(C, H, W)
-                gathered_images.append(img)
-                offset += length
-
+        gathered_images = gather_tensor_list(accelerator, log_data['images'], device="cpu")
         gathered_images = tensor_list_to_pil_image(gathered_images) # List[PIL.Image]
+
+    if memory_profiler is not None:
+        memory_profiler.snapshot("after_gather_images")
 
     if accelerator.is_main_process:
          # Use a fixed generator to log same indices everytime for comparison
@@ -281,6 +283,10 @@ def eval(pipeline : FluxPipeline,
 
     if config.train.ema:
         ema.copy_temp_to(transformer_trainable_parameters)
+
+    # Log memory after eval
+    if memory_profiler is not None:
+        memory_profiler.snapshot("after_eval")
 
 def unwrap_model(model, accelerator):
     model = accelerator.unwrap_model(model)
@@ -742,7 +748,8 @@ These two numbers should be equal
                 reward_fn, executor,
                 autocast,
                 ema,
-                transformer_trainable_parameters
+                transformer_trainable_parameters,
+                memory_profiler=memory_profiler if config.enable_mem_log else None,
             )
             if config.enable_mem_log:
                 memory_profiler.snapshot(f"epoch_{epoch}_after_eval")

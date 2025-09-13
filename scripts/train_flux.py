@@ -37,7 +37,7 @@ from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
 from flow_grpo.datasets.sampler import DistributedKRepeatSampler
 from flow_grpo.scheduler import FlowMatchSlidingWindowScheduler
-from flow_grpo.debug_utils import MemoryProfiler
+from flow_grpo.memory_tracker import MemoryProfiler
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 

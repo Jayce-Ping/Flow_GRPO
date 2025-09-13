@@ -7,7 +7,7 @@ from PIL import Image
 import numpy as np
 import torch
 from openai import OpenAI, AsyncOpenAI
-from flow_grpo.rewards.utils import tensor_list_to_pil_image, tensor_to_pil_image, numpy_to_pil_image, numpy_list_to_pil_image
+from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, numpy_to_pil_image, numpy_list_to_pil_image
 
 def jpeg_incompressibility():
     def _fn(images, prompts, metadata):
