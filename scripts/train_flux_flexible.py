@@ -932,11 +932,13 @@ These two numbers should be equal
             del sample["prompt_ids"]
 
         #################### TRAINING ####################
-        total_batch_size = len(samples)
         if config.enable_mem_log:
             memory_profiler.snapshot(f"epoch_{epoch}_before_training")
+
+        total_batch_size = len(samples) # = config.train.batch_size * config.train.num_batches_per_epoch
+
         for inner_epoch in range(config.train.num_inner_epochs):
-            # shuffle samples along batch dimension
+            # shuffle samples
             perm = torch.randperm(total_batch_size)
             samples = [samples[i] for i in perm]
 

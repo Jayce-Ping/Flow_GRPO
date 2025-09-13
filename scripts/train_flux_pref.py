@@ -114,7 +114,6 @@ def eval(pipeline : FluxPipeline,
         widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
         if not all(h == heights[0] for h in heights) or not all(w == widths[0] for w in widths):
             # Split the batch if there are different sizes
-            rewards = {}
             images = []
             for i in tqdm(
                 range(len(prompts)),
@@ -140,16 +139,7 @@ def eval(pipeline : FluxPipeline,
                         noise_level=0,
                     )
 
-                future = executor.submit(reward_fn, imgs, prompt, prompt_meta)
-                # yield to to make sure reward computation starts
-                time.sleep(0)
-                reward, reward_metadata = future.result()
-                for key, value in reward.items():
-                    if key not in rewards:
-                        rewards[key] = []
-                    rewards[key].extend(value)
-
-                images.extend(imgs)
+                images.append(imgs.squeeze(0))  # (C, H, W)
         else:
             # Batch inference if all sizes are the same
             with autocast():
@@ -164,12 +154,12 @@ def eval(pipeline : FluxPipeline,
                     width=widths[0],
                     noise_level=0,
                 )
-        
-            future = executor.submit(reward_fn, images, prompts, prompt_metadata)
-            # yield to to make sure reward computation starts
-            time.sleep(0)
-            # all_futures.append(future)
-            rewards, reward_metadata = future.result()
+        # reward_fn accepts torch.Tensor (B, C, H, W) or List[torch.Tensor(C, H, W)]
+        future = executor.submit(reward_fn, images, prompts, prompt_metadata)
+        # yield to to make sure reward computation starts
+        time.sleep(0)
+        # all_futures.append(future)
+        rewards, reward_metadata = future.result()
         
         # -------------------------------Collect log data--------------------------------
         if len(log_data["prompts"]) < log_sample_num // accelerator.num_processes:
@@ -481,7 +471,8 @@ def main(_):
 
     # Flexible training only supports batch size 1, so
     # update gradient_accumulation_steps, and update train.batch_size to 1 later for logger info
-    gradient_accumulation_steps = config.train.gradient_accumulation_steps * config.train.batch_size
+    if config.enable_flexible_size:
+        gradient_accumulation_steps = config.train.gradient_accumulation_steps * config.train.batch_size
 
     # number of timesteps within each trajectory to train on
     if config.sample.use_sliding_window:
@@ -506,7 +497,7 @@ def main(_):
     # set seed (device_specific is very important to get different prompts on different devices)
     set_seed(config.seed, device_specific=True)
 
-    if config.train.batch_size != 1:
+    if config.enable_flexible_size and config.train.batch_size != 1:
         # Print a warning message and override config
         logger.info(
             "Only batch size 1 is supported for flexible size training: "
@@ -515,6 +506,10 @@ def main(_):
         
         config.train.batch_size = 1
         config.train.gradient_accumulation_steps = gradient_accumulation_steps
+    else:
+        # config.train.batch_size should divide config.sample.batch_size * config.num_batches_per_epoch
+        assert (config.sample.batch_size * config.sample.num_batches_per_epoch) % config.train.batch_size == 0, \
+            f"config.train.batch_size {config.train.batch_size} should divide config.sample.batch_size {config.sample.batch_size} * config.num_batches_per_epoch {config.sample.num_batches_per_epoch}"
 
     # -------------------------------------------------Set up online log-----------------------------------
     if not config.project_name:
@@ -757,8 +752,13 @@ These two numbers should be equal
                 return_tensors="pt",
             ).input_ids.to(accelerator.device)
 
+            # Get heights and widths
             heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
             widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
+            # Fixed size training requires all heights and widths in the batch to be the same
+            if not config.enable_flexible_size:
+                assert all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths), \
+                    f"When config.enable_flexible_size is False, all heights and widths in the batch must be the same, but got heights {heights} and widths {widths}"
 
             # sample
             if config.sample.same_latent:
@@ -952,13 +952,39 @@ These two numbers should be equal
         #################### TRAINING ####################
         if config.enable_mem_log:
             memory_profiler.snapshot(f"epoch_{epoch}_before_training")
-        total_batch_size = len(samples)
+
+        total_batch_size = len(samples) # = config.train.batch_size * config.train.num_batches_per_epoch
+
         for inner_epoch in range(config.train.num_inner_epochs):
-            # shuffle samples along batch dimension
+            # shuffle samples
             perm = torch.randperm(total_batch_size)
             samples = [samples[i] for i in perm]
 
-            assert config.train.batch_size == 1, "Only batch size 1 is supported for flexible size training"
+            if config.enable_flexible_size:
+                assert config.train.batch_size == 1, "Only batch size 1 is supported for flexible size training"
+            else:
+                # sample:{
+                # 'height': int,
+                # 'width': int,
+                # 'prompt_embeds': Tensor(1, L, D),
+                # 'pooled_prompt_embeds': Tensor(1, D),
+                # 'latents': Tensor(1, window_size + 1, C, H
+                # 'next_latents': Tensor(1, window_size + 1, C, H, W),
+                # 'log_probs': Tensor(1, window_size),
+                # 'advantages': Tensor(1, 1),
+                # }
+                keys = samples[0].keys()
+                samples = [samples[i:i+config.train.batch_size] for i in range(0, total_batch_size, config.train.batch_size)]
+                samples = [
+                    {
+                         # Catenate along batch dimension if the entry is Tensor
+                        k: torch.cat([s[k] for s in batch], dim=0)
+                        if isinstance(batch[0][k], torch.Tensor)
+                        else batch[0][k] # for other type -  they should be the same within the batch
+                        for k in keys
+                    }
+                    for batch in samples
+                ]
 
             pipeline.transformer.train()
             info = defaultdict(list)
