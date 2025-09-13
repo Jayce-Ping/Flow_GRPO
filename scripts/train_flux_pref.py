@@ -99,6 +99,11 @@ def eval(pipeline : FluxPipeline,
     if memory_profiler is not None:
         memory_profiler.snapshot("before_eval")
 
+    # 'Deterministically' sample 'random' `log_sample_num` data for logging
+    total_sample_num = len(test_dataloader.dataset)
+    generator = torch.Generator().manual_seed(config.seed)
+    sample_indices = torch.randint(0, total_sample_num, (log_sample_num // accelerator.num_processes,), generator=generator).tolist()
+
     for batch_idx, test_batch in enumerate(tqdm(
             test_dataloader,
             desc="Eval: ",
@@ -167,16 +172,18 @@ def eval(pipeline : FluxPipeline,
         time.sleep(0)
         # all_futures.append(future)
         rewards, reward_metadata = future.result()
-    
-        # -------------------------------Collect log data--------------------------------
-        if len(log_data["prompts"]) < log_sample_num // accelerator.num_processes:
-            log_data['images'].extend(images)
-            log_data['prompts'].extend(prompts)
-            for key, value in rewards.items():
-                if key not in log_data['rewards']:
-                    log_data['rewards'][key] = []
-                
-                log_data['rewards'][key].extend(value)
+
+        # ---------------------------------Collect log data--------------------------------
+        for i, prompt in enumerate(prompts):
+            sample_index = batch_idx * config.test.batch_size + i
+            if sample_index in sample_indices:
+                log_data['images'].append(images[i].cpu())
+                log_data['prompts'].append(prompt)
+                for key, value in rewards.items():
+                    if key not in log_data['rewards']:
+                        log_data['rewards'][key] = []
+                    
+                    log_data['rewards'][key].append(value[i])
         
         # log memory after reward computation
         if memory_profiler is not None:

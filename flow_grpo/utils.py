@@ -346,7 +346,7 @@ def all_gather_tensor_list(
     ]
 
     # Step 3: Gather all tensors by flattening and concatenating
-    local_flat_tensor = torch.cat([t.flatten() for t in tensor_list], dim=0)
+    local_flat_tensor = torch.cat([t.flatten() for t in tensor_list], dim=0).to(device=accelerator.device, dtype=tensor_dtype)
     gathered_flat_tensors = [
         torch.zeros(length, dtype=tensor_dtype, device=accelerator.device)
         for length in flat_lengths
