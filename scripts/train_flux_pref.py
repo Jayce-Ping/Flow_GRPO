@@ -229,7 +229,7 @@ def eval(pipeline : FluxPipeline,
         memory_profiler.snapshot("after_gather_prompts")
 
     # 3. Gather all images
-    use_jpg_compression = False
+    use_jpg_compression = True
     if use_jpg_compression:
         # Approach : by saving them in a temp dir
         # This approach saves images as JPG files in a temporary directory
@@ -895,24 +895,7 @@ These two numbers should be equal
             gathered_images = [Image.open(os.path.join(temp_dir, f)) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
         else:
             # Approach 2: Flattern, gather and reshape
-            # Get shapes and flatten lengths for each image
-            local_shapes = torch.tensor([list(s['image'].shape) for s in samples], device=accelerator.device, dtype=torch.long) # (B, 3)
-            # Gather shapes and lengths
-            gathered_shapes = accelerator.gather(local_shapes).cpu() # (sum_B, 3)
-            # Flatten and gather images
-            flat_images = torch.cat([s['image'].flatten() for s in samples], dim=0) # (sum_local_length,)
-            gathered_flat_images = accelerator.gather(flat_images).cpu() # (sum_global_length,)
-
-            gathered_images = []
-            offset = 0
-            for shape in gathered_shapes:
-                C, H, W = map(int, shape.tolist())
-                length = C * H * W
-                if length > 0:
-                    img = gathered_flat_images[offset:offset+length].reshape(C, H, W)
-                    gathered_images.append(img)
-                    offset += length
-
+            gathered_images = all_gather_tensor_list(accelerator, [s["image"] for s in samples], device="cpu")
             gathered_images = tensor_list_to_pil_image(gathered_images) # List[PIL.Image]
 
         # Gather all prompts

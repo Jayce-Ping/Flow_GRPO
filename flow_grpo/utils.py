@@ -307,7 +307,7 @@ def all_gather_tensor_list(
 
     Args:
         accelerator (`Accelerator`): Accelerator object
-        tensor_list (`List[torch.Tensor]`): list of tensors to gather, each tensor can have different shape but same dimension,  for example, [(3, 64, 64), (3, 128, 128), ...]
+        tensor_list (`List[torch.Tensor]`): list of tensors to gather, each tensor can have different shape but same dimension,  for example, [(3, 64, 64), (3, 128, 128), ...]. Each list can have different length on different processes.
         dtype (`torch.dtype`, *optional*): dtype of the gathered tensors, if None, use the dtype of the first tensor in tensor_list
         device (`Union[str, torch.device]`, *optional*, defaults to `torch.device("cpu")`): device of the gathered tensors
 
@@ -337,6 +337,7 @@ def all_gather_tensor_list(
         for length in gathered_lengths
     ]
     dist.all_gather(gathered_shapes, local_shapes)
+    gathered_shapes = [shapes.cpu() for shapes in gathered_shapes]  # Move to CPU to save some GPU memory
 
     # Compute the total length of flattened tensors for each rank, [rank0_total_length, rank1_total_length, ...]
     flat_lengths = [
@@ -351,6 +352,7 @@ def all_gather_tensor_list(
         for length in flat_lengths
     ]
     dist.all_gather(gathered_flat_tensors, local_flat_tensor)
+    gathered_flat_tensors = [t.cpu() for t in gathered_flat_tensors]  # Move to CPU to save some GPU memory
 
     # Step 4: Reconstruct the original tensors from gathered shapes and flattened tensors
     gathered_tensors = []
@@ -358,6 +360,7 @@ def all_gather_tensor_list(
         offset = 0
         for shape in this_rank_shapes:
             length = int(shape.prod().item())
+            # Reshape and move to the specified device
             this_tensor = this_rank_flat_tensor[offset:offset+length].reshape(shape.tolist()).to(device)
             gathered_tensors.append(this_tensor)
             offset += length

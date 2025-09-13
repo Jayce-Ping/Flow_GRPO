@@ -228,7 +228,7 @@ def eval(pipeline : FluxPipeline,
         memory_profiler.snapshot("after_gather_prompts")
 
     # 3. Gather all images
-    use_jpg_compression = False
+    use_jpg_compression = True
     if use_jpg_compression:
         # Approach : by saving them in a temp dir
         # This approach saves images as JPG files in a temporary directory
