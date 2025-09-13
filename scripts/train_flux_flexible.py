@@ -3,7 +3,7 @@ import contextlib
 import datetime
 import hashlib
 import json
-import numpy as np
+import math
 import os
 import random
 import signal
@@ -26,6 +26,7 @@ from diffusers.utils.torch_utils import is_compiled_module
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
 from functools import partial
 from ml_collections import config_flags
+import numpy as np
 from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftModel
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
@@ -101,7 +102,8 @@ def eval(pipeline : FluxPipeline,
     # 'Deterministically' sample 'random' `log_sample_num` data for logging
     total_sample_num = len(test_dataloader.dataset)
     generator = torch.Generator().manual_seed(config.seed)
-    sample_indices = torch.randint(0, total_sample_num, (log_sample_num // accelerator.num_processes,), generator=generator).tolist()
+    log_sample_num = math.ceil(log_sample_num / accelerator.num_processes)
+    sample_indices = torch.randperm(total_sample_num, generator=generator)[:log_sample_num].tolist()
 
     for batch_idx, test_batch in enumerate(tqdm(
             test_dataloader,
