@@ -229,8 +229,8 @@ def eval(pipeline : FluxPipeline,
         memory_profiler.snapshot("after_gather_prompts")
 
     # 3. Gather all images
-    use_jpg_compression = True
-    if use_jpg_compression:
+    approach = 1
+    if approach == 1:
         # Approach : by saving them in a temp dir
         # This approach saves images as JPG files in a temporary directory
         # Since uploading images with jpg is faster, if we need to do it anyway.
@@ -879,7 +879,7 @@ These two numbers should be equal
         # Since the Pref-reward is computed within the whole group, we need to group images with the same prompt together
 
         # Image communication
-        approach = 2
+        approach = 1
         if approach == 1:
             # Approach 1: save in a temp dir instead
             # Slower but saves GPU memory
