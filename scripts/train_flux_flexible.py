@@ -30,7 +30,7 @@ from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftMode
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
-from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, gather_tensor_list
+from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list
 from flow_grpo.rewards.rewards import multi_score
 from flow_grpo.diffusers_patch.flux_pipeline_flexible_with_logprob import calculate_shift, pipeline_with_logprob, denoising_sde_step_with_logprob, compute_log_prob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
@@ -228,9 +228,9 @@ def eval(pipeline : FluxPipeline,
         memory_profiler.snapshot("after_gather_prompts")
 
     # 3. Gather all images
-    use_jpg_compression = True
-    # Approach : by saving them in a temp dir
+    use_jpg_compression = False
     if use_jpg_compression:
+        # Approach : by saving them in a temp dir
         # This approach saves images as JPG files in a temporary directory
         # Since uploading images with jpg is faster, if we need to do it anyway.
         temp_dir = os.path.join(config.save_dir, 'temp_eval_images')
@@ -246,7 +246,7 @@ def eval(pipeline : FluxPipeline,
         gathered_images = [os.path.join(temp_dir, f) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
     else:
         # Approach: flatten and gather, then reshape
-        gathered_images = gather_tensor_list(accelerator, log_data['images'], device="cpu")
+        gathered_images = all_gather_tensor_list(accelerator, log_data['images'], device="cpu")
         gathered_images = tensor_list_to_pil_image(gathered_images) # List[PIL.Image]
 
     if memory_profiler is not None:

@@ -3,6 +3,7 @@ import base64
 from io import BytesIO
 from typing import List, Union, Optional, Dict
 from itertools import permutations, combinations, chain
+import torch.distributed as dist
 
 from PIL import Image
 import torch
@@ -293,8 +294,13 @@ def is_transitive_matrix(matrix: np.ndarray, return_violations=False):
     return len(violations) == 0
 
 
-# -------------------------------------Tensor Gathering Utils---------------------------------------
-def gather_tensor_list(accelerator: Accelerator, tensor_list: List[torch.Tensor], device: Union[str, torch.device]=torch.device("cpu")) -> List[torch.Tensor]:
+# -----------------------------------Tensor Gathering Utils---------------------------------------
+def all_gather_tensor_list(
+        accelerator: Accelerator,
+        tensor_list: List[torch.Tensor],
+        dtype: Optional[torch.dtype]=None,
+        device: Union[str, torch.device]=torch.device("cpu")
+    ) -> List[torch.Tensor]:
     """
     Gather a list of tensors from all processes, each process has a list of tensors.
     Each tensor can have a different shape (e.g., (C, H, W)).
@@ -302,6 +308,8 @@ def gather_tensor_list(accelerator: Accelerator, tensor_list: List[torch.Tensor]
     Args:
         accelerator (`Accelerator`): Accelerator object
         tensor_list (`List[torch.Tensor]`): list of tensors to gather, each tensor can have different shape but same dimension,  for example, [(3, 64, 64), (3, 128, 128), ...]
+        dtype (`torch.dtype`, *optional*): dtype of the gathered tensors, if None, use the dtype of the first tensor in tensor_list
+        device (`Union[str, torch.device]`, *optional*, defaults to `torch.device("cpu")`): device of the gathered tensors
 
     Returns:
         gathered_tensors (`List[torch.Tensor]`): tensors from all processes, concatenated in rank order
@@ -312,25 +320,46 @@ def gather_tensor_list(accelerator: Accelerator, tensor_list: List[torch.Tensor]
     assert all(isinstance(t, torch.Tensor) for t in tensor_list), "All elements in tensor_list must be torch.Tensor"
     assert all(t.dim() == tensor_list[0].dim() for t in tensor_list), "All tensors must have the same number of dimensions"
 
-    # Step1. Convert to tensor and gather shapes
+    tensor_dim = tensor_list[0].dim()
+    tensor_dtype = tensor_list[0].dtype if dtype is None else dtype
+    device = torch.device(device)
+
+    # Step 1: Gather lengths of tensor_list from all ranks
+    local_length = torch.tensor([len(tensor_list)], device=accelerator.device, dtype=torch.long)
+    gathered_lengths = [torch.zeros(1, dtype=torch.long, device=accelerator.device) for _ in range(accelerator.num_processes)]
+    dist.all_gather(gathered_lengths, local_length)
+    gathered_lengths = [int(length.item()) for length in gathered_lengths]
+
+    # Step 2: Gather shapes of each tensor in tensor_list from all ranks
     local_shapes = torch.tensor([list(t.shape) for t in tensor_list], device=accelerator.device, dtype=torch.long)
-    gathered_shapes = accelerator.gather(local_shapes).cpu()
+    gathered_shapes = [
+        torch.zeros((length, tensor_dim), dtype=torch.long, device=accelerator.device)
+        for length in gathered_lengths
+    ]
+    dist.all_gather(gathered_shapes, local_shapes)
 
-    # Step 2. Flatten tensors and concatenate
-    local_flat_tensor = torch.cat([t.flatten() for t in tensor_list], dim=0).to(accelerator.device)
+    # Compute the total length of flattened tensors for each rank, [rank0_total_length, rank1_total_length, ...]
+    flat_lengths = [
+        sum(int(shape.prod().item()) for shape in this_rank_shapes)
+        for this_rank_shapes in gathered_shapes
+    ]
 
-    # Step 3. Gather all flattened data
-    gathered_flat_tensor = accelerator.gather(local_flat_tensor)
+    # Step 3: Gather all tensors by flattening and concatenating
+    local_flat_tensor = torch.cat([t.flatten() for t in tensor_list], dim=0)
+    gathered_flat_tensors = [
+        torch.zeros(length, dtype=tensor_dtype, device=accelerator.device)
+        for length in flat_lengths
+    ]
+    dist.all_gather(gathered_flat_tensors, local_flat_tensor)
 
-    # Step 4. Reconstruct tensors based on gathered shapes
+    # Step 4: Reconstruct the original tensors from gathered shapes and flattened tensors
     gathered_tensors = []
-    offset = 0
-    
-    for shape in gathered_shapes:
-        # Remove padding -1 and compute actual shape and size
-        length = int(torch.prod(shape).item())
-        tensor = gathered_flat_tensor[offset:offset+length].reshape(*shape).to(device)
-        gathered_tensors.append(tensor)
-        offset += length
+    for rank, (this_rank_shapes, this_rank_flat_tensor) in enumerate(zip(gathered_shapes, gathered_flat_tensors)):
+        offset = 0
+        for shape in this_rank_shapes:
+            length = int(shape.prod().item())
+            this_tensor = this_rank_flat_tensor[offset:offset+length].reshape(shape.tolist()).to(device)
+            gathered_tensors.append(this_tensor)
+            offset += length
 
     return gathered_tensors
