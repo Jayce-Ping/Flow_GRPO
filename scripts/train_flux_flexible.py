@@ -179,7 +179,7 @@ def eval(pipeline : FluxPipeline,
         
         # log memory after reward computation
         if memory_profiler is not None:
-            memory_profiler.snapshot(f"eval_batch_{i}_end")
+            memory_profiler.snapshot(f"eval_batch_{batch_idx}_end")
 
     if memory_profiler is not None:
         memory_profiler.snapshot("after_eval_before_gather_log_data")
