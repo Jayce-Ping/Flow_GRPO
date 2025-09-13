@@ -99,14 +99,14 @@ def eval(pipeline : FluxPipeline,
     if memory_profiler is not None:
         memory_profiler.snapshot("before_eval")
 
-    for i, test_batch in tqdm(
-            enumerate(test_dataloader),
+    for batch_idx, test_batch in enumerate(tqdm(
+            test_dataloader,
             desc="Eval: ",
             disable=not accelerator.is_local_main_process,
             position=0,
-        ):
+        )):
         if memory_profiler is not None:
-            memory_profiler.snapshot(f"eval_batch_{i}_start")
+            memory_profiler.snapshot(f"eval_batch_{batch_idx}_start")
 
         prompts, prompt_metadata = test_batch
         prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
