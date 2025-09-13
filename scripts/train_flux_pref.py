@@ -897,7 +897,7 @@ These two numbers should be equal
             for i, s in enumerate(samples):
                 img = s["image"]
                 img_id = f"{accelerator.process_index * len(samples) + i}.jpg"
-                pil_img = numpy_to_pil_image(img)[0]
+                pil_img = tensor_to_pil_image(img)[0]
                 pil_img.save(os.path.join(temp_dir, img_id))
             
             accelerator.wait_for_everyone()
