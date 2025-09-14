@@ -831,7 +831,7 @@ These two numbers should be equal
                     # images: (batch_size, C, H, W) -> List[Tensor(C, H, W)] with length batch_size
                     # all_latents: List[Tensor(batch_size C, H, W)] with length windowsize+1 -> List[Tensor(window_size + 1, C, H, W)] with length batch_size
                     # all_log_probs: List[Tensor(batch_size)] with length window_size -> List[Tensor(window_size) with length batch_size
-                    images = list(images.unbind(0)) # List[Tensor(C, H, W)] with length batch_size
+                    images = list(images.cpu().unbind(0)) # List[Tensor(C, H, W)] with length batch_size
                     all_latents = torch.stack(all_latents, dim=1) # (batch_size, window_size + 1, C, H, W)
                     all_latents = list(all_latents.unbind(0)) # List[Tensor(window_size + 1, C, H, W)] with length batch_size
                     all_log_probs = torch.stack(all_log_probs, dim=1) # (batch_size, window_size)
@@ -855,7 +855,7 @@ These two numbers should be equal
                                 width=widths[index],
                                 generator=generators[index] if generators is not None else None
                         )
-                    images.append(this_image.squeeze(0))  # add (C, H, W)
+                    images.append(this_image.cpu().squeeze(0))  # add (C, H, W)
                     all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (window_size + 1, C, H, W)
                     all_log_probs.append(torch.stack(this_all_log_probs, dim=1).squeeze(0))  # add (window_size, )
 
