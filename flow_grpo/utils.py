@@ -13,14 +13,29 @@ from accelerate import Accelerator
 
 # -------------------------------------Image Utils-------------------------------------
 
-def pil_image_to_base64(image, format="JPEG"):
+def pil_image_to_base64(image : Image.Image, format="JPEG"):
+    """
+        Convert a PIL Image to a base64-encoded string.
+        Args:
+            image (Image.Image): PIL Image object
+            format (str): Image format, e.g., "JPEG", "PNG"
+        Returns:
+            base64 string of the image
+    """
     buffered = BytesIO()
     image.save(buffered, format="JPEG")
     encoded_image_text = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    base64_qwen = f"data:image/{format.lower()};base64,{encoded_image_text}"
-    return base64_qwen
+    base64_image = f"data:image/{format.lower()};base64,{encoded_image_text}"
+    return base64_image
 
 def tensor_to_pil_image(tensor: torch.Tensor) -> List[Image.Image]:
+    """
+        Convert a torch Tensor to a list of PIL Images.
+        Args:
+            tensor (torch.Tensor): Image tensor of shape (C, H, W) or (N, C, H, W)
+        Returns:
+            images (List[Image.Image]): list of PIL Image objects. If input is (C, H, W), returns a list with one image.
+    """
     if len(tensor.shape) == 3:
         tensor = tensor.unsqueeze(0)
     
@@ -31,6 +46,16 @@ def tensor_to_pil_image(tensor: torch.Tensor) -> List[Image.Image]:
     return images
 
 def numpy_to_pil_image(array: np.ndarray) -> List[Image.Image]:
+    """
+        Convert a NumPy array to a list of PIL Images.
+        Args:
+            array (np.ndarray): Image array of shape (C, H, W) or (N, C, H, W)
+        Returns:
+            images (List[Image.Image]): list of PIL Image objects. If input is (C, H, W), returns a list with one image.
+        1. If the input array has shape (C, H, W), it is treated as a single image and converted to (1, C, H, W).
+        2. The pixel values are assumed to be in the range [0, 1] or [0, 255]. If the maximum value is less than or equal to 1.0, the values are scaled to [0, 255].
+        3. The array is clipped to ensure all values are within [0, 255] and converted to uint8.
+    """
     if len(array.shape) == 3:
         array = array[np.newaxis, ...]
     
@@ -49,6 +74,15 @@ def numpy_to_pil_image(array: np.ndarray) -> List[Image.Image]:
 
 
 def tensor_list_to_pil_image(tensor_list: List[torch.Tensor]) -> List[Image.Image]:
+    """
+        Convert a list of torch Tensors to a list of PIL Images.
+        Args:
+            tensor_list (List[torch.Tensor]): list of image tensors, each of shape (C, H, W) or (1, C, H, W). Each tensor can have different shape but same dimension.
+        Returns:
+            images (List[Image.Image]): list of PIL Image objects
+        Note:
+            If the input tensors have different shapes, they will be processed individually.
+    """
     if not tensor_list:
         return []
 
@@ -77,6 +111,15 @@ def tensor_list_to_pil_image(tensor_list: List[torch.Tensor]) -> List[Image.Imag
         return images
 
 def numpy_list_to_pil_image(numpy_list: List[np.ndarray]) -> List[Image.Image]:
+    """
+        Convert a list of NumPy arrays to a list of PIL Images.
+        Args:
+            numpy_list (List[np.ndarray]): list of image arrays, each of shape (C, H, W) or (1, C, H, W). Each array can have different shape but same dimension.
+        Returns:
+            images (List[Image.Image]): list of PIL Image objects
+        Note:
+            If the input arrays have different shapes, they will be processed individually.
+    """
     if not numpy_list:
         return []
     # If all image arrays have the same shape, stack them directly
@@ -161,6 +204,14 @@ def extract_grid_info(prompt) -> tuple[int, int]:
 
 # -------------------------------------OpenAI Utils------------------------------------
 def get_yes_cond_prob_from_completion(completion : openai.ChatCompletion, canonicalize=False) -> float:
+    """
+        Extract the conditional probability of "yes" from an OpenAI ChatCompletion response.
+        Args:
+            completion (openai.ChatCompletion): The completion response from OpenAI API.
+            canonicalize (bool): If True, aggregate probabilities for all case variations of "yes" and "no".
+        Returns:
+            float: The conditional probability of "yes". Returns 0.0 if "yes" or "no" cannot be determined.
+    """
     if completion is None:
         return 0.0
 
@@ -213,15 +264,12 @@ def get_yes_cond_prob_from_completion(completion : openai.ChatCompletion, canoni
     return yes_cond_prob
 
 
-
-
-
 # -------------------------------------Reward Computation Utils---------------------------------------
 def is_symmetric_matrix(matrix: np.ndarray):
     """
         Check if the matrix is symmetric
         Args:
-            matrix: square numpy array
+            matrix (np.ndarray): square numpy array
         Returns:
             bool: True if symmetric, False otherwise
     """
@@ -236,8 +284,8 @@ def is_antisymmetric_matrix(matrix: np.ndarray, diagonal_zero=True):
     """
         Check if the matrix is anti-symmetric
         Args:
-            matrix: square numpy array
-            diagonal_zero: if True, check if diagonal elements are zero, else ignore diagonal
+            matrix (np.ndarray): square numpy array
+            diagonal_zero (bool): if True, check if diagonal elements are zero, else ignore diagonal
         Returns:
             bool: True if anti-symmetric, False otherwise
     """
@@ -263,7 +311,7 @@ def is_transitive_matrix(matrix: np.ndarray, return_violations=False):
     """
         Check if the matrix is transitive
         Args:
-            matrix: square numpy array with binary values (0 or 1)
+            matrix (np.ndarray): square numpy array with binary values (0 or 1)
         Returns:
             bool: True if transitive, False otherwise
     """
