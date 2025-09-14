@@ -994,6 +994,12 @@ These two numbers should be equal
 
         # clean up to save memory
         del gathered_rewards
+        del gathered_images
+        del gathered_pref_rewards
+        del gathered_prompts
+        del gathered_prompt_ids
+        del advantages
+        del prompt_to_pos
         for sample in samples:
             del sample["prompt_ids"]
             del sample["image"]

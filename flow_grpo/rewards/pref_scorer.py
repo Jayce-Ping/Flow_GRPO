@@ -154,7 +154,7 @@ class PrefScorer:
             completion2 = await self.compare_image(image2, image1, prompt, metadata, detailed=detailed)
             prob1 = get_yes_cond_prob_from_completion(completion1, canonicalize=True)
             prob2 = get_yes_cond_prob_from_completion(completion2, canonicalize=True)
-            return int(prob1 > prob2), int(prob2 > prob1)
+            return int(prob1 > prob2), int(prob2 > prob1) # This ensures the result tuple is anti-symmetric
 
         # Process all image pairs concurrently
         comparison_matrix = np.zeros((len(images), len(images)), dtype=int)
