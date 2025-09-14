@@ -908,7 +908,7 @@ These two numbers should be equal
             gathered_images = tensor_list_to_pil_image(gathered_images) # List[PIL.Image]
 
         # Gather all prompts
-        gathered_prompt_ids = accelerator.gather(torch.cat([s["prompt_ids"] for s in samples], dim=0))
+        gathered_prompt_ids = accelerator.gather(torch.cat([s["prompt_ids"] for s in samples], dim=0)).cpu().numpy()
         gathered_prompts = tokenizers[1].batch_decode(gathered_prompt_ids, skip_special_tokens=True)
         gathered_pref_rewards = np.zeros((len(gathered_prompts),))  # placeholder to fill in later
         prompt_to_pos = defaultdict(list)
