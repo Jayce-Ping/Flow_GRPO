@@ -28,7 +28,7 @@ class ConsistencyScorer:
             self,
             client: AsyncOpenAI,
             model='Qwen2.5-VL-7B-Instruct',
-            max_concurrent=60,
+            max_concurrent=300,
             max_retries=10,
             timeout=60
         ):
@@ -37,8 +37,7 @@ class ConsistencyScorer:
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
         self.timeout = timeout
-        # self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
-        self.global_semaphore = None
+        self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
     def __call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict], canonicalize: bool = False) -> list[float]:
         return asyncio.run(self.__async_call__(images, prompts, metadatas, canonicalize))
@@ -46,10 +45,6 @@ class ConsistencyScorer:
     @torch.no_grad()
     async def __async_call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict], canonicalize: bool = False) -> list[float]:
         assert len(prompts) == len(images), "Length of prompts and images must match"
-
-        # Create a global semaphore for overall concurrency control
-        if self.global_semaphore is None:
-            self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
         async def process_single_image(prompt, image, metadata):
             criteria_info = metadata['criteria']

@@ -35,7 +35,7 @@ def pref_score():
         scorer = PrefScorer(
             client=client,
             model='Qwen2.5-VL-7B-Instruct',
-            max_concurrent=100, # Adjust based on the system's capabilities (especially when using vllm as local model server)
+            max_concurrent=300, # Adjust based on the system's capabilities (especially when using vllm as local model server)
         )
         scores = scorer(images, prompts, metadatas)
         return scores, {}
@@ -97,7 +97,7 @@ class PrefScorer:
             self,
             client: AsyncOpenAI,
             model='Qwen2.5-VL-7B-Instruct',
-            max_concurrent=100,
+            max_concurrent=300,
             max_retries=10,
             timeout=60
         ):
@@ -106,15 +106,12 @@ class PrefScorer:
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
         self.timeout = timeout
-        # self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
-        self.global_semaphore = None
+        self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
     def __call__(self, images : list[Image.Image], prompts : list[str], metadata: list[dict], detailed=True) -> np.ndarray:
         return asyncio.run(self.__async_call__(images, prompts, metadata, detailed=detailed))
 
     async def __async_call__(self, images : list[Image.Image], prompts : list[str], metadata: list[dict], detailed=True) -> np.ndarray:
-        if self.global_semaphore is None:
-            self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
 
         assert len(images) == len(prompts) == len(metadata), "Length of images, prompts, and metadata must be the same."
         # Group images and metadata by their prompts
