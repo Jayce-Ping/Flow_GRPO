@@ -157,7 +157,7 @@ class PrefScorer:
             return int(prob1 > prob2), int(prob2 > prob1) # This ensures the result tuple is anti-symmetric
 
         # Process all image pairs concurrently
-        comparison_matrix = np.zeros((len(images), len(images)), dtype=int)
+        comparison_matrix = np.zeros((len(images), len(images)), dtype=np.float64)
         tasks = []
         pairs = []
         
