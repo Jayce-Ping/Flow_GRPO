@@ -113,7 +113,7 @@ def grid_layout_score():
         scorer = GridLayoutScorer(
             client=client,
             model='Qwen2.5-VL-7B-Instruct',
-            max_concurrent=300, # Adjust based on the system's capabilities (especially when using vllm as local model server)
+            max_concurrent=120, # Adjust based on the system's capabilities (especially when using vllm as local model server)
         )
         scores = scorer(images, prompts, metadatas)
         return scores, {}
@@ -134,7 +134,7 @@ def consistency_score():
         scorer = ConsistencyScorer(
             client=client,
             model='Qwen2.5-VL-7B-Instruct',
-            max_concurrent=300, # Adjust based on the system's capabilities (especially when using vllm as local model server)
+            max_concurrent=120, # Adjust based on the system's capabilities (especially when using vllm as local model server)
         )
         scores = scorer(images, prompts, metadatas)
         return scores, {}
