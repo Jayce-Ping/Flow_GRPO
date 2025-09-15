@@ -92,6 +92,7 @@ def eval(pipeline : FluxPipeline,
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
     
     log_data = {
+        'sample_indices': [],
         'images': [],
         'prompts': [],
         'rewards': defaultdict(list)
@@ -100,10 +101,12 @@ def eval(pipeline : FluxPipeline,
         memory_profiler.snapshot("before_eval")
 
     # 'Deterministically' sample 'random' `log_sample_num` data for logging
-    total_sample_num = len(test_dataloader.dataset)
+    total_sample_num = len(test_dataloader) * config.test.batch_size * accelerator.num_processes
+    log_sample_num = min(log_sample_num, total_sample_num)
     generator = torch.Generator().manual_seed(config.seed)
-    log_sample_num = math.ceil(log_sample_num / accelerator.num_processes)
     sample_indices = torch.randperm(total_sample_num, generator=generator)[:log_sample_num].tolist()
+    # Chunk sample_indices to distribute to different processes
+    sample_indices = sample_indices[accelerator.process_index::accelerator.num_processes]
 
     for batch_idx, test_batch in enumerate(tqdm(
             test_dataloader,
@@ -176,8 +179,9 @@ def eval(pipeline : FluxPipeline,
 
         # ---------------------------------Collect log data--------------------------------
         for i, prompt in enumerate(prompts):
-            sample_index = batch_idx * config.test.batch_size + i
+            sample_index = accelerator.process_index * len(test_dataloader) + batch_idx * config.test.batch_size + i
             if sample_index in sample_indices:
+                log_data['sample_indices'].append(sample_index)
                 log_data['images'].append(images[i].cpu())
                 log_data['prompts'].append(prompt)
                 for key, value in rewards.items():
