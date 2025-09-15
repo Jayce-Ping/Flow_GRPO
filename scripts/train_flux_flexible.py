@@ -86,13 +86,12 @@ def eval(pipeline : FluxPipeline,
          ema,
          transformer_trainable_parameters,
          memory_profiler : Optional[MemoryProfiler] = None,
-         log_sample_num : int = 90 # 108 as max in wandb/swanlab
+         log_sample_num : int = 108 # 108 as max in wandb/swanlab
     ):
     if config.train.ema:
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
     
     log_data = {
-        'sample_indices': [],
         'images': [],
         'prompts': [],
         'rewards': defaultdict(list)
@@ -101,12 +100,11 @@ def eval(pipeline : FluxPipeline,
         memory_profiler.snapshot("before_eval")
 
     # 'Deterministically' sample 'random' `log_sample_num` data for logging
-    total_sample_num = len(test_dataloader) * config.test.batch_size * accelerator.num_processes
-    log_sample_num = min(log_sample_num, total_sample_num)
-    generator = torch.Generator().manual_seed(config.seed)
+    # Make `num_processes` divides `log_sample_num` to make sure each process has same amount of data to log
+    log_sample_num = int(math.ceil(log_sample_num / accelerator.num_processes) * accelerator.num_processes)
+    generator = torch.Generator().manual_seed(config.seed + accelerator.process_index)
+    total_sample_num = len(test_dataloader) * config.test.batch_size
     sample_indices = torch.randperm(total_sample_num, generator=generator)[:log_sample_num].tolist()
-    # Chunk sample_indices to distribute to different processes
-    sample_indices = sample_indices[accelerator.process_index::accelerator.num_processes]
 
     for batch_idx, test_batch in enumerate(tqdm(
             test_dataloader,
@@ -179,9 +177,8 @@ def eval(pipeline : FluxPipeline,
 
         # ---------------------------------Collect log data--------------------------------
         for i, prompt in enumerate(prompts):
-            sample_index = accelerator.process_index * len(test_dataloader) + batch_idx * config.test.batch_size + i
+            sample_index = batch_idx * config.test.batch_size + i
             if sample_index in sample_indices:
-                log_data['sample_indices'].append(sample_index)
                 log_data['images'].append(images[i].cpu())
                 log_data['prompts'].append(prompt)
                 for key, value in rewards.items():
@@ -248,15 +245,18 @@ def eval(pipeline : FluxPipeline,
         # Since uploading images with jpg is faster, if we need to do it anyway.
         temp_dir = os.path.join(config.save_dir, 'temp_eval_images')
         os.makedirs(temp_dir, exist_ok=True)
-        offset = accelerator.process_index * len(log_data['images'])
-        for i,img in enumerate(log_data['images']):
+        for idx, img in enumerate(log_data['images']):
             # Save image to temp dir
             pil_img = tensor_to_pil_image(img)[0]
-            pil_img.save(os.path.join(temp_dir, f"{offset + i}.jpg"))
+            pil_img.save(os.path.join(temp_dir, f"{accelerator.process_index}-{idx}.jpg"))
         accelerator.wait_for_everyone()
         # The order of images here should be guaranteed by the name of images
         # NOTE: it provides gathered_images as a list of file paths
-        gathered_images = [os.path.join(temp_dir, f) for f in sorted(os.listdir(temp_dir), key=lambda x: int(x.split('.')[0]))]
+        sort_key = lambda filename: tuple([int(i) for i in filename.split('.')[0].split('-')])
+        gathered_images = [
+            os.path.join(temp_dir, f)
+            for f in sorted(os.listdir(temp_dir), key=sort_key)
+        ]
     else:
         # Approach: flatten and gather, then reshape
         gathered_images = all_gather_tensor_list(accelerator, log_data['images'], device="cpu")
@@ -266,18 +266,6 @@ def eval(pipeline : FluxPipeline,
         memory_profiler.snapshot("after_gather_images")
 
     if accelerator.is_main_process:
-         # Use a fixed generator to log same indices everytime for comparison
-        gen = torch.Generator().manual_seed(0)
-        # Sample `log_sample_num` data for logging, 'None' for all data.
-        if log_sample_num is None:
-            sample_indices = list(range(len(gathered_prompts)))
-        else:
-            sample_indices = torch.randperm(len(gathered_prompts), generator=gen)[:log_sample_num]
-
-        sampled_images = [gathered_images[i] for i in sample_indices]
-        sampled_prompts = [gathered_prompts[i] for i in sample_indices]
-        sampled_rewards = [gathered_rewards[i] for i in sample_indices]
-
         logging_platform.log(
             {
                 "eval_images": [
@@ -285,7 +273,7 @@ def eval(pipeline : FluxPipeline,
                         image,
                         caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
                     )
-                    for idx, (image, prompt, reward) in enumerate(zip(sampled_images, sampled_prompts, sampled_rewards))
+                    for idx, (image, prompt, reward) in enumerate(zip(gathered_images, gathered_prompts, gathered_rewards))
                 ]
             },
             step=global_step,
