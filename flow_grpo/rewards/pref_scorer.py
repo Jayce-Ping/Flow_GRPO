@@ -7,7 +7,7 @@ from io import BytesIO
 import base64
 import logging
 import asyncio
-from itertools import combinations
+from itertools import combinations, permutations
 import math
 import time
 
@@ -148,29 +148,29 @@ class PrefScorer:
         
 
     async def compute_group_rewards(self, prompt : str, images : list[Image.Image], metadata: dict, return_matrix=False, detailed=True) -> np.ndarray:
-        async def compare_image_pair(image1, image2):
-            # Symmetric comparison for better reliability
-            completion1 = await self.compare_image(image1, image2, prompt, metadata, detailed=detailed)
-            completion2 = await self.compare_image(image2, image1, prompt, metadata, detailed=detailed)
-            prob1 = get_yes_cond_prob_from_completion(completion1, canonicalize=True)
-            prob2 = get_yes_cond_prob_from_completion(completion2, canonicalize=True)
-            return int(prob1 > prob2), int(prob2 > prob1) # This ensures the result tuple is anti-symmetric
-
         # Process all image pairs concurrently
         comparison_matrix = np.zeros((len(images), len(images)), dtype=np.float64)
         tasks = []
         pairs = []
         
-        for i, j in combinations(range(len(images)), 2):
-            task = compare_image_pair(images[i], images[j])
+        for i, j in permutations(range(len(images)), 2):
+            task = self.compare_image(images[i], images[j], prompt, metadata, detailed=detailed)
             tasks.append(task)
             pairs.append((i, j))
         
         # Execute all comparisons concurrently
-        results = await asyncio.gather(*tasks)
+        completions = await asyncio.gather(*tasks)
 
         # Fill the comparison array
-        for (i, j), (win1, win2) in zip(pairs, results):
+        for (i, j), completion in zip(pairs, completions):
+            # Extract the probability that image i is preferred over image j
+            prob = get_yes_cond_prob_from_completion(completion, canonicalize=True)
+            comparison_matrix[i, j] = prob
+
+        for i, j in combinations(range(len(images)), 2):
+            # Determine wins based on probabilities
+            win1 = int(comparison_matrix[i, j] > comparison_matrix[j, i])
+            win2 = int(comparison_matrix[j, i] > comparison_matrix[i, j])
             comparison_matrix[i, j] = win1
             comparison_matrix[j, i] = win2
         
