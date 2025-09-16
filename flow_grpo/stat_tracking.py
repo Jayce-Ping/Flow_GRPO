@@ -9,7 +9,7 @@ class PerPromptStatTracker:
         self.stats = {}
         self.history_prompts = set()
 
-    def update(self, prompts : List[str], rewards : torch.Tensor | np.ndarray, type : str = 'grpo'):
+    def update(self, prompts : List[str], rewards : np.ndarray, type : str = 'grpo') -> np.ndarray:
         """
             Add `prompts` and corresponding `rewards` to the tracker and return advantages.
 
@@ -36,28 +36,37 @@ class PerPromptStatTracker:
         # Compute mean and std for each sample
         for prompt in unique:
             prompt_rewards = rewards[prompts == prompt]
+
+            if type == 'rank-grpo':
+                assert self.use_history == False, "Ranked-based GPRO does not support use_history=True"
+                # Compute rank-based rewards for this prompt group
+                prompt_rewards = self.compute_rank_rewards(prompt_rewards)
+
             # Compute mean and std
             if self.use_history:
                 # 1. Use all its history when `use_history=True`
                 mean = np.mean(self.stats[prompt], axis=0, keepdims=True)
                 if self.global_std:
                     # Global std across all history
-                    std = np.std(np.concatenate(list(self.stats.values())), axis=0, keepdims=True) + 1e-4
+                    std = np.std(np.concatenate(list(self.stats.values())), axis=0, keepdims=True)
                 else:
                     # Local std across all history, for this prompt only
-                    std = np.std(self.stats[prompt], axis=0, keepdims=True) + 1e-4
+                    std = np.std(self.stats[prompt], axis=0, keepdims=True)
             else:
                 # 2. Use only info in this update.
                 mean = np.mean(prompt_rewards, axis=0, keepdims=True)
                 if self.global_std:
                     # Global std across this update info
-                    std = np.std(rewards, axis=0, keepdims=True) + 1e-4
+                    std = np.std(rewards, axis=0, keepdims=True)
                 else:
                     # Local std for this prompt only
-                    std = np.std(prompt_rewards, axis=0, keepdims=True) + 1e-4
+                    std = np.std(prompt_rewards, axis=0, keepdims=True)
+
+            # Avoid division by zero
+            std = max(std, 1e-4)
 
             # Compute advantages with different algorithm
-            if type == 'grpo':
+            if type == 'grpo' or type == 'rank-grpo':
                 advantages[prompts == prompt] = (prompt_rewards - mean) / std
             elif type == 'rwr':
                 # advantages[prompts == prompt] = (prompt_rewards - mean) / std
@@ -83,6 +92,14 @@ class PerPromptStatTracker:
                 # print("reward difference one group", prompt_advantages[max_idx]-prompt_advantages[min_idx])
             
         return advantages
+
+    def compute_rank_rewards(self, rewards: np.ndarray) -> np.ndarray:
+        """
+            Compute rank-based rewards (related rewards) for a group of rewards (absolute rewards).
+        """
+        group_size = rewards.shape[0]
+        ranked_rewards = np.argsort(np.argsort(rewards, axis=0), axis=0) / ((group_size - 1) if group_size > 1 else 1)
+        return ranked_rewards
 
     def get_stats(self):
         avg_group_size = sum(len(v) for v in self.stats.values()) / len(self.stats) if self.stats else 0
