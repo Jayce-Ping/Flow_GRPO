@@ -912,7 +912,7 @@ These two numbers should be equal
         for prompt in dist_prompts:
             images = [gathered_images[i] for i in prompt_to_pos[prompt]]
             group_size = len(images)
-            # compute reward for each prompt
+            # compute reward for each prompt - how to gather and add metadata here?
             rewards, _ = executor.submit(pref_reward_fn, images, [prompt]*group_size, [{}]*group_size).result()
             gathered_pref_rewards[prompt_to_pos[prompt]] = rewards
         

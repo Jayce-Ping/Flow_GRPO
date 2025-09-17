@@ -26,7 +26,7 @@ class GridLayoutScorer:
             self,
             client : AsyncOpenAI,
             model='Qwen2.5-VL-7B-Instruct',
-            max_concurrent=300,
+            max_concurrent=100,
             max_retries=10,
             timeout=60
         ):
@@ -81,7 +81,7 @@ class GridLayoutScorer:
                     completion = await self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
-                        temperature=1e-6, # Low temperature may cause issue here.
+                        temperature=1e-3, # temperature doesn't matter if we only look at the prob of "Yes"
                         max_completion_tokens=1,
                         logprobs=True,
                         top_logprobs=top_logprobs,

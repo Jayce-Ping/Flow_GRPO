@@ -28,7 +28,7 @@ class ConsistencyScorer:
             self,
             client: AsyncOpenAI,
             model='Qwen2.5-VL-7B-Instruct',
-            max_concurrent=300,
+            max_concurrent=100,
             max_retries=10,
             timeout=60
         ):
