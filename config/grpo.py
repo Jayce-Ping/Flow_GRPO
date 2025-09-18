@@ -11,8 +11,9 @@ spec.loader.exec_module(base)
 
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 SD3_MODEL_PATH = "stabilityai/stable-diffusion-3.5-medium"
-SAVE_DIR = 'logs'
-SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
+# SAVE_DIR = 'logs'
+# SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
+SAVE_DIR = '/root/autodl-tmp/Flow_GRPO/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
