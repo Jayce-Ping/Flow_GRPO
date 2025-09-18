@@ -10,7 +10,7 @@ import random
 def split_train_test_from_metadata(
         data : list[dict],
         train_ratio=0.5,
-        group_keys = ['uid', 'size'],
+        group_keys = ['size'],
         seed=42
         ):
 
@@ -72,11 +72,11 @@ def save_split_dataset(
                 f.write(json.dumps(item) + '\n')
 
 def main():
-    data_summary_path = "dataset/T2IS/data_summary.jsonl"
+    data_summary_path = "dataset/T2IS/extended_data_summary.jsonl"
     n = 4
     max_resolution_threshold = 512 * 512 * n
-    output_dir = f"dataset/T2IS/train_half_leq_{n}" # less/equal to n 512x512 images
-
+    # output_dir = f"dataset/T2IS/train_half_leq_{n}" # less/equal to n 512x512 images
+    output_dir = f"dataset/T2IS/train_extended_73_2by2"
 
     with open(data_summary_path, "r") as f:
         data = [json.loads(line) for line in f]
@@ -84,15 +84,13 @@ def main():
     for d in data:
         d['size'] = (d['height'], d['width'])
 
-    data = [d for d in data if d['height'] * d['width'] <= max_resolution_threshold]
-    with open(f"dataset/T2IS/data_summary_leq_{n}.jsonl", "w") as f:
-        for d in data:
-            f.write(json.dumps(d) + "\n")
+    # data = [d for d in data if d['height'] * d['width'] <= max_resolution_threshold]
+    data = [d for d in data if d['layout'] == '2x2']
 
     grouped_train, grouped_test = split_train_test_from_metadata(
         data,
-        train_ratio=0.5,
-        group_keys=['uid', 'size'],
+        train_ratio=0.7,
+        group_keys=['size', 'category', 'task_name'],
         seed=42
     )
 
