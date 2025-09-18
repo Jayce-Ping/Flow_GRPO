@@ -1,11 +1,10 @@
-export CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7
+# export CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7
 export WANDB_API_KEY="66795f41320baafdbf8b4a19b62dce232ded0c2e"
-export WANDB_MODE=disabled
+# export WANDB_MODE=disabled
 
 if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
     # Audo-set number of GPUs if not set
     NUM_GPUS=$(nvidia-smi --list-gpus | wc -l)
-    export CUDA_VISIBLE_DEVICES=$(seq -s, 0 $((NUM_GPUS-1)))
 else
     # Count number of GPUs from CUDA_VISIBLE_DEVICES
     NUM_GPUS=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)

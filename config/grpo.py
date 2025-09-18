@@ -12,6 +12,7 @@ spec.loader.exec_module(base)
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 SD3_MODEL_PATH = "stabilityai/stable-diffusion-3.5-medium"
 SAVE_DIR = 'logs'
+SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -251,9 +252,10 @@ def grid_consistency_clip_flux():
     config = compressibility()
 
     config.project_name = 'FlowGRPO-Flux'
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_leq_4")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
+    config.enable_mem_log = False
 
     config.enable_flexible_size = True
     config.resolution = 1024
@@ -265,9 +267,9 @@ def grid_consistency_clip_flux():
 
     # Sampling
     ## sliding window scheduler
-    config.sample.num_steps = 20
+    config.sample.num_steps = 10
     config.sample.use_sliding_window = True
-    config.sample.window_size = 2
+    config.sample.window_size = 1
     config.sample.left_boundary = 1
     config.sample.guidance_scale = 3.5
 
@@ -309,8 +311,8 @@ def grid_consistency_clip_flux():
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.noise_level = 0.9
-    config.save_freq = 10 # epoch
-    config.eval_freq = 10 # 0 for no eval applied
+    config.save_freq = 20 # epoch
+    config.eval_freq = 20 # 0 for no eval applied
 
     config.reward_fn = {
         "grid_layout": 1.0,
