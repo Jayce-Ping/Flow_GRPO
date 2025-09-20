@@ -1,4 +1,4 @@
-# export CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7
 export WANDB_API_KEY="66795f41320baafdbf8b4a19b62dce232ded0c2e"
 # export WANDB_MODE=disabled
 

@@ -11,8 +11,9 @@ spec.loader.exec_module(base)
 
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 SD3_MODEL_PATH = "stabilityai/stable-diffusion-3.5-medium"
-SAVE_DIR = 'logs'
-SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
+# SAVE_DIR = 'logs'
+# SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
+SAVE_DIR = '/root/autodl-tmp/Flow_GRPO/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -252,7 +253,7 @@ def grid_consistency_clip_flux():
     config = compressibility()
 
     config.project_name = 'FlowGRPO-Flux'
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_extended_73_2by2")
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
@@ -324,7 +325,7 @@ def grid_consistency_clip_flux():
     
     config.aggregate_fn = agg_fn
 
-    config.save_dir = os.path.join(SAVE_DIR, f'grid_consistency_clip_flux_{gpu_number}gpu')
+    config.save_dir = os.path.join(SAVE_DIR, f'grid_consistency_clip_flux')
 
     return config
 
