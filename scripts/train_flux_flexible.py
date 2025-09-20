@@ -206,7 +206,10 @@ def eval(pipeline : FluxPipeline,
 
         # Log eval metrics
         logging_platform.log(
-            {f"eval/{key}": np.mean(value) for key, value in gathered_rewards.items()},
+            {
+                **{f"eval/{key}": np.mean(value) for key, value in gathered_rewards.items()},
+                **{f"eval/{key}_std": np.std(value) for key, value in gathered_rewards.items()},
+            },
             step=global_step
         )
 
@@ -908,6 +911,7 @@ These two numbers should be equal
                 {
                     "epoch": epoch,
                     **{f"reward_{key}": value.mean() for key, value in gathered_rewards.items()},
+                    **{f"reward_{key}_std": value.std() for key, value in gathered_rewards.items()},
                 },
                 step=global_step,
             )
