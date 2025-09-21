@@ -47,7 +47,7 @@ class GridLayoutScorer:
 
         # Process all images concurrently
         tasks = [
-            self.compute_layout_score(prompt, image, metadata) 
+            self.compute_layout_score(prompt, image, metadata, use_prob=False)
             for prompt, image, metadata in zip(prompts, images, metadatas)
         ]
 
@@ -60,8 +60,7 @@ class GridLayoutScorer:
             image : Image.Image,
             metadata : dict,
             top_logprobs: int = 20,
-            use_prob: bool = False,
-            threshold = 0.5,
+            use_prob: bool = False
         ) -> float:
         grid_info = extract_grid_info(prompt)
         messages = [
@@ -98,7 +97,7 @@ class GridLayoutScorer:
 
         if use_prob:
             yes_prob = get_yes_cond_prob_from_completion(completion, canonicalize=True)
-            return 1.0 if yes_prob >= threshold else 0.0
+            return yes_prob
 
         content = completion.choices[0].message.content.strip().lower()
         return 1.0 if "yes" in content else 0.0
