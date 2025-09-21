@@ -22,9 +22,10 @@ def upload_checkpoint_dir(folder_path, path_in_repo, repo_id, commit_message="Up
     print(f"Folder '{folder_path}' successfully uploaded to '{repo_id}'.")
 
 if __name__ == "__main__":
-    label = ""
+    label = "Add 1. Pref all 2by2 and 2. grid-consistency-subclip extended half 2by2"
+    SAVE_DIR = '/root/autodl-tmp/Flow_GRPO/logs'
     folder_name = 'grid-consistency-subclip'
-    folder_path = os.path.join("logs", folder_name)
+    folder_path = os.path.join(SAVE_DIR, folder_name)
     path_in_repo = folder_name
     repo_id = "Jayce-Ping/Flux-GRPO"
 

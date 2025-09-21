@@ -325,7 +325,7 @@ def grid_consistency_clip_flux():
     
     config.aggregate_fn = agg_fn
 
-    config.save_dir = os.path.join(SAVE_DIR, f'grid_consistency_clip_flux', f'flux-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT')
+    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT')
 
     return config
 
