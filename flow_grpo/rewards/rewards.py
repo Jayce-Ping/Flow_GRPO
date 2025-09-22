@@ -167,7 +167,7 @@ def ocr_score(device):
 def multi_score(
     device: str,
     score_dict: Dict[str, float],
-    aggregate_fn: Optional[Callable[[Dict[str, float]], float]] = None,
+    aggregate_fn: Optional[Callable[[Dict[str, np.ndarray]], np.ndarray]] = None,
 ) -> Callable[[List[Image.Image], List[str], List[dict]], Tuple[dict[str, np.ndarray], dict]]:
     """
     Constructs a multi-score reward function that computes multiple reward metrics for a batch of images and prompts.
@@ -177,17 +177,17 @@ def multi_score(
         
         score_dict (List[str]): A dictionary mapping reward function names to their weights.
         
-        aggregate_fn (Callable[[Dict[str, float]], float], optional): A function to aggregate multiple scores.
-            If None, defaults to summing all values. The function should accept keyword arguments where:
+        aggregate_fn (Callable[[Dict[str, np.ndarray]], np.ndarray], optional): A function to aggregate multiple scores.
+            If None, defaults to summing all weighted scores along axis 0. The function should accept keyword arguments where:
             - Each keyword corresponds to a key in score_dict (e.g., "clipscore", "aesthetic").
-            - Each value is the weighted score (original_score * weight) for that reward metric.
-            - Returns a single float representing the final aggregated score.
+            - Each value is the weighted score array (original_score * weight) for that reward metric.
+            - Returns a numpy array representing the final aggregated scores for each sample in the batch.
 
             Examples:
-            - lambda **kwargs: np.sum(list(kwargs.values()))  # Sum all weighted scores (default)
-            - lambda **kwargs: np.mean(list(kwargs.values()))  # Average of weighted scores  
-            - lambda clipscore, aesthetic: np.exp(clipscore) + np.exp(aesthetic)  # Custom weighting
-            - lambda **kwargs: max(kwargs.values())  # Take maximum score
+            - lambda **kwargs: np.sum(list(kwargs.values()), axis=0)  # Sum all weighted scores (default)
+            - lambda **kwargs: np.mean(list(kwargs.values()), axis=0)  # Average of weighted scores  
+            - lambda clipscore, aesthetic: np.maximum(clipscore, aesthetic)  # Element-wise maximum
+            - lambda **kwargs: np.prod(list(kwargs.values()), axis=0)  # Product of all scores
 
     Returns:
         Callable: A function that takes as input:
@@ -209,7 +209,7 @@ def multi_score(
     """
     if aggregate_fn is None:
         # If not given, use np.sum directly
-        aggregate_fn = lambda **kwargs: np.sum(list(kwargs.values()))
+        aggregate_fn = lambda **kwargs: np.sum(list(kwargs.values()), axis=0)
 
     assert aggregate_fn is not None
 
@@ -242,7 +242,7 @@ def multi_score(
         prompts : List[str],
         metadata: List[dict]
     ) -> Tuple[dict[str, np.ndarray], dict]:
-        total_scores = []
+        aggregated_scores = {}
         score_details = {}
 
         # Convert images to PIL format if they are tensors or numpy arrays
@@ -269,15 +269,12 @@ def multi_score(
 
             score_details[score_name] = scores
             # Scale each reward by corresponding weight
-            total_scores.append(weight * scores)
+            aggregated_scores[score_name] = weight * scores
 
         # Aggregate scores from different reward models
-        total_scores = np.array([
-            aggregate_fn(**{k: v for k,v in zip(score_dict.keys(), scores)})
-            for scores in zip(*total_scores)
-        ])
+        aggregated_scores = aggregate_fn(**aggregated_scores)
 
-        score_details['avg'] = total_scores
+        score_details['avg'] = aggregated_scores
         return score_details, {}
 
     return _fn
