@@ -253,17 +253,17 @@ def grid_consistency_clip_flux():
     config = compressibility()
 
     config.project_name = 'FlowGRPO-Flux'
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_extended_73_2by2")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
 
-    config.enable_flexible_size = True
+    config.enable_flexible_size = False
     config.resolution = 1024
     config.max_sequence_length = 512
 
     # Testing
-    config.test.batch_size = 4
+    config.test.batch_size = 5
     config.test.num_steps = 20
 
     # Sampling
@@ -276,7 +276,7 @@ def grid_consistency_clip_flux():
 
     ## batches
     config.sample.batch_size = 1
-    config.sample.num_image_per_prompt = 16
+    config.sample.num_image_per_prompt = 24
     config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
@@ -317,15 +317,15 @@ def grid_consistency_clip_flux():
 
     config.reward_fn = {
         "grid_layout": 1.0,
-        "consistency_score": 0.3,
-        "subfig_clipT" : 0.7
+        "consistency_score": 0.2,
+        "subfig_clipT" : 0.8
     }
     def agg_fn(grid_layout : np.ndarray, consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
         return grid_layout * (consistency_score + subfig_clipT)
     
     config.aggregate_fn = agg_fn
 
-    config.save_dir = os.path.join(SAVE_DIR, f'grid_consistency_clip_flux')
+    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT')
 
     return config
 
