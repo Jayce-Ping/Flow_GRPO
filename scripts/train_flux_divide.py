@@ -150,6 +150,7 @@ def eval(pipeline : FluxPipeline,
                         height=height,
                         width=width,
                         noise_level=0,
+                        layout=None # No dividing for evaluation
                     )
 
                 images.append(imgs.squeeze(0))  # (C, H, W)

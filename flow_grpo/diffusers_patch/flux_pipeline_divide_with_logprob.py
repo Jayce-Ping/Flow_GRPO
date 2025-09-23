@@ -300,47 +300,47 @@ def pipeline_with_logprob(
         lora_scale=lora_scale,
     )
 
-    # Encode each sub-prompt if layout is given
-    assert layout is not None, "Layout must be provided for sub-figure generation."
-    sub_height = height // layout[0]
-    sub_width = width // layout[1]
-    divided_prompts = [divide_prompt(p) for p in prompt] # List (`length=batch_size`) of List[str] (`length=rows*cols + 1`)
-    sub_prompts = sum([p[1:] for p in divided_prompts], []) # List of str, length = batch_size*rows*cols
-    # Encode sub-prompts
-    sub_prompt_embeds, sub_pooled_prompt_embeds, sub_text_ids = pipeline.encode_prompt(
-        prompt=sub_prompts,
-        prompt_2=sub_prompts,
-        prompt_embeds=prompt_embeds,
-        pooled_prompt_embeds=pooled_prompt_embeds,
-        device=device,
-        max_sequence_length=max_sequence_length,
-        lora_scale=lora_scale,
-    )
+    if layout is not None:
+        # Encode each sub-prompt if layout is given
+        sub_height = height // layout[0]
+        sub_width = width // layout[1]
+        divided_prompts = [divide_prompt(p) for p in prompt] # List (`length=batch_size`) of List[str] (`length=rows*cols + 1`)
+        sub_prompts = sum([p[1:] for p in divided_prompts], []) # List of str, length = batch_size*rows*cols
+        # Encode sub-prompts
+        sub_prompt_embeds, sub_pooled_prompt_embeds, sub_text_ids = pipeline.encode_prompt(
+            prompt=sub_prompts,
+            prompt_2=sub_prompts,
+            prompt_embeds=prompt_embeds,
+            pooled_prompt_embeds=pooled_prompt_embeds,
+            device=device,
+            max_sequence_length=max_sequence_length,
+            lora_scale=lora_scale,
+        )
 
-    # 4. Prepare latent variables
-    num_channels_latents = pipeline.transformer.config.in_channels // 4
-    latents, latent_image_ids = pipeline.prepare_latents(
-        batch_size,
-        num_channels_latents,
-        height,
-        width,
-        prompt_embeds.dtype,
-        device,
-        generator,
-        latents,
-    )
+        # 4. Prepare latent variables
+        num_channels_latents = pipeline.transformer.config.in_channels // 4
+        latents, latent_image_ids = pipeline.prepare_latents(
+            batch_size,
+            num_channels_latents,
+            height,
+            width,
+            prompt_embeds.dtype,
+            device,
+            generator,
+            latents,
+        )
 
-    # Prepare latents for subfig
-    _, sub_latent_image_ids = pipeline.prepare_latents(
-        batch_size=batch_size * layout[0] * layout[1],
-        num_channels_latents=num_channels_latents,
-        height=sub_height,
-        width=sub_width,
-        dtype=prompt_embeds.dtype,
-        device=device,
-        generator=generator,
-        latents=None,
-    )
+        # Prepare latents for subfig
+        _, sub_latent_image_ids = pipeline.prepare_latents(
+            batch_size=batch_size * layout[0] * layout[1],
+            num_channels_latents=num_channels_latents,
+            height=sub_height,
+            width=sub_width,
+            dtype=prompt_embeds.dtype,
+            device=device,
+            generator=generator,
+            latents=None,
+        )
 
     # 5. Prepare scheduler, shift timesteps/sigmas according to image size (image_seq_len)
     sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
@@ -386,7 +386,8 @@ def pipeline_with_logprob(
             if current_noise_level > 0:
                 all_latents.append(latents)
 
-            if i < pipeline.scheduler.merge_step:
+            if layout is not None and i < pipeline.scheduler.merge_step:
+                # use sub-prompts and sub-latents if layout is given and not yet merged
                 current_prompt_embeds = sub_prompt_embeds
                 current_pooled_prompt_embeds = sub_pooled_prompt_embeds
                 latents = divide_latents(latents, height, width, sub_height, sub_width) # (B, rows, cols, sub_seq_len, C)
@@ -430,8 +431,8 @@ def pipeline_with_logprob(
             if latents.dtype != latents_dtype:
                 latents = latents.to(latents_dtype)
 
-            if i < pipeline.scheduler.merge_step:
-                # merge sub-latents into full latents
+            if layout is not None and i < pipeline.scheduler.merge_step:
+                # Reconstruct full latents and compute the mean log_prob if use dividing
                 latents = latents.view(batch_size, layout[0], layout[1], -1, latents.shape[2]) # (B, rows, cols, sub_seq_len, C)
                 latents = merge_latents(latents, height, width, sub_height, sub_width) # (B, seq_len, C)
                 # TODO: for subfig generation, should we compute the log_prob of the full image , or the mean of all subfig log_probs?
