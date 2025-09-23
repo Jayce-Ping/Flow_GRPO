@@ -285,7 +285,7 @@ def pipeline_with_logprob(
         if pipeline.joint_attention_kwargs is not None else None
     )
     
-    # Encode the entire prompt
+    # 3. Encode prompts
     (
         prompt_embeds,
         pooled_prompt_embeds,
@@ -317,19 +317,20 @@ def pipeline_with_logprob(
             lora_scale=lora_scale,
         )
 
-        # 4. Prepare latent variables
-        num_channels_latents = pipeline.transformer.config.in_channels // 4
-        latents, latent_image_ids = pipeline.prepare_latents(
-            batch_size,
-            num_channels_latents,
-            height,
-            width,
-            prompt_embeds.dtype,
-            device,
-            generator,
-            latents,
-        )
+    # 4. Prepare latent variables
+    num_channels_latents = pipeline.transformer.config.in_channels // 4
+    latents, latent_image_ids = pipeline.prepare_latents(
+        batch_size,
+        num_channels_latents,
+        height,
+        width,
+        prompt_embeds.dtype,
+        device,
+        generator,
+        latents,
+    )
 
+    if layout is not None:
         # Prepare latents for subfig
         _, sub_latent_image_ids = pipeline.prepare_latents(
             batch_size=batch_size * layout[0] * layout[1],
