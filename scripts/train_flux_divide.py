@@ -140,7 +140,7 @@ def eval(pipeline : FluxPipeline,
                 height = heights[i]
                 width = widths[i]
                 with autocast():
-                    imgs, _, _ = pipeline_with_logprob(
+                    imgs, _, _, _ = pipeline_with_logprob(
                         pipeline,
                         prompt_embeds=prompt_embeds[i].unsqueeze(0),
                         pooled_prompt_embeds=pooled_prompt_embeds[i].unsqueeze(0),
@@ -157,7 +157,7 @@ def eval(pipeline : FluxPipeline,
         else:
             # Batch inference if all sizes are the same
             with autocast():
-                images, _, _, = pipeline_with_logprob(
+                images, _, _, _ = pipeline_with_logprob(
                     pipeline,
                     prompt_embeds=prompt_embeds,
                     pooled_prompt_embeds=pooled_prompt_embeds,
