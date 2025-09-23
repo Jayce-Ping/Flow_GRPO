@@ -93,3 +93,91 @@ class FlowMatchSlidingWindowScheduler(FlowMatchEulerDiscreteScheduler):
             return self.noise_level
 
         return 0.0
+    
+
+class FlowMatchSubfigScheduler(FlowMatchEulerDiscreteScheduler):
+    """
+        A scheduler with noise level provided within the given steps
+    """
+    def __init__(
+        self,
+        noise_level : float = 0.9,
+        noise_steps : Optional[Union[int, list, torch.Tensor]] = None,
+        merge_step : int = 0,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        if noise_steps is None:
+            noise_steps = range(0, self.config.num_train_timesteps)
+
+        self.noise_level = noise_level
+        self._left_boundary = min(noise_steps)
+
+        assert self.noise_level >= 0, "Noise level must be non-negative."
+        assert self._left_boundary >= 0, "Left boundary must be non-negative."
+
+        self.noise_steps = torch.tensor(noise_steps, dtype=torch.int64)
+        self._window_size = max(noise_steps) - self._left_boundary + 1
+        self.merge_step = merge_step
+
+    @property
+    def window_size(self):
+        if self._window_size > len(self.timesteps) - self._left_boundary:
+            self._window_size = len(self.timesteps) - self._left_boundary
+
+        return self._window_size
+
+    @property
+    def left_boundary(self):
+        if self._left_boundary > len(self.timesteps):
+            # Reset left boundary to zero
+            print("Left boundary exceeds the number of timesteps. Resetting to zero.")
+            self._left_boundary = 0
+
+        return self._left_boundary
+
+    @property
+    def right_boundary(self):
+        return self.left_boundary + self.window_size
+
+    def get_window_timesteps(self, left_boundary : Optional[int] = None, window_size : Optional[int] = None) -> torch.Tensor:
+        """
+            Returns timesteps within the current window.
+            If `left_boundary` is provided, use it instead of the current left boundary.
+            If `window_size` is provided, use it instead of the current window size.
+        """
+        if left_boundary is None:
+            left_boundary = self.left_boundary
+        if window_size is None:
+            window_size = self.window_size
+
+        return self.timesteps[left_boundary:left_boundary + window_size]
+
+    def get_window_sigmas(self, left_boundary : Optional[int] = None, window_size : Optional[int] = None) -> torch.Tensor:
+        """
+            Returns sigmas within the current window.
+            If `left_boundary` is provided, use it instead of the current left boundary.
+            If `window_size` is provided, use it instead of the current window size.
+        """
+        if left_boundary is None:
+            left_boundary = self.left_boundary
+        if window_size is None:
+            window_size = self.window_size
+
+        return self.sigmas[left_boundary:left_boundary + window_size]
+
+    def get_noise_levels(self) -> torch.Tensor:
+        """ Returns noise levels on all timesteps, where noise level is non-zero only within the current window. """
+        noise_levels = torch.zeros_like(self.timesteps, dtype=torch.float32)
+        noise_levels[self.noise_steps] = self.noise_level
+        return noise_levels
+
+    def get_noise_level_for_timestep(self, time_step) -> float:
+        """
+            Return the noise level for a specific timestep.
+        """
+        time_step_index = self.index_for_timestep(time_step)
+        if time_step_index in self.noise_steps:
+            return self.noise_level
+
+        return 0.0

@@ -1,61 +1,43 @@
-import wandb
-import datetime
-import ml_collections
-def set_resume_info(config):
-    """
-        Resume wandb training log
-    """
-    project_name = config.project_name
-    run_id = config.resume_from_id
-    # Get history
-    api_run = wandb.Api().run(f"{project_name}/{run_id}")
-    history = api_run.history()
-    if not history.empty:
-        config.resume_from_step = int(history['_step'].iloc[-1])
-        config.resume_from_epoch = int(history['epoch'].iloc[-1])
-        print(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
-    else:
-        print("No previous history found, starting from beginning")
-        config.resume_from_step = 0
-        config.resume_from_epoch = 0
+import asyncio
+from datetime import datetime
+from concurrent import futures
 
-    config.run_name = api_run.name
-    config.run_id = api_run.id
+class test:
+    def __init__(self, max_concurrent: int):
+        self.semaphore = asyncio.Semaphore(max_concurrent)
 
-def set_wandb(config):
-    # Resume training
-    if config.resume_from_id:
-        run_id = config.resume_from_id
-        print("Resuming")
-        wandb_run = wandb.init(
-            project=config.project_name,
-            config=config.to_dict(),
-            id=run_id,
-            resume='must'
-        )
-        print("Resuming done")
-    else:
-        print("Start from beginning")
-        unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
-        if not config.run_name:
-            config.run_name = unique_id
-        else:
-            config.run_name += "_" + unique_id
+    def __call__(self, n):
+        res = asyncio.run(self.run(n))
+        return res
 
-        wandb_run = wandb.init(
-            project=config.project_name,
-            config=config.to_dict()
-        )
-        config.run_name = wandb_run.name
-        config.run_id = wandb_run.id
-        print("Init done")
+    async def run(self, n):
+        tasks = [self.__async_call() for _ in range(n)]
+        return await asyncio.gather(*tasks)
 
-    return wandb_run
+    async def __async_call(self):
+        async with self.semaphore:
+            time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"{time} start")
+            await asyncio.sleep(1)
+            print("done")
+        
+        return time
+    
 
 
-config = ml_collections.ConfigDict()
+def get_fn():
 
-config.resume_from_id = 'd04p82m0'
-config.project_name = 'FlowGRPO'
-set_resume_info(config)
-set_wandb(config)
+    def _fn(m, n):
+        t = test(m)
+        res = t(n)
+        return res
+    
+    return _fn
+
+if __name__ == "__main__":
+    fn = get_fn()
+    executor = futures.ThreadPoolExecutor(max_workers=8)
+    res = executor.submit(fn, 8, 10)
+    
+    res = res.result()
+    print(res)

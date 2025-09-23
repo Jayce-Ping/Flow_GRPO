@@ -14,5 +14,5 @@ accelerate launch \
     --config_file scripts/accelerate_configs/deepspeed_zero2.yaml \
     --num_processes=$NUM_GPUS \
     --main_process_port 29501 \
-    scripts/train_flux_flexible.py \
+    scripts/train_flux_divide.py \
     --config config/grpo.py:subfig_clip_flux_2gpu
