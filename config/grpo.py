@@ -2,6 +2,7 @@ import ml_collections
 import os
 import math
 from importlib.util import spec_from_file_location, module_from_spec
+import inspect
 
 import numpy as np
 
@@ -13,8 +14,8 @@ FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 SD3_MODEL_PATH = "stabilityai/stable-diffusion-3.5-medium"
 # SAVE_DIR = 'logs'
 # SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
-# SAVE_DIR = '/root/autodl-tmp/Flow_GRPO/logs'
-SAVE_DIR = '/root/siton-tmp/Flow_GRPO/logs'
+SAVE_DIR = '/root/autodl-tmp/Flow_GRPO/logs'
+# SAVE_DIR = '/root/siton-tmp/Flow_GRPO/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -27,7 +28,7 @@ def compressibility():
     config.use_lora = True
 
     # Sampling
-    config.sample.noise_steps = [1]
+    config.sample.noise_steps = [2]
     config.sample.merge_step = 2
     config.sample.use_sliding_window = False
     config.sample.left_boundary = 0
@@ -43,8 +44,10 @@ def compressibility():
     config.train.batch_size = 4
     config.train.gradient_accumulation_steps = 2
 
+    # Testing
     config.test.batch_size = 4
     config.test.num_steps = 20
+    config.test.merge_step = 1
 
     # prompting
     config.prompt_fn = "general_ocr"
@@ -263,6 +266,7 @@ def grid_consistency_clip_flux():
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
+    # config.logging_platform = "swanlab"
 
     config.enable_flexible_size = False
     config.resolution = 1024
@@ -271,6 +275,7 @@ def grid_consistency_clip_flux():
     # Testing
     config.test.batch_size = 5
     config.test.num_steps = 20
+    config.test.merge_step = 2
 
     # Sampling
     ## sliding window scheduler
@@ -278,6 +283,8 @@ def grid_consistency_clip_flux():
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
     config.sample.left_boundary = 1
+    config.sample.noise_steps = [1]
+    config.sample.merge_step = 1
     config.sample.guidance_scale = 3.5
 
     ## batches
@@ -329,9 +336,11 @@ def grid_consistency_clip_flux():
     def agg_fn(grid_layout : np.ndarray, consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
         return grid_layout * (consistency_score + subfig_clipT)
     
+    config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+
     config.aggregate_fn = agg_fn
 
-    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT')
+    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-divide-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT')
 
     return config
 

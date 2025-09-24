@@ -325,7 +325,7 @@ def compute_log_prob(
         prev_sample=next_latents.float(),
     )
 
-    if timestep_index < pipeline.scheduler.merge_step:
+    if timestep_index < config.sample.merge_step:
         # # Reconstruct full latents and compute the mean log_prob if use dividing
         prev_sample = prev_sample.view(batch_size, layout[0], layout[1], -1, prev_sample.shape[2]) # (B, rows, cols, sub_seq_len, C)
         prev_sample = merge_latents(prev_sample, height, width, sub_height, sub_width) # (B, seq_len, C)
@@ -350,7 +350,8 @@ def compute_log_prob(
         # Reshape log_prob to (B, rows * cols)
         log_prob = log_prob.view(batch_size, layout[0] * layout[1])
         # Sum and scale
-        log_prob = log_prob.sum(dim=1) / math.sqrt(layout[0] * layout[1]) # (B,)
+        log_prob = log_prob.sum(dim=1) / math.sqrt(layout[0] * layout[1]) # (B,) to make variance unchanged
+        # log_prob = log_prob.sum(dim=1) / (layout[0] * layout[1]) # (B,) to make mean unchanged
 
 
     return prev_sample, log_prob, prev_sample_mean, std_dev_t
@@ -571,7 +572,7 @@ def pipeline_with_logprob(
             if latents.dtype != latents_dtype:
                 latents = latents.to(latents_dtype)
 
-            if layout is not None and i <merge_step:
+            if layout is not None and i < merge_step:
                 # Reconstruct full latents and compute the mean log_prob if use dividing
                 latents = latents.view(batch_size, layout[0], layout[1], -1, latents.shape[-1]) # (B, rows, cols, sub_seq_len, C)
                 latents = merge_latents(latents, height, width, sub_height, sub_width) # (B, seq_len, C)
@@ -596,7 +597,8 @@ def pipeline_with_logprob(
                 # Reshape log_prob to (B, rows * cols)
                 log_prob = log_prob.view(batch_size, layout[0] * layout[1])
                 # Sum and scale
-                log_prob = log_prob.sum(dim=1) / math.sqrt(layout[0] * layout[1]) # (B,)
+                log_prob = log_prob.sum(dim=1) / math.sqrt(layout[0] * layout[1]) # (B,) to make variance unchanged
+                # log_prob = log_prob.sum(dim=1) / (layout[0] * layout[1]) # (B,) to make mean unchanged
 
 
             if current_noise_level > 0:
