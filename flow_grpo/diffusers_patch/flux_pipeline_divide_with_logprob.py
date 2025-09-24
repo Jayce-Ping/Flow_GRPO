@@ -54,17 +54,15 @@ def divide_latents(latents, H, W, h, w):
     # Reshape latents to (B, latent_H, latent_W, C)
     latents = latents.view(batch_size, latent_H, latent_W, channels)
     
-    sub_latents = [
-        [
-            latents[:, i * latent_h:(i + 1) * latent_h, j * latent_w:(j + 1) * latent_w, :].reshape(batch_size, -1, channels)
-            for j in range(cols)
-        ]
-        for i in range(rows)
-    ]
+    # split into sub-grids: (B, rows, latent_h, cols, latent_w, C)
+    latents = latents.view(batch_size, rows, latent_h, cols, latent_w, channels)
 
-    # Since all sub-latents have the same shape, we can return them as a tensor
-    sub_latents = torch.stack([torch.stack(row, dim=1) for row in sub_latents], dim=1)  # Shape: (B, rows, cols, sub_seq_len, C)
-    
+    # (B, rows, latent_h, cols, latent_w, C) -> (B, rows, cols, latent_h, latent_w, C)
+    sub_latents = latents.permute(0, 1, 3, 2, 4, 5).contiguous()
+
+    # (B, rows, cols, latent_h, latent_w, C) -> (B, rows, cols, sub_seq_len, C)
+    sub_latents = sub_latents.view(batch_size, rows, cols, latent_h * latent_w, channels)
+
     return sub_latents
 
 
