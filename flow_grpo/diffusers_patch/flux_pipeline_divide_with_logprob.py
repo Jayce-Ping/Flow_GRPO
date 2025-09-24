@@ -274,7 +274,7 @@ def compute_log_prob(
     noise_level = pipeline.scheduler.get_noise_level_for_timestep(timestep)
 
     # 2. Prepare prompt_embeds and latents if using dividing
-    if timestep_index < pipeline.scheduler.merge_step:
+    if timestep_index < config.sample.merge_step:
         pooled_prompt_embeds = sample["sub_pooled_prompt_embeds"]
         prompt_embeds = sample["sub_prompt_embeds"]
         latents = divide_latents(latents, height, width, sub_height, sub_width) # (B, rows, cols, sub_seq_len, C)
@@ -289,8 +289,8 @@ def compute_log_prob(
     latents, image_ids = pipeline.prepare_latents(
         batch_size = batch_size,
         num_channels_latents = num_channels_latents,
-        height = height if timestep_index >= pipeline.scheduler.merge_step else sub_height,
-        width = width if timestep_index >= pipeline.scheduler.merge_step else sub_width,
+        height = height if timestep_index >= config.sample.merge_step else sub_height,
+        width = width if timestep_index >= config.sample.merge_step else sub_width,
         dtype=dtype,
         device=device,
         generator=None,
@@ -380,6 +380,7 @@ def pipeline_with_logprob(
     max_sequence_length: int = 512,
     noise_level: Optional[float] = None,
     layout: Optional[Tuple[int, int]] = None,
+    merge_step: int = 0,
 ) -> Tuple[
         torch.FloatTensor,
         List[torch.FloatTensor],
@@ -525,7 +526,7 @@ def pipeline_with_logprob(
             if current_noise_level > 0:
                 all_latents.append(latents)
 
-            if layout is not None and i < pipeline.scheduler.merge_step:
+            if layout is not None and i < merge_step:
                 # use sub-prompts and sub-latents if layout is given and not yet merged
                 current_prompt_embeds = sub_prompt_embeds
                 current_pooled_prompt_embeds = sub_pooled_prompt_embeds
@@ -570,7 +571,7 @@ def pipeline_with_logprob(
             if latents.dtype != latents_dtype:
                 latents = latents.to(latents_dtype)
 
-            if layout is not None and i < pipeline.scheduler.merge_step:
+            if layout is not None and i <merge_step:
                 # Reconstruct full latents and compute the mean log_prob if use dividing
                 latents = latents.view(batch_size, layout[0], layout[1], -1, latents.shape[-1]) # (B, rows, cols, sub_seq_len, C)
                 latents = merge_latents(latents, height, width, sub_height, sub_width) # (B, seq_len, C)

@@ -160,6 +160,7 @@ def eval(pipeline : FluxPipeline,
                     width=widths[0],
                     noise_level=0,
                     layout=layouts[0],
+                    merge_step=config.test.merge_step
                 )
                 images = list(images.unbind(0)) # List[torch.Tensor(C, H, W)]
         # reward_fn accepts torch.Tensor (B, C, H, W) or List[torch.Tensor(C, H, W)]
