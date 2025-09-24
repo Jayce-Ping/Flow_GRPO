@@ -137,12 +137,12 @@ def subfig_clip_flux_2gpu():
     
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
     config.enable_flexible_size = True
-    config.enable_mem_log = False
+    config.enable_mem_log = True
 
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
     config.sample.left_boundary = 1
-    config.sample.noise_steps = [1, 3]
+    config.sample.noise_steps = [2]
     config.sample.merge_step = 2
 
     # flux
@@ -154,7 +154,7 @@ def subfig_clip_flux_2gpu():
 
     config.sample.batch_size = 1
     config.sample.num_image_per_prompt = 24
-    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 8 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -189,8 +189,8 @@ def subfig_clip_flux_2gpu():
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
-    config.save_freq = 20 # epoch
-    config.eval_freq = 20
+    config.save_freq = 40 # epoch
+    config.eval_freq = 40
     config.save_dir = os.path.join(SAVE_DIR, f'subfig_clipT_flux_{gpu_number}gpu')
     config.reward_fn = {
         "subfig_clipT": 1.0,

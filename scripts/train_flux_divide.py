@@ -31,7 +31,7 @@ from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftMode
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
-from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list
+from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, divide_prompt
 from flow_grpo.rewards.rewards import multi_score
 from flow_grpo.diffusers_patch.flux_pipeline_divide_with_logprob import calculate_shift, pipeline_with_logprob, compute_log_prob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_flux import encode_prompt
@@ -116,16 +116,12 @@ def eval(pipeline : FluxPipeline,
             memory_profiler.snapshot(f"eval_batch_{batch_idx}_start")
 
         prompts, prompt_metadata = test_batch
-        prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
-            prompts,
-            text_encoders,
-            tokenizers,
-            max_sequence_length=config.max_sequence_length,
-            device=accelerator.device
-        )
+
         heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
         widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
-        if not all(h == heights[0] for h in heights) or not all(w == widths[0] for w in widths):
+        layouts = [prompt_meta.get('layout', '1x1') for prompt_meta in prompt_metadata]
+        layouts = [tuple(map(int, l.split('x'))) for l in layouts] # Convert '2x3' to (2, 3)
+        if not all(h == heights[0] for h in heights) or not all(w == widths[0] for w in widths) or not all(l == layouts[0] for l in layouts):
             # Split the batch if there are different sizes
             images = []
             for i in tqdm(
@@ -137,20 +133,17 @@ def eval(pipeline : FluxPipeline,
             ):
                 prompt = [prompts[i]]
                 prompt_meta = [prompt_metadata[i]]
-                height = heights[i]
-                width = widths[i]
                 with autocast():
                     imgs, _, _, _ = pipeline_with_logprob(
                         pipeline,
-                        prompt_embeds=prompt_embeds[i].unsqueeze(0),
-                        pooled_prompt_embeds=pooled_prompt_embeds[i].unsqueeze(0),
+                        prompt=prompt,
                         num_inference_steps=config.test.num_steps,
                         guidance_scale=config.sample.guidance_scale,
                         output_type="pt",
-                        height=height,
-                        width=width,
+                        height=heights[i],
+                        width=widths[i],
                         noise_level=0,
-                        layout=None # No dividing for evaluation
+                        layout=layouts[i],
                     )
 
                 images.append(imgs.squeeze(0))  # (C, H, W)
@@ -159,14 +152,14 @@ def eval(pipeline : FluxPipeline,
             with autocast():
                 images, _, _, _ = pipeline_with_logprob(
                     pipeline,
-                    prompt_embeds=prompt_embeds,
-                    pooled_prompt_embeds=pooled_prompt_embeds,
+                    prompt=prompts,
                     num_inference_steps=config.test.num_steps,
                     guidance_scale=config.sample.guidance_scale,
                     output_type="pt",
                     height=heights[0],
                     width=widths[0],
                     noise_level=0,
+                    layout=layouts[0],
                 )
                 images = list(images.unbind(0)) # List[torch.Tensor(C, H, W)]
         # reward_fn accepts torch.Tensor (B, C, H, W) or List[torch.Tensor(C, H, W)]
@@ -811,6 +804,17 @@ These two numbers should be equal
 
             # If all heights and widths are the same, we can batch them together
             if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths) and all(l == layouts[0] for l in layouts):
+                # Encode each sub-prompt if layout is given
+                divided_prompts = [divide_prompt(p) for p in prompts] # List (`length=batch_size`) of List[str] (`length=rows*cols + 1`)
+                sub_prompts = sum([p[1:] for p in divided_prompts], []) # List of str, length = batch_size*rows*cols
+                # Encode sub-prompts
+                all_sub_prompt_embeds, all_sub_pooled_prompt_embeds = compute_text_embeddings(
+                    sub_prompts,
+                    text_encoders,
+                    tokenizers,
+                    max_sequence_length=config.max_sequence_length,
+                    device=accelerator.device
+                )
                 with autocast():
                     with torch.no_grad():
                         images, all_latents, all_log_probs, timestep_indices = pipeline_with_logprob(
@@ -832,12 +836,25 @@ These two numbers should be equal
                     all_latents = list(all_latents.unbind(0)) # List[Tensor(num_train_steps + 1, C, H, W)] with length batch_size
                     all_log_probs = torch.stack(all_log_probs, dim=1) # (batch_size, num_train_steps)
                     all_log_probs = list(all_log_probs.unbind(0)) # List[Tensor(num_train_steps)] with length batch_size
+                    all_sub_prompt_embeds = all_sub_prompt_embeds.view(len(prompts), -1, *all_sub_prompt_embeds.shape[1:]) # (batch_size, rows*cols, L, D)
+                    all_sub_pooled_prompt_embeds = all_sub_pooled_prompt_embeds.view(len(prompts), -1, *all_sub_pooled_prompt_embeds.shape[1:]) # (batch_size, rows*cols, D)
             else:
                 # Different sizes, have to do one by one
                 images = []
                 all_latents = []
                 all_log_probs = []
+                all_sub_prompt_embeds = []
+                all_sub_pooled_prompt_embeds = []
                 for index in range(len(prompts)):
+                    sub_prompts = divide_prompt(prompts[index])[1:] # List[str], length = rows*cols
+                    # Encode sub-prompts
+                    sub_prompt_embeds, sub_pooled_prompt_embeds = compute_text_embeddings(
+                        sub_prompts,
+                        text_encoders,
+                        tokenizers,
+                        max_sequence_length=config.max_sequence_length,
+                        device=accelerator.device
+                    )
                     with autocast():
                         with torch.no_grad():
                             this_image, this_all_latents, this_all_log_probs, timestep_indices = pipeline_with_logprob(
@@ -854,6 +871,8 @@ These two numbers should be equal
                     images.append(this_image.squeeze(0))  # add (C, H, W)
                     all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_train_steps + 1, C, H, W)
                     all_log_probs.append(torch.stack(this_all_log_probs, dim=1).squeeze(0))  # add (num_train_steps, )
+                    all_sub_prompt_embeds.append(sub_prompt_embeds) # add (rows*cols, L, D)
+                    all_sub_pooled_prompt_embeds.append(sub_pooled_prompt_embeds) # add (rows*cols, D)
 
                 # images: List[Tensor(C, H, W)] with length batch_size
                 # all_latents: List[Tensor(num_train_steps + 1, C, H, W)] with length batch_size
@@ -878,10 +897,13 @@ These two numbers should be equal
                     {
                         'height': heights[index],
                         'width': widths[index],
-                        'prompt_ids': prompt_ids[index].unsqueeze(0), # Keep batch dimension as 1
-                        'prompt_embeds': prompt_embeds[index].unsqueeze(0),
+                        'layout': layouts[index],
                         'timestep_indices': timestep_indices,
-                        'pooled_prompt_embeds': pooled_prompt_embeds[index].unsqueeze(0),
+                        'prompt_ids': prompt_ids[index].unsqueeze(0), # Keep batch dimension as 1
+                        'prompt_embeds': prompt_embeds[index].unsqueeze(0), # (1, L, D)
+                        'pooled_prompt_embeds': pooled_prompt_embeds[index].unsqueeze(0), # (1, D)
+                        'sub_prompt_embeds': all_sub_prompt_embeds[index], # (rows*cols, L, D)
+                        'sub_pooled_prompt_embeds': all_sub_pooled_prompt_embeds[index], # (rows*cols, D)
                         'latents': all_latents[index][:-1].unsqueeze(0),
                         'next_latents': all_latents[index][1:].unsqueeze(0),
                         'log_probs': all_log_probs[index].unsqueeze(0),
