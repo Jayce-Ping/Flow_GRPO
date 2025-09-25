@@ -144,6 +144,7 @@ def eval(pipeline : FluxPipeline,
                         width=widths[i],
                         noise_level=0,
                         layout=layouts[i],
+                        merge_step=config.test.merge_step
                     )
 
                 images.append(imgs.squeeze(0))  # (C, H, W)
@@ -828,6 +829,7 @@ These two numbers should be equal
                             width=widths[0],
                             generator=generators,
                             layout=layouts[0],
+                            merge_step=config.sample.merge_step
                     )
                     # images: (batch_size, C, H, W) -> List[Tensor(C, H, W)] with length batch_size
                     # all_latents: List[Tensor(batch_size C, H, W)] with length windowsize+1 -> List[Tensor(num_train_steps + 1, C, H, W)] with length batch_size
@@ -868,6 +870,7 @@ These two numbers should be equal
                                 width=widths[index],
                                 generator=generators[index] if generators is not None else None,
                                 layout=layouts[index],
+                                merge_step=config.sample.merge_step
                         )
                     images.append(this_image.squeeze(0))  # add (C, H, W)
                     all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_train_steps + 1, C, H, W)

@@ -329,27 +329,12 @@ def compute_log_prob(
         prev_sample = merge_latents(prev_sample, height, width, sub_height, sub_width) # (B, seq_len, C)
         prev_sample_mean = prev_sample_mean.view(batch_size, layout[0], layout[1], -1, prev_sample_mean.shape[2]) # (B, rows, cols, sub_seq_len, C)
         prev_sample_mean = merge_latents(prev_sample_mean, height, width, sub_height, sub_width) # (B, seq_len, C)
-        # # TODO: for subfig generation, should we compute the log_prob of (1) the full image , (2) or the mean of all subfig log_probs ❎
-        # # 1. Compute the log_prob of the full image
-        # sigma_max = pipeline.scheduler.sigmas[1]
-        # sigma = pipeline.scheduler.sigmas[timestep_index].view(-1, *([1] * (len(prev_sample.shape) - 1)))
-        # sigma_prev = pipeline.scheduler.sigmas[timestep_index + 1].view(-1, *([1] * (len(prev_sample.shape) - 1)))
-        # dt = sigma_prev - sigma # (batch_size, 1, 1)
-        # std_dev_t = torch.sqrt(sigma / (1 - torch.where(sigma == 1, sigma_max, sigma))) * noise_level # (batch_size, 1, 1)
-        # log_prob = (
-        #     -((prev_sample.detach() - prev_sample_mean) ** 2) / (2 * ((std_dev_t * torch.sqrt(-1 * dt)) ** 2))
-        #     - torch.log(std_dev_t * torch.sqrt(-1 * dt))
-        #     - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
-        # )
-        # log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim))) # (B,)
-        # # 2. Each sub-log-prob is for a gussian dist, the sum of n independent gaussian is still a gaussian dist with mean=sum(means) and var=sum(vars)
-        # ⏩: TODO: check it
-        # scale the log_prob by 1 / sqrt(n) to get the equivalent full image log_prob
+        # scale the log_prob to get the `equivalent`` full image log_prob
         # Reshape log_prob to (B, rows * cols)
         log_prob = log_prob.view(batch_size, layout[0] * layout[1])
         # Sum and scale
-        log_prob = log_prob.sum(dim=1) / math.sqrt(layout[0] * layout[1]) # (B,) to make variance unchanged
-        # log_prob = log_prob.sum(dim=1) / (layout[0] * layout[1]) # (B,) to make mean unchanged
+        log_prob = log_prob.mean(dim=1) # (B,) to make mean unchanged
+        # log_prob = log_prob.sum(dim=1) / math.sqrt(layout[0] * layout[1]) # (B,) to make variance unchanged
 
 
     return prev_sample, log_prob, prev_sample_mean, std_dev_t
@@ -576,27 +561,12 @@ def pipeline_with_logprob(
                 latents = merge_latents(latents, height, width, sub_height, sub_width) # (B, seq_len, C)
                 prev_latents_mean = prev_latents_mean.view(batch_size, layout[0], layout[1], -1, prev_latents_mean.shape[-1]) # (B, rows, cols, sub_seq_len, C)
                 prev_latents_mean = merge_latents(prev_latents_mean, height, width, sub_height, sub_width) # (B, seq_len, C)
-                # # TODO: for subfig generation, should we compute the log_prob of (1) the full image , (2) or the mean of all subfig log_probs ❎
-                # # 1. Compute the log_prob of the full image
-                # sigma_max = pipeline.scheduler.sigmas[1]
-                # sigma = pipeline.scheduler.sigmas[i].view(-1, *([1] * (len(latents.shape) - 1)))
-                # sigma_prev = pipeline.scheduler.sigmas[i + 1].view(-1, *([1] * (len(latents.shape) - 1)))
-                # dt = sigma_prev - sigma # (batch_size, 1, 1)
-                # std_dev_t = torch.sqrt(sigma / (1 - torch.where(sigma == 1, sigma_max, sigma))) * current_noise_level # (batch_size, 1, 1)
-                # log_prob = (
-                #     -((latents.detach() - prev_latents_mean) ** 2) / (2 * ((std_dev_t * torch.sqrt(-1 * dt)) ** 2))
-                #     - torch.log(std_dev_t * torch.sqrt(-1 * dt))
-                #     - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
-                # )
-                # log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim))) # (B,)
-                # # 2. Each sub-log-prob is for a gussian dist, the sum of n independent gaussian is still a gaussian dist with mean=sum(means) and var=sum(vars)
-                # ⏩: TODO: check it
-                # scale the log_prob by 1 / sqrt(n) to get the equivalent full image log_prob
+                # scale the log_prob to get the `equivalent`` full image log_prob
                 # Reshape log_prob to (B, rows * cols)
                 log_prob = log_prob.view(batch_size, layout[0] * layout[1])
                 # Sum and scale
-                log_prob = log_prob.sum(dim=1) / math.sqrt(layout[0] * layout[1]) # (B,) to make variance unchanged
-                # log_prob = log_prob.sum(dim=1) / (layout[0] * layout[1]) # (B,) to make mean unchanged
+                log_prob = log_prob.mean(dim=1) # (B,) to make mean unchanged
+                # log_prob = log_prob.sum(dim=1) / math.sqrt(layout[0] * layout[1]) # (B,) to make variance unchanged
 
 
             if current_noise_level > 0:
