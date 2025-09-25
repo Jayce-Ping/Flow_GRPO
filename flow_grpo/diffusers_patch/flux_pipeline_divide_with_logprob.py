@@ -12,100 +12,7 @@ from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchE
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
 from ..scheduler import FlowMatchSlidingWindowScheduler, FlowMatchSubfigScheduler
 # from .denoising_step_with_logprob import denoising_sde_step_with_logprob
-from flow_grpo.utils import divide_prompt
-
-def divide_latents(latents, H, W, h, w):
-    """
-    Divide latents into sub-latents based on the specified sub-image size (h, w).
-    Args:
-        latents (torch.Tensor): The input latents tensor of shape (B, seq_len, C).
-        H (int): Height of the original image.
-        W (int): Width of the original image.
-        h (int): Height of each sub-image.
-        w (int): Width of each sub-image.
-
-    Returns:
-        torch.Tensor: A tensor of sub-latents of shape (B, rows, cols, sub_seq_len, C).
-    """
-    batch_size, image_seq_len, channels = latents.shape
-    assert H % h == 0 and W % w == 0, "H and W must be divisible by h and w respectively."
-    
-    # Compute downsampling factor
-    total_pixels = H * W
-    downsampling_factor = total_pixels // image_seq_len
-
-    # Check if downsampling factor is a perfect square
-    downsample_ratio = int(math.sqrt(downsampling_factor))
-    if downsample_ratio * downsample_ratio != downsampling_factor:
-        raise ValueError(f"The downsampling ratio cannot be determined. Image pixels {total_pixels} and sequence length {image_seq_len} do not match.")
-    
-    # Calculate latent dimensions
-    latent_H = H // downsample_ratio
-    latent_W = W // downsample_ratio
-    latent_h = h // downsample_ratio
-    latent_w = w // downsample_ratio
-    
-    # Match check
-    assert latent_H * latent_W == image_seq_len, f"Calculated latent dimensions {latent_H}x{latent_W} do not match sequence length {image_seq_len}"
-    
-    rows = latent_H // latent_h
-    cols = latent_W // latent_w
-    
-    # Reshape latents to (B, latent_H, latent_W, C)
-    latents = latents.view(batch_size, latent_H, latent_W, channels)
-    
-    # split into sub-grids: (B, rows, latent_h, cols, latent_w, C)
-    latents = latents.view(batch_size, rows, latent_h, cols, latent_w, channels)
-
-    # (B, rows, latent_h, cols, latent_w, C) -> (B, rows, cols, latent_h, latent_w, C)
-    sub_latents = latents.permute(0, 1, 3, 2, 4, 5).contiguous()
-
-    # (B, rows, cols, latent_h, latent_w, C) -> (B, rows, cols, sub_seq_len, C)
-    sub_latents = sub_latents.view(batch_size, rows, cols, latent_h * latent_w, channels)
-
-    return sub_latents
-
-
-def merge_latents(sub_latents, H, W, h, w):
-    """
-    Merge sub-latents back into the original latents tensor.
-    Args:
-        sub_latents (torch.Tensor): A tensor of sub-latents of shape (B, rows, cols, sub_seq_len, C).
-        H (int): Height of the original image.
-        W (int): Width of the original image.
-        h (int): Height of each sub-image.
-        w (int): Width of each sub-image.
-    Returns:
-        torch.Tensor: The merged latents tensor of shape (B, seq_len, C).
-    """
-    batch_size, rows, cols, sub_seq_len, channels = sub_latents.shape
-    
-    vae_scale_factor = int(math.sqrt(h * w // sub_seq_len))
-    # Calculate latent dimensions using the explicit parameters
-    latent_h = h // vae_scale_factor
-    latent_w = w // vae_scale_factor
-    latent_H = H // vae_scale_factor
-    latent_W = W // vae_scale_factor
-    
-    # Verify dimensions match
-    assert latent_h * latent_w == sub_seq_len, f"sub_seq_len {sub_seq_len} does not match calculated sub-latent size {latent_h}x{latent_w}"
-    assert rows * cols == (latent_H // latent_h) * (latent_W // latent_w), f"Grid size {rows}x{cols} does not match expected grid size"
-    
-    # Reshape sub_latents to (B, rows, cols, latent_h, latent_w, C)
-    sub_latents = sub_latents.view(batch_size, rows, cols, latent_h, latent_w, channels)
-    
-    # Merge by rearranging dimensions
-    # (B, rows, cols, latent_h, latent_w, C) -> (B, rows, latent_h, cols, latent_w, C)
-    merged = sub_latents.permute(0, 1, 3, 2, 4, 5).contiguous()
-    
-    # Reshape to (B, latent_H, latent_W, C)
-    merged = merged.view(batch_size, latent_H, latent_W, channels)
-    
-    # Final reshape to (B, seq_len, C)
-    merged = merged.view(batch_size, latent_H * latent_W, channels)
-    
-    return merged
-
+from flow_grpo.utils import divide_prompt, divide_latents, merge_latents, to_broadcast_tensor
 
 def gaussian_log_prob(x, mean, var):
     return -((x - mean) ** 2) / (2 * var) - torch.log(torch.sqrt(var)) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
@@ -148,15 +55,7 @@ def denoising_sde_step_with_logprob(
         timestep = [timestep] * sample.shape[0]
 
     # Convert noise_level to a tensor with shape (batch_size, 1, 1)
-    if isinstance(noise_level, float) or isinstance(noise_level, int):
-        noise_level = torch.tensor([noise_level], device=sample.device, dtype=sample.dtype).expand(sample.shape[0])
-    elif isinstance(noise_level, list):
-        noise_level = torch.tensor(noise_level, device=sample.device, dtype=sample.dtype)
-    elif isinstance(noise_level, torch.Tensor):
-        noise_level = noise_level.to(device=sample.device, dtype=sample.dtype)
-
-    # Convert noise_level to a tensor with shape (batch_size, 1, 1)
-    noise_level = torch.as_tensor(noise_level).view(-1, *([1] * (len(sample.shape) - 1)))
+    noise_level = to_broadcast_tensor(noise_level, sample)
 
     # Get sigma, sigma_prev, dt
     step_index = [scheduler.index_for_timestep(t) for t in timestep]

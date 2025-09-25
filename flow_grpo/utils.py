@@ -3,8 +3,9 @@ import base64
 from io import BytesIO
 from typing import List, Union, Optional, Dict
 from itertools import permutations, combinations, chain
-import torch.distributed as dist
+import math
 
+import torch.distributed as dist
 from PIL import Image
 import torch
 import numpy as np
@@ -200,6 +201,98 @@ def extract_grid_info(prompt) -> tuple[int, int]:
         return (1, 1)
 
     return (int(match[0][0]), int(match[0][1]))
+
+def divide_latents(latents, H, W, h, w):
+    """
+    Divide latents into sub-latents based on the specified sub-image size (h, w).
+    Args:
+        latents (torch.Tensor): The input latents tensor of shape (B, seq_len, C).
+        H (int): Height of the original image.
+        W (int): Width of the original image.
+        h (int): Height of each sub-image.
+        w (int): Width of each sub-image.
+
+    Returns:
+        torch.Tensor: A tensor of sub-latents of shape (B, rows, cols, sub_seq_len, C).
+    """
+    batch_size, image_seq_len, channels = latents.shape
+    assert H % h == 0 and W % w == 0, "H and W must be divisible by h and w respectively."
+    
+    # Compute downsampling factor
+    total_pixels = H * W
+    downsampling_factor = total_pixels // image_seq_len
+
+    # Check if downsampling factor is a perfect square
+    downsample_ratio = int(math.sqrt(downsampling_factor))
+    if downsample_ratio * downsample_ratio != downsampling_factor:
+        raise ValueError(f"The downsampling ratio cannot be determined. Image pixels {total_pixels} and sequence length {image_seq_len} do not match.")
+    
+    # Calculate latent dimensions
+    latent_H = H // downsample_ratio
+    latent_W = W // downsample_ratio
+    latent_h = h // downsample_ratio
+    latent_w = w // downsample_ratio
+    
+    # Match check
+    assert latent_H * latent_W == image_seq_len, f"Calculated latent dimensions {latent_H}x{latent_W} do not match sequence length {image_seq_len}"
+    
+    rows = latent_H // latent_h
+    cols = latent_W // latent_w
+    
+    # Reshape latents to (B, latent_H, latent_W, C)
+    latents = latents.view(batch_size, latent_H, latent_W, channels)
+    
+    # split into sub-grids: (B, rows, latent_h, cols, latent_w, C)
+    latents = latents.view(batch_size, rows, latent_h, cols, latent_w, channels)
+
+    # (B, rows, latent_h, cols, latent_w, C) -> (B, rows, cols, latent_h, latent_w, C)
+    sub_latents = latents.permute(0, 1, 3, 2, 4, 5).contiguous()
+
+    # (B, rows, cols, latent_h, latent_w, C) -> (B, rows, cols, sub_seq_len, C)
+    sub_latents = sub_latents.view(batch_size, rows, cols, latent_h * latent_w, channels)
+
+    return sub_latents
+
+
+def merge_latents(sub_latents, H, W, h, w):
+    """
+    Merge sub-latents back into the original latents tensor.
+    Args:
+        sub_latents (torch.Tensor): A tensor of sub-latents of shape (B, rows, cols, sub_seq_len, C).
+        H (int): Height of the original image.
+        W (int): Width of the original image.
+        h (int): Height of each sub-image.
+        w (int): Width of each sub-image.
+    Returns:
+        torch.Tensor: The merged latents tensor of shape (B, seq_len, C).
+    """
+    batch_size, rows, cols, sub_seq_len, channels = sub_latents.shape
+    
+    vae_scale_factor = int(math.sqrt(h * w // sub_seq_len))
+    # Calculate latent dimensions using the explicit parameters
+    latent_h = h // vae_scale_factor
+    latent_w = w // vae_scale_factor
+    latent_H = H // vae_scale_factor
+    latent_W = W // vae_scale_factor
+    
+    # Verify dimensions match
+    assert latent_h * latent_w == sub_seq_len, f"sub_seq_len {sub_seq_len} does not match calculated sub-latent size {latent_h}x{latent_w}"
+    assert rows * cols == (latent_H // latent_h) * (latent_W // latent_w), f"Grid size {rows}x{cols} does not match expected grid size"
+    
+    # Reshape sub_latents to (B, rows, cols, latent_h, latent_w, C)
+    sub_latents = sub_latents.view(batch_size, rows, cols, latent_h, latent_w, channels)
+    
+    # Merge by rearranging dimensions
+    # (B, rows, cols, latent_h, latent_w, C) -> (B, rows, latent_h, cols, latent_w, C)
+    merged = sub_latents.permute(0, 1, 3, 2, 4, 5).contiguous()
+    
+    # Reshape to (B, latent_H, latent_W, C)
+    merged = merged.view(batch_size, latent_H, latent_W, channels)
+    
+    # Final reshape to (B, seq_len, C)
+    merged = merged.view(batch_size, latent_H * latent_W, channels)
+    
+    return merged
 
 
 # -------------------------------------OpenAI Utils------------------------------------
@@ -414,3 +507,26 @@ def all_gather_tensor_list(
             offset += length
 
     return gathered_tensors
+
+
+# -----------------------------------Tensor Utils---------------------------------------
+
+def to_broadcast_tensor(value : Union[int, float, List[int], List[float], torch.Tensor], ref_tensor : torch.Tensor) -> torch.Tensor:
+    """
+    Convert a scalar, list, or tensor to a tensor that can be broadcasted with ref_tensor.
+    The returned tensor will have shape (batch_size, 1, 1, ..., 1) where batch_size is the first dimension of ref_tensor,
+    and the number of trailing singleton dimensions is equal to the number of dimensions in ref_tensor minus one.
+    """
+    # Convert to tensor if not already a tensor
+    if not isinstance(value, torch.Tensor):
+        value = torch.tensor(value if isinstance(value, list) else [value])
+
+    # Move to the correct device and data type
+    value = value.to(device=ref_tensor.device, dtype=ref_tensor.dtype)
+
+    # If scalar, expand to batch size
+    if value.numel() == 1:
+        value = value.expand(ref_tensor.shape[0])
+
+    # Adjust shape for broadcasting
+    return value.view(-1, *([1] * (len(ref_tensor.shape) - 1)))
