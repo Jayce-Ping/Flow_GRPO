@@ -334,7 +334,7 @@ def grid_consistency_clip_flux():
         "subfig_clipT" : 0.8
     }
     def agg_fn(grid_layout : np.ndarray, consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
-        return grid_layout * (consistency_score + subfig_clipT)
+        return grid_layout * consistency_score + subfig_clipT
     
     config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
 
