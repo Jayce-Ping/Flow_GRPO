@@ -14,7 +14,7 @@ from accelerate import Accelerator
 
 # -------------------------------------Image Utils-------------------------------------
 
-def pil_image_to_base64(image : Image.Image, format="JPEG"):
+def pil_image_to_base64(image : Image.Image, format="JPEG") -> str:
     """
         Convert a PIL Image to a base64-encoded string.
         Args:
@@ -153,7 +153,7 @@ def numpy_list_to_pil_image(numpy_list: List[np.ndarray]) -> List[Image.Image]:
 
 
 # -------------------------------------Grid Utils-------------------------------------
-def divide_prompt(prompt):
+def divide_prompt(prompt: str) -> List[str]:
     # seqis like ". [TOP-LEFT]:"
     match_sep = re.compile(r"\.\s+[A-Z0-9-\[\]]+:")
     seps = match_sep.findall(prompt)
@@ -164,7 +164,7 @@ def divide_prompt(prompt):
     ]
     return sub_prompts
 
-def divide_image(image, grid_info : tuple[int, int]):
+def divide_image(image, grid_info : tuple[int, int]) -> List[Image.Image]:
     assert len(grid_info) == 2, "grid_info must be a tuple of two integers (a, b)"
 
     a, b = grid_info
@@ -194,7 +194,7 @@ def divide_image(image, grid_info : tuple[int, int]):
 
     return grid_cells
 
-def extract_grid_info(prompt) -> tuple[int, int]:
+def extract_grid_info(prompt : str) -> tuple[int, int]:
     # Grid can be represented as int x int, or int ⨉ int. ⨉ has unicode \u2a09
     match = re.findall(r'(\d+)\s*[x⨉]\s*(\d+)', prompt)
     if len(match) == 0:
@@ -202,7 +202,7 @@ def extract_grid_info(prompt) -> tuple[int, int]:
 
     return (int(match[0][0]), int(match[0][1]))
 
-def divide_latents(latents, H, W, h, w):
+def divide_latents(latents: torch.Tensor, H: int, W: int, h: int, w: int) -> torch.Tensor:
     """
     Divide latents into sub-latents based on the specified sub-image size (h, w).
     Args:
@@ -254,7 +254,7 @@ def divide_latents(latents, H, W, h, w):
     return sub_latents
 
 
-def merge_latents(sub_latents, H, W, h, w):
+def merge_latents(sub_latents: torch.Tensor, H: int, W: int, h: int, w: int) -> torch.Tensor:
     """
     Merge sub-latents back into the original latents tensor.
     Args:
@@ -358,7 +358,7 @@ def get_yes_cond_prob_from_completion(completion : openai.ChatCompletion, canoni
 
 
 # -------------------------------------Reward Computation Utils---------------------------------------
-def is_symmetric_matrix(matrix: np.ndarray):
+def is_symmetric_matrix(matrix: np.ndarray) -> bool:
     """
         Check if the matrix is symmetric
         Args:
@@ -373,7 +373,7 @@ def is_symmetric_matrix(matrix: np.ndarray):
 
     return np.all(matrix == matrix.T)
 
-def is_antisymmetric_matrix(matrix: np.ndarray, diagonal_zero=True):
+def is_antisymmetric_matrix(matrix: np.ndarray, diagonal_zero=True) -> bool:
     """
         Check if the matrix is anti-symmetric
         Args:
@@ -400,7 +400,7 @@ def is_antisymmetric_matrix(matrix: np.ndarray, diagonal_zero=True):
 
     return True
 
-def is_transitive_matrix(matrix: np.ndarray, return_violations=False):
+def is_transitive_matrix(matrix: np.ndarray, return_violations=False) -> Union[bool, tuple[bool, List[tuple[int, int, int]]]]:
     """
         Check if the matrix is transitive
         Args:
