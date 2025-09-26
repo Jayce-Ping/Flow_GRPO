@@ -13,7 +13,6 @@ spec.loader.exec_module(base)
 
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 # FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21"
-
 # SAVE_DIR = 'logs'
 # SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
 # SAVE_DIR = '/root/autodl-tmp/Flow_GRPO/logs'
@@ -45,6 +44,7 @@ def compressibility():
     config.enable_flexible_size = True
     config.train.batch_size = 4
     config.train.gradient_accumulation_steps = 2
+    config.enable_gradient_checkpointing = True
 
     # Testing
     config.test.batch_size = 4
@@ -81,8 +81,8 @@ def subfig_clip_flux():
     config.enable_mem_log = True
     config.logging_platform = "swanlab"
 
-    config.enable_flexible_size = True
-    config.resolution = 960
+    config.enable_flexible_size = False
+    config.resolution = 1024
     config.max_sequence_length = 512
 
     config.test.batch_size = 6
@@ -97,9 +97,9 @@ def subfig_clip_flux():
     config.sample.merge_step = 2
     config.sample.guidance_scale = 3.5
 
-    config.sample.batch_size = 1
+    config.sample.batch_size = 8
     config.sample.num_image_per_prompt = 24
-    config.sample.unique_sample_num_per_epoch = 8 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -131,8 +131,8 @@ def subfig_clip_flux():
     config.sample.same_latent = False
     config.train.ema = True
     config.sample.noise_level = 0.9
-    config.save_freq = 0 # epoch
-    config.eval_freq = 0
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10
     config.save_dir = os.path.join(SAVE_DIR, f'subfig_clipT_flux_{gpu_number}gpu')
     config.reward_fn = {
         "subfig_clipT": 1.0,

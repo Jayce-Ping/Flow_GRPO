@@ -391,6 +391,8 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
         else:
             pipeline.transformer = get_peft_model(pipeline.transformer, transformer_lora_config)
 
+    if config.enable_gradient_checkpointing:
+        pipeline.transformer.enable_gradient_checkpointing() # save memory
 
     return pipeline, text_encoders, tokenizers
 
@@ -771,13 +773,6 @@ These two numbers should be equal
         ):
             # Get prompt and metadata
             prompts, prompt_metadata = next(train_iter)
-            prompt_embeds, pooled_prompt_embeds = compute_text_embeddings(
-                prompts,
-                text_encoders,
-                tokenizers,
-                max_sequence_length=config.max_sequence_length,
-                device=accelerator.device
-            )
             prompt_ids = tokenizers[1](
                 prompts,
                 padding="max_length",
@@ -807,16 +802,6 @@ These two numbers should be equal
             # If all heights and widths are the same, we can batch them together
             if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths) and all(l == layouts[0] for l in layouts):
                 # Encode each sub-prompt if layout is given
-                divided_prompts = [divide_prompt(p) for p in prompts] # List (`length=batch_size`) of List[str] (`length=rows*cols + 1`)
-                sub_prompts = sum([p[1:] for p in divided_prompts], []) # List of str, length = batch_size*rows*cols
-                # Encode sub-prompts
-                all_sub_prompt_embeds, all_sub_pooled_prompt_embeds = compute_text_embeddings(
-                    sub_prompts,
-                    text_encoders,
-                    tokenizers,
-                    max_sequence_length=config.max_sequence_length,
-                    device=accelerator.device
-                )
                 with autocast():
                     with torch.no_grad():
                         images, all_latents, all_log_probs, timestep_indices = pipeline_with_logprob(
@@ -839,25 +824,12 @@ These two numbers should be equal
                     all_latents = list(all_latents.unbind(0)) # List[Tensor(num_train_steps + 1, C, H, W)] with length batch_size
                     all_log_probs = torch.stack(all_log_probs, dim=1) # (batch_size, num_train_steps)
                     all_log_probs = list(all_log_probs.unbind(0)) # List[Tensor(num_train_steps)] with length batch_size
-                    all_sub_prompt_embeds = all_sub_prompt_embeds.view(len(prompts), -1, *all_sub_prompt_embeds.shape[1:]) # (batch_size, rows*cols, L, D)
-                    all_sub_pooled_prompt_embeds = all_sub_pooled_prompt_embeds.view(len(prompts), -1, *all_sub_pooled_prompt_embeds.shape[1:]) # (batch_size, rows*cols, D)
             else:
                 # Different sizes, have to do one by one
                 images = []
                 all_latents = []
                 all_log_probs = []
-                all_sub_prompt_embeds = []
-                all_sub_pooled_prompt_embeds = []
                 for index in range(len(prompts)):
-                    sub_prompts = divide_prompt(prompts[index])[1:] # List[str], length = rows*cols
-                    # Encode sub-prompts
-                    sub_prompt_embeds, sub_pooled_prompt_embeds = compute_text_embeddings(
-                        sub_prompts,
-                        text_encoders,
-                        tokenizers,
-                        max_sequence_length=config.max_sequence_length,
-                        device=accelerator.device
-                    )
                     with autocast():
                         with torch.no_grad():
                             this_image, this_all_latents, this_all_log_probs, timestep_indices = pipeline_with_logprob(
@@ -875,8 +847,6 @@ These two numbers should be equal
                     images.append(this_image.squeeze(0))  # add (C, H, W)
                     all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_train_steps + 1, C, H, W)
                     all_log_probs.append(torch.stack(this_all_log_probs, dim=1).squeeze(0))  # add (num_train_steps, )
-                    all_sub_prompt_embeds.append(sub_prompt_embeds) # add (rows*cols, L, D)
-                    all_sub_pooled_prompt_embeds.append(sub_pooled_prompt_embeds) # add (rows*cols, D)
 
                 # images: List[Tensor(C, H, W)] with length batch_size
                 # all_latents: List[Tensor(num_train_steps + 1, C, H, W)] with length batch_size
@@ -902,12 +872,9 @@ These two numbers should be equal
                         'height': heights[index],
                         'width': widths[index],
                         'layout': layouts[index],
+                        'prompt': prompts[index],
                         'timestep_indices': timestep_indices,
                         'prompt_ids': prompt_ids[index].unsqueeze(0), # Keep batch dimension as 1
-                        'prompt_embeds': prompt_embeds[index].unsqueeze(0), # (1, L, D)
-                        'pooled_prompt_embeds': pooled_prompt_embeds[index].unsqueeze(0), # (1, D)
-                        'sub_prompt_embeds': all_sub_prompt_embeds[index], # (rows*cols, L, D)
-                        'sub_pooled_prompt_embeds': all_sub_pooled_prompt_embeds[index], # (rows*cols, D)
                         'latents': all_latents[index][:-1].unsqueeze(0),
                         'next_latents': all_latents[index][1:].unsqueeze(0),
                         'log_probs': all_log_probs[index].unsqueeze(0),
@@ -1020,9 +987,9 @@ These two numbers should be equal
                 # sample:{
                 # 'height': int,
                 # 'width': int,
+                # 'layout': (int, int),
+                # 'prompt': str,
                 # 'timestep_indices': list[int],
-                # 'prompt_embeds': Tensor(1, L, D),
-                # 'pooled_prompt_embeds': Tensor(1, D),
                 # 'latents': Tensor(1, num_train_steps + 1, C, H
                 # 'next_latents': Tensor(1, num_train_steps + 1, C, H, W),
                 # 'log_probs': Tensor(1, num_train_steps),
@@ -1035,7 +1002,7 @@ These two numbers should be equal
                          # Catenate along batch dimension if the entry is Tensor
                         k: torch.cat([s[k] for s in batch], dim=0)
                         if isinstance(batch[0][k], torch.Tensor)
-                        else batch[0][k] # for other type -  they should be the same within the batch
+                        else [batch[_][k] for _ in range(config.train.batch_size)] # for other type -  cat to a list
                         for k in keys
                     }
                     for batch in samples

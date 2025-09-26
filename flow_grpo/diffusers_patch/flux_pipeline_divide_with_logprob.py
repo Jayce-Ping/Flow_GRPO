@@ -131,13 +131,14 @@ def compute_log_prob(
     next_latents = sample["next_latents"][:, j]
     num_inference_steps = config.sample.num_steps
     scheduler = pipeline.scheduler
-    timestep_index = sample['timestep_indices'][j] # timestep index in the scheduler.timesteps
-    layout = sample.get("layout", (1, 1))
+    timestep_index = sample['timestep_indices'][0][j] # timestep index in the scheduler.timesteps
 
     batch_size = latents.shape[0]
     num_channels_latents = pipeline.transformer.config.in_channels // 4
-    height = sample.get("height", config.resolution)
-    width = sample.get("width", config.resolution)
+    height = config.resolution if 'height' not in sample else sample['height'][0] # All height/width in the batch should be the same
+    width = config.resolution if 'width' not in sample else sample['width'][0] # All height/width in the batch should be the same
+    layout = (1, 1) if 'layout' not in sample else sample['layout'][0] # All layout in the batch should be the same
+    prompt = sample['prompt']
     device = latents.device
     dtype = latents.dtype
 
@@ -172,15 +173,24 @@ def compute_log_prob(
 
     # 2. Prepare prompt_embeds and latents if using dividing
     if timestep_index < config.sample.merge_step:
-        pooled_prompt_embeds = sample["sub_pooled_prompt_embeds"]
-        prompt_embeds = sample["sub_prompt_embeds"]
+        sub_prompts = sum([divide_prompt(p)[1:] for p in prompt], []) # List of str, length = batch_size*rows*cols
+        prompt_embeds, pooled_prompt_embeds, text_ids = pipeline.encode_prompt(
+            prompt=sub_prompts,
+            prompt_2=sub_prompts,
+            device=device,
+            max_sequence_length=config.max_sequence_length,
+        )
         latents = divide_latents(latents, height, width, sub_height, sub_width) # (B, rows, cols, sub_seq_len, C)
         latents = latents.view(-1, latents.shape[3], latents.shape[4]) # (B*rows*cols, sub_seq_len, C)
         next_latents = divide_latents(next_latents, height, width, sub_height, sub_width) # (B, rows, cols, sub_seq_len, C)
         next_latents = next_latents.view(-1, next_latents.shape[3], next_latents.shape[4]) # (B*rows*cols, sub_seq_len, C)
     else:
-        pooled_prompt_embeds = sample["pooled_prompt_embeds"]
-        prompt_embeds = sample["prompt_embeds"]
+        prompt_embeds, pooled_prompt_embeds, text_ids = pipeline.encode_prompt(
+            prompt=prompt,
+            prompt_2=prompt,
+            device=device,
+            max_sequence_length=config.max_sequence_length,
+        )
 
     # 3. Prepare image_ids according to the latents
     latents, image_ids = pipeline.prepare_latents(
