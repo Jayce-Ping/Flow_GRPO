@@ -395,6 +395,8 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
         else:
             pipeline.transformer = get_peft_model(pipeline.transformer, transformer_lora_config)
 
+    if config.enable_gradient_checkpointing:
+        pipeline.transformer.enable_gradient_checkpointing() # save memory
 
     return pipeline, text_encoders, tokenizers
 
@@ -948,7 +950,7 @@ These two numbers should be equal
                     )
             # !!! Notice here, after every advantage calculation, the tracker is cleared so that no history is saved.
             # So comment the following clear code if `config.sample.use_history=True` is set
-            stat_tracker.clear()
+            # stat_tracker.clear()
         else:
             advantages = (gathered_rewards['avg'] - gathered_rewards['avg'].mean()) / (gathered_rewards['avg'].std() + 1e-4)
 
