@@ -1055,7 +1055,10 @@ These two numbers should be equal
                         policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
 
                         if config.train.beta > 0:
-                            kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=tuple(range(1, prev_sample_mean.ndim)), keepdim=True) / (2 * std_dev_t ** 2)
+                            if config.sample.cps:
+                                kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=tuple(range(1, prev_sample_mean.ndim)), keepdim=True)
+                            else:
+                                kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=tuple(range(1, prev_sample_mean.ndim)), keepdim=True) / (2 * std_dev_t ** 2)
                             kl_loss = torch.mean(kl_loss)
                             loss = policy_loss + config.train.beta * kl_loss
                         else:
