@@ -16,7 +16,7 @@ FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 # SAVE_DIR = 'logs'
 # SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
 SAVE_DIR = '/root/autodl-tmp/Flow_GRPO/logs'
-# SAVE_DIR = '/root/siton-tmp/Flow_GRPO/logs'
+SAVE_DIR = '/root/siton-tmp/Flow_GRPO/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -146,7 +146,7 @@ def subfig_clip_flux():
     return config
 
 def grid_consistency_clip_flux():
-    gpu_number = 7
+    gpu_number = 2
     config = compressibility()
 
     config.project_name = 'FlowGRPO-Flux'
@@ -154,7 +154,7 @@ def grid_consistency_clip_flux():
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
-    # config.logging_platform = "swanlab"
+    config.logging_platform = "swanlab"
 
     config.enable_flexible_size = False
     config.resolution = 1024
@@ -163,21 +163,22 @@ def grid_consistency_clip_flux():
     # Testing
     config.test.batch_size = 5
     config.test.num_steps = 20
-    config.test.merge_step = 2
+    config.test.merge_step = 0
 
     # Sampling
     ## sliding window scheduler
-    config.sample.num_steps = 10
+    config.sample.cps = True
+    config.sample.num_steps = 6
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
     config.sample.left_boundary = 1
-    config.sample.noise_steps = [0, 1]
-    config.sample.merge_step = 1
+    config.sample.noise_steps = [1]
+    config.sample.merge_step = 0
     config.sample.guidance_scale = 3.5
 
     ## batches
-    config.enable_gradient_checkpointing = False
-    config.sample.batch_size = 1
+    config.enable_gradient_checkpointing = True
+    config.sample.batch_size = 4
     config.sample.num_image_per_prompt = 24
     config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
@@ -210,7 +211,7 @@ def grid_consistency_clip_flux():
     config.train.timestep_fraction = 0.99
     config.train.beta = 0
     config.train.ema = True
-    config.sample.global_std = True
+    config.sample.global_std = False
     config.per_prompt_stat_tracking = True
     config.sample.use_history = False
     config.sample.same_latent = False
@@ -230,7 +231,7 @@ def grid_consistency_clip_flux():
 
     config.aggregate_fn = agg_fn
 
-    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-divide-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT')
+    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-test-using-history')
 
     return config
 

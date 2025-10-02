@@ -39,7 +39,7 @@ from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
 from flow_grpo.datasets.sampler import DistributedKRepeatSampler
-from flow_grpo.scheduler import FlowMatchSlidingWindowScheduler, FlowMatchSubfigScheduler
+from flow_grpo.scheduler import FlowMatchSlidingWindowScheduler, FlowMatchNoiseScheduler
 from flow_grpo.memory_tracker import MemoryProfiler
 
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
@@ -313,14 +313,14 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
     )
 
     if config.sample.use_sliding_window:
-        scheduler = FlowMatchSubfigScheduler(
+        scheduler = FlowMatchNoiseScheduler(
             noise_level=config.sample.noise_level,
             noise_steps=config.sample.noise_steps,
             merge_step=config.sample.merge_step,
             **pipeline.scheduler.config.__dict__,
         )
     else:
-        scheduler = FlowMatchSubfigScheduler(
+        scheduler = FlowMatchNoiseScheduler(
             noise_level=config.sample.noise_level,
         )
 

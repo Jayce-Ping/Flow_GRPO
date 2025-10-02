@@ -95,7 +95,7 @@ class FlowMatchSlidingWindowScheduler(FlowMatchEulerDiscreteScheduler):
         return 0.0
     
 
-class FlowMatchSubfigScheduler(FlowMatchEulerDiscreteScheduler):
+class FlowMatchNoiseScheduler(FlowMatchEulerDiscreteScheduler):
     """
         A scheduler with noise level provided within the given steps
     """
