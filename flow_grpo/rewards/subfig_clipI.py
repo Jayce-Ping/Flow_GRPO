@@ -71,10 +71,20 @@ class SubfigClipIScorer(torch.nn.Module):
             return clip_scores.cpu()
 
 def download_model():
-    scorer = SubfigClipTScorer(device='cpu')        
+    scorer = SubfigClipIScorer(device='cpu')
 
 def main():
+    image_paths = ['/root/flux_trained_0001_0003.png', '/root/flux_0001_0003.png', '/root/sd3_0001_0003.png']
+    images = [Image.open(img) for img in image_paths]
+    prompt = "THREE-PANEL Images with a 1x3 grid layout a male child with a round face, short ginger hair, and curious, wide eyes, rendered in watercolor style.All illustrations maintain a warm, whimsical watercolor aesthetic with soft edges and vibrant yet gentle colors. The child's features, including ginger hair and wide-eyed curiosity, remain consistent across settings. [LEFT]:The child plays in a sunlit backyard, surrounded by scattered toys and a half-built sandcastle. Dandelion puffs float in the air, and a small dog bounds joyfully nearby. The scene emphasizes playful energy with loose brushstrokes and warm golden-green hues. [MIDDLE]:The child explores a museum exhibit, gazing up at a towering dinosaur skeleton. Display cases glow softly with amber lighting, casting playful shadows. His posture leans forward in wonder, clutching a magnifying glass, with watercolor textures suggesting aged parchment and fossil textures. [RIGHT]:The child sits cross-legged in a wooden treehouse, sketching in a notebook. Sunlight filters through leaves, dappling the pages. A jar of fireflies and binoculars rest beside him, with distant hills rendered in hazy blue layers to evoke depth and quiet imagination."
+    prompts = [prompt for _ in range(len(images))]
+
+    scorer = SubfigClipIScorer(device='cuda:0')
+
+    scores = scorer(images, prompts, [])
+
     print(scores)
+
 
 if __name__ == "__main__":
     download_model()
