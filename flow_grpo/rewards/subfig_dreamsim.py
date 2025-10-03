@@ -12,8 +12,9 @@ class SubfigDreamSimScorer():
     """
     def __init__(self, device):
         self.device = device
-        self.model, self.preprocess = dreamsim(pretrained=True, device=device)
-        self.model.eval()
+        # Use huggingface cache directory to store the model
+        cache_dir = os.environ.get('HF_HOME', './models')
+        self.model, self.preprocess = dreamsim(pretrained=True, device=device, cache_dir=cache_dir)
 
     @torch.no_grad()
     def __call__(self,
@@ -48,12 +49,17 @@ class SubfigDreamSimScorer():
 
         return np.array(scores)
     
-    def compute_dreamsim_matrix(self, ref_images : list[Image.Image], images : list[Image.Image]):
-        ref_images = torch.stack([self.preprocess(img).to(self.device) for img in ref_images], dim=0)
-        input_images = torch.stack([self.preprocess(img).to(self.device) for img in images], dim=0)
+    @torch.no_grad()
+    def compute_dreamsim_matrix(self, ref_images : list[Image.Image], images : list[Image.Image]) -> torch.Tensor:
+        ref_images_tensor = torch.cat([self.preprocess(img).to(self.device) for img in ref_images], dim=0)
+        input_images_tensor = torch.cat([self.preprocess(img).to(self.device) for img in images], dim=0)
 
         with torch.no_grad():
-            dist = self.model(ref_images, input_images)
+            # Compute pairwise distance matrix - dreamsim matrix is symmetric
+            dist = torch.stack([
+                self.model(ref_images_tensor, input_images_tensor[i:i+1])
+                for i in range(len(images))
+            ], dim=0)
             sim = 1 - dist  # Convert distance to similarity
         
         return sim.cpu()
@@ -62,7 +68,10 @@ def download_model():
     scorer = SubfigDreamSimScorer(device='cpu')
 
 def main():
-    image_paths = ['/root/flux_trained_0001_0003.png', '/root/flux_0001_0003.png', '/root/sd3_0001_0003.png']
+    image_paths = [
+        '/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/images/base/0/0001_0003.png',
+        '/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/images/consistency_all/180/0001_0003.png'
+    ]
     images = [Image.open(img) for img in image_paths]
     prompt = "THREE-PANEL Images with a 1x3 grid layout a male child with a round face, short ginger hair, and curious, wide eyes, rendered in watercolor style.All illustrations maintain a warm, whimsical watercolor aesthetic with soft edges and vibrant yet gentle colors. The child's features, including ginger hair and wide-eyed curiosity, remain consistent across settings. [LEFT]:The child plays in a sunlit backyard, surrounded by scattered toys and a half-built sandcastle. Dandelion puffs float in the air, and a small dog bounds joyfully nearby. The scene emphasizes playful energy with loose brushstrokes and warm golden-green hues. [MIDDLE]:The child explores a museum exhibit, gazing up at a towering dinosaur skeleton. Display cases glow softly with amber lighting, casting playful shadows. His posture leans forward in wonder, clutching a magnifying glass, with watercolor textures suggesting aged parchment and fossil textures. [RIGHT]:The child sits cross-legged in a wooden treehouse, sketching in a notebook. Sunlight filters through leaves, dappling the pages. A jar of fireflies and binoculars rest beside him, with distant hills rendered in hazy blue layers to evoke depth and quiet imagination."
     prompts = [prompt for _ in range(len(images))]
