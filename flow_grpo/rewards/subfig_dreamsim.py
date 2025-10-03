@@ -13,7 +13,8 @@ class SubfigDreamSimScorer():
     def __init__(self, device):
         self.device = device
         # Use huggingface cache directory to store the model
-        cache_dir = os.environ.get('HF_HOME', './models')
+        cache_dir = os.environ.get('HF_HOME', './')
+        cache_dir = os.path.join(cache_dir, 'dreamsim_models')
         self.model, self.preprocess = dreamsim(pretrained=True, device=device, cache_dir=cache_dir)
 
     @torch.no_grad()
