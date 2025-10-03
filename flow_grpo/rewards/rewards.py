@@ -152,6 +152,17 @@ def subfig_clipT_score(device):
 
     return _fn
 
+def subfig_clipI_score(device):
+    from flow_grpo.rewards.subfig_clipI import SubfigClipIScorer
+
+    scorer = SubfigClipIScorer(device=device)
+
+    def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[np.ndarray, dict]:
+        scores = scorer(images, prompts, metadatas)
+        return scores, {}
+
+    return _fn
+
 def ocr_score(device):
     from flow_grpo.rewards.ocr import OcrScorer
 
@@ -222,6 +233,7 @@ def multi_score(
         "clipscore": clip_score,
         "consistency_score": consistency_score,
         "subfig_clipT": subfig_clipT_score,
+        'subfig_clipI': subfig_clipI_score,
         "grid_layout": grid_layout_score,
     }
 
