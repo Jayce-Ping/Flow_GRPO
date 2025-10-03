@@ -15,4 +15,4 @@ accelerate launch \
     --num_processes=$NUM_GPUS \
     --main_process_port 29501 \
     scripts/train_flux_divide.py \
-    --config config/grpo.py:grid_consistency_clip_flux
+    --config config/grpo.py:subfig_clip_flux

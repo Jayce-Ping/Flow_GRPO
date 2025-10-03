@@ -39,6 +39,7 @@ def compressibility():
     config.sample.num_image_per_prompt = 1
     config.sample.num_batches_per_epoch = 4
     config.sample.guidance_scale = 3.5
+    config.sample.cps = False
 
     # Training
     config.enable_flexible_size = True
@@ -78,7 +79,7 @@ def subfig_clip_flux():
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
-    config.enable_mem_log = True
+    config.enable_mem_log = False
     config.logging_platform = "swanlab"
 
     config.enable_flexible_size = False
@@ -87,19 +88,19 @@ def subfig_clip_flux():
 
     config.test.batch_size = 6
     config.test.num_steps = 20
-    config.test.merge_step = 2
+    config.test.merge_step = 0
 
     config.sample.num_steps = 10
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
     config.sample.left_boundary = 1
     config.sample.noise_steps = [1]
-    config.sample.merge_step = 2
+    config.sample.merge_step = 0
     config.sample.guidance_scale = 3.5
 
-    config.enable_gradient_checkpointing = True
-    config.sample.batch_size = 8
-    config.sample.num_image_per_prompt = 24
+    config.enable_gradient_checkpointing = False
+    config.sample.batch_size = 1
+    config.sample.num_image_per_prompt = 16
     config.sample.unique_sample_num_per_epoch = 32 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
@@ -135,9 +136,10 @@ def subfig_clip_flux():
     config.sample.noise_level = 0.9
     config.save_freq = 10 # epoch
     config.eval_freq = 10
-    config.save_dir = os.path.join(SAVE_DIR, f'subfig_clipT_flux_{gpu_number}gpu')
+    config.save_dir = os.path.join(SAVE_DIR, f'subfig_clipT_subfig_clipI_flux_{gpu_number}gpu')
     config.reward_fn = {
-        "subfig_clipT": 1.0,
+        "subfig_clipT": 0.6,
+        'subfig_clipI': 0.4,
     }
 
     config.prompt_fn = "geneval"
@@ -179,7 +181,7 @@ def grid_consistency_clip_flux():
     ## batches
     config.enable_gradient_checkpointing = True
     config.sample.batch_size = 4
-    config.sample.num_image_per_prompt = 24
+    config.sample.num_image_per_prompt = 16
     config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
