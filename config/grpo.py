@@ -246,7 +246,7 @@ def grid_consistency_clip_flux():
 
     # Sampling
     ## sliding window scheduler
-    config.sample.cps = True
+    config.sample.cps = False
     config.sample.num_steps = 6
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
@@ -310,7 +310,7 @@ def grid_consistency_clip_flux():
 
     config.aggregate_fn = agg_fn
 
-    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-test-using-history')
+    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT_8steps')
 
     return config
 
