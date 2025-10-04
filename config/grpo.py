@@ -16,7 +16,7 @@ FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 # SAVE_DIR = 'logs'
 # SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
 SAVE_DIR = '/root/autodl-tmp/Flow_GRPO/logs'
-SAVE_DIR = '/root/siton-tmp/Flow_GRPO/logs'
+# SAVE_DIR = '/root/siton-tmp/Flow_GRPO/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -136,7 +136,7 @@ def subfig_clip_dreamsim_flux():
     config.sample.noise_level = 0.9
     config.save_freq = 20 # epoch
     config.eval_freq = 20
-    config.save_dir = os.path.join(SAVE_DIR, f'subfig_dreamsim_subfig_clipI_flux_{gpu_number}gpu')
+    config.save_dir = os.path.join(SAVE_DIR, f'subfig_dreamsim_subfig_clipI', f'flux_{gpu_number}gpu_10steps_2by2_half')
     config.reward_fn = {
         'subfig_clipT': 0.7,
         "subfig_dreamsim": 0.3,
@@ -213,7 +213,7 @@ def subfig_clip_flux():
     config.sample.noise_level = 0.9
     config.save_freq = 20 # epoch
     config.eval_freq = 20
-    config.save_dir = os.path.join(SAVE_DIR, f'subfig_clipT_subfig_clipI_flux_{gpu_number}gpu')
+    config.save_dir = os.path.join(SAVE_DIR, f'subfig_clipT_subfig_clipI', f"flux_{gpu_number}gpu_10steps_2by2_half")
     config.reward_fn = {
         "subfig_clipT": 0.7,
         'subfig_clipI': 0.3,
