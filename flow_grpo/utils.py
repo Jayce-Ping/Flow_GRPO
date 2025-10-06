@@ -154,8 +154,8 @@ def numpy_list_to_pil_image(numpy_list: List[np.ndarray]) -> List[Image.Image]:
 
 # -------------------------------------Grid Utils-------------------------------------
 def divide_prompt(prompt: str) -> List[str]:
-    # seqis like ". [TOP-LEFT]:"
-    match_sep = re.compile(r"\.\s+[A-Z0-9-\[\]]+:")
+    # seqis like ". [TOP-LEFT]:" or 'xxx." [BOTTOM-RIGHT]:'
+    match_sep = re.compile(r"[\.\"]\s+[A-Z0-9-\[\]]+:")
     seps = match_sep.findall(prompt)
     # Add '.' for each sentence
     sub_prompts = [
