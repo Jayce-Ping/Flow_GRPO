@@ -292,7 +292,7 @@ class EditScorer:
     def __init__(
             self,
             client : AsyncOpenAI,
-            model: str = "EditScore",
+            model: str = "EditScore-7B",
             score_range: int = 25,
     ):
         self.client = client

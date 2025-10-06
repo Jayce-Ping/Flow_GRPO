@@ -193,7 +193,9 @@ def edit_score(device):
         client=AsyncOpenAI(
             api_key='dummy-key',
             base_url='http://127.0.0.1:8000/v1'
-        )
+        ),
+        model='EditScore-7B',
+        score_range=25
     )
 
     def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[np.ndarray, dict]:
