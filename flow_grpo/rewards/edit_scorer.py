@@ -10,9 +10,13 @@ import asyncio
 from typing import List, Union, Optional
 from openai import OpenAI, AsyncOpenAI
 from itertools import combinations
-
+import logging
 
 from ..utils import pil_image_to_base64, divide_image, divide_prompt, extract_grid_info
+
+# VLLM log filter
+logging.getLogger("vllm").setLevel(logging.ERROR)
+logging.getLogger().setLevel(logging.ERROR)
 
 # -----------------------------------------------------utils------------------------------------------------
 def fix_json(input_str):
@@ -310,7 +314,7 @@ class EditScorer:
         messages = [
             {
                 'role': 'user',
-                'content': [{"type": "text", "text": prompt}] + [{"type": "image_url", "image_url": {"url": img}} for img in images]
+                'content': [{"type": "text", "text": prompt}] + [{"type": "image_url", "image_url": {"url": pil_image_to_base64(img)}} for img in images]
             }
         ]
         return messages
@@ -319,7 +323,7 @@ class EditScorer:
         messages = [
             {
                 'role': 'user',
-                'content': [{"type": "text", "text": self.PQ_prompt}, {"type": "image_url", "image_url": {"url": image}}]
+                'content': [{"type": "text", "text": self.PQ_prompt}, {"type": "image_url", "image_url": {"url": pil_image_to_base64(image)}}]
             }
         ]
         return messages
@@ -332,7 +336,6 @@ class EditScorer:
             max_tokens=512, # args following edit score
             temperature=0.7,
             top_p=0.9,
-            top_k=20,
         )
         return response.choices[0].message.content
     
