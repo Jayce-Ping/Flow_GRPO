@@ -247,7 +247,7 @@ def grid_consistency_clip_flux():
     # Sampling
     ## sliding window scheduler
     config.sample.cps = False
-    config.sample.num_steps = 10
+    config.sample.num_steps = 8
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
     config.sample.left_boundary = 1
@@ -290,11 +290,11 @@ def grid_consistency_clip_flux():
     config.train.timestep_fraction = 0.99
     config.train.beta = 0
     config.train.ema = True
-    config.sample.global_std = False
+    config.sample.global_std = True
     config.per_prompt_stat_tracking = True
     config.sample.use_history = False
     config.sample.same_latent = False
-    config.sample.noise_level = 0.9
+    config.sample.noise_level = 0.7
     config.save_freq = 20 # epoch
     config.eval_freq = 20 # 0 for no eval applied
 
