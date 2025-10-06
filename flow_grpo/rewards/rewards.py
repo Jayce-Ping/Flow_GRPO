@@ -186,6 +186,22 @@ def ocr_score(device):
 
     return _fn
 
+def edit_score(device):
+    from flow_grpo.rewards.edit_scorer import EditScorer
+
+    scorer = EditScorer(
+        client=AsyncOpenAI(
+            api_key='dummy-key',
+            base_url='http://127.0.0.1:8000/v1'
+        )
+    )
+
+    def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[np.ndarray, dict]:
+        scores = scorer(images, prompts, metadatas)
+        return scores, {}
+
+    return _fn
+
 def multi_score(
     device: str,
     score_dict: Dict[str, float],
@@ -247,6 +263,7 @@ def multi_score(
         'subfig_clipI': subfig_clipI_score,
         'subfig_dreamsim': subfig_dreamsim_score,
         "grid_layout": grid_layout_score,
+        'edit_score': edit_score,
     }
 
     score_fns = {}
