@@ -363,7 +363,7 @@ class EditScorer:
     async def score_PQ_async(self, image: Image.Image, prompt : str, metadata : dict):
         PQ_messages = self.prepare_PQ_messages(image)
         output = await self.inference(PQ_messages)
-        result = mllm_output_to_dict(output, give_up_parsing=True, text_prompt=prompt)
+        result = mllm_output_to_dict(output, give_up_parsing=False, text_prompt=prompt)
         # If it is well parsed, normalize the score to [0, 1]
         if result and result != "rate_limit_exceeded" and 'score' in result and isinstance(result['score'], list) and len(result['score']) == 2:
             score = result['score']
@@ -375,7 +375,7 @@ class EditScorer:
     async def score_SC_async(self, images: List[Image.Image], prompt : str, metadata : dict):
         SC_messages = self.prepare_SC_messages(images, prompt)
         output = await self.inference(SC_messages)
-        result = mllm_output_to_dict(output, give_up_parsing=True, text_prompt=prompt)
+        result = mllm_output_to_dict(output, give_up_parsing=False, text_prompt=prompt)
         # If it is well parsed, normalize the score to [0, 1]
         if result and result != "rate_limit_exceeded" and 'score' in result and isinstance(result['score'], list) and len(result['score']) == 2:
             score = result['score']
