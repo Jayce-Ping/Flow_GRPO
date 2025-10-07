@@ -65,7 +65,7 @@ def compressibility():
     config.resume_from_id = None
     config.resume_from_step = None
     config.resume_from_epoch = None
-    config.project_name = None
+    config.project_name = 'FlowGRPO-Flux'
     return config
 
 # -----------------------------------------------------------Flux---------------------------------------------------------------
@@ -75,7 +75,7 @@ def subfig_clip_dreamsim_flux():
     config = compressibility()
     
     # flux
-    config.pretrained.model = FLUX_MODEL_PATH
+    config.project_name = 'FlowGRPO-Flux'
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
@@ -96,6 +96,10 @@ def subfig_clip_dreamsim_flux():
     config.sample.left_boundary = 1
     config.sample.noise_steps = [1]
     config.sample.merge_step = 0
+    config.sample.noise_level = 0.9
+    config.sample.global_std = True
+    config.sample.use_history = False
+    config.sample.same_latent = False
     config.sample.guidance_scale = 3.5
 
     config.enable_gradient_checkpointing = False
@@ -129,11 +133,8 @@ def subfig_clip_dreamsim_flux():
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 0.99
     config.train.beta = 0
-    config.sample.global_std = True
-    config.sample.use_history = False
-    config.sample.same_latent = False
     config.train.ema = True
-    config.sample.noise_level = 0.9
+
     config.save_freq = 20 # epoch
     config.eval_freq = 20
     config.save_dir = os.path.join(SAVE_DIR, f'subfig_dreamsim_subfig_clipI', f'flux_{gpu_number}gpu_10steps_2by2_half')
@@ -152,7 +153,7 @@ def subfig_clip_flux():
     config = compressibility()
     
     # flux
-    config.pretrained.model = FLUX_MODEL_PATH
+    config.project_name = 'FlowGRPO-Flux'
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
@@ -229,12 +230,12 @@ def editscore_subfig_clip_flux():
     config = compressibility()
     
     # flux
-    config.pretrained.model = FLUX_MODEL_PATH
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
+    config.project_name = 'FlowGRPO-Flux'
+    config.dataset = os.path.join(os.getcwd(), "dataset/Editing/temp")
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
-    # config.logging_platform = "swanlab"
+    config.logging_platform = "swanlab"
 
     config.enable_flexible_size = False
     config.resolution = 1024
@@ -249,8 +250,12 @@ def editscore_subfig_clip_flux():
     config.sample.window_size = 1
     config.sample.left_boundary = 1
     config.sample.noise_steps = [1]
+    config.sample.noise_level = 0.7
     config.sample.merge_step = 0
     config.sample.guidance_scale = 3.5
+    config.sample.global_std = True
+    config.sample.use_history = False
+    config.sample.same_latent = False
 
     config.enable_gradient_checkpointing = True
     config.sample.batch_size = 4
@@ -283,14 +288,10 @@ def editscore_subfig_clip_flux():
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 0.99
     config.train.beta = 0
-    config.sample.global_std = True
-    config.sample.use_history = False
-    config.sample.same_latent = False
     config.train.ema = True
-    config.sample.noise_level = 0.7
     config.save_freq = 20 # epoch
     config.eval_freq = 20
-    config.save_dir = os.path.join(SAVE_DIR, f'editscore_subclipI', f"flux_{gpu_number}gpu_8steps_2by2_half")
+    config.save_dir = os.path.join(SAVE_DIR, f'editscore_subclipT', f"flux_{gpu_number}gpu_8steps_2by2_half")
     config.reward_fn = {
         "edit_score": 0.2,
         'subfig_clipT': 0.8,
@@ -329,7 +330,11 @@ def grid_consistency_clip_flux():
     config.sample.window_size = 1
     config.sample.left_boundary = 1
     config.sample.noise_steps = [1]
+    config.sample.noise_level = 0.7
     config.sample.merge_step = 0
+    config.sample.global_std = True
+    config.sample.use_history = False
+    config.sample.same_latent = False
     config.sample.guidance_scale = 3.5
 
     ## batches
@@ -367,11 +372,7 @@ def grid_consistency_clip_flux():
     config.train.timestep_fraction = 0.99
     config.train.beta = 0
     config.train.ema = True
-    config.sample.global_std = True
     config.per_prompt_stat_tracking = True
-    config.sample.use_history = False
-    config.sample.same_latent = False
-    config.sample.noise_level = 0.7
     config.save_freq = 20 # epoch
     config.eval_freq = 20 # 0 for no eval applied
 

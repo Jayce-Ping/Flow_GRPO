@@ -398,13 +398,17 @@ class EditScorer:
             SC_tasks.append(self.score_SC_async([img1, img2], edit_prompt, metadata))
         
         # 同时执行 SC 和 PQ 评分
-        SC_scores, PQ_score = await asyncio.gather(
+        # SC_scores, PQ_score = await asyncio.gather(
+        #     asyncio.gather(*SC_tasks) if SC_tasks else asyncio.sleep(0, result=[]),
+        #     self.score_PQ_async(image, prompt, metadata)
+        # )
+        SC_scores = await asyncio.gather(
             asyncio.gather(*SC_tasks) if SC_tasks else asyncio.sleep(0, result=[]),
-            self.score_PQ_async(image, prompt, metadata)
         )
         
         SC_score = np.mean(SC_scores) if len(SC_scores) > 0 else 0.0
 
-        overall_score = math.sqrt(SC_score * PQ_score) # Follow EditScore to use geometric mean
+        overall_score = SC_score # only use SC score
+        # overall_score = math.sqrt(SC_score * PQ_score) # Follow EditScore to use geometric mean
 
         return overall_score
