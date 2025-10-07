@@ -226,7 +226,7 @@ def subfig_clip_flux():
     return config
 
 def editscore_subfig_clip_flux():
-    gpu_number = 2
+    gpu_number = 8
     config = compressibility()
     
     # flux
@@ -235,7 +235,7 @@ def editscore_subfig_clip_flux():
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
-    config.logging_platform = "swanlab"
+    # config.logging_platform = "swanlab"
 
     config.enable_flexible_size = False
     config.resolution = 1024
@@ -257,10 +257,10 @@ def editscore_subfig_clip_flux():
     config.sample.use_history = False
     config.sample.same_latent = False
 
-    config.enable_gradient_checkpointing = True
-    config.sample.batch_size = 4
+    config.enable_gradient_checkpointing = False
+    config.sample.batch_size = 1
     config.sample.num_image_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 8 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_image_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -293,8 +293,8 @@ def editscore_subfig_clip_flux():
     config.eval_freq = 20
     config.save_dir = os.path.join(SAVE_DIR, f'editscore_subclipT', f"flux_{gpu_number}gpu_8steps_2by2_half")
     config.reward_fn = {
-        "edit_score": 0.2,
-        'subfig_clipT': 0.8,
+        "edit_score": 0.3,
+        'subfig_clipT': 0.7,
     }
 
     config.prompt_fn = "geneval"
