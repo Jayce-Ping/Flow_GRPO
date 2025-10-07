@@ -293,7 +293,7 @@ def editscore_subfig_clip_flux():
     config.save_dir = os.path.join(SAVE_DIR, f'editscore_subclipI', f"flux_{gpu_number}gpu_8steps_2by2_half")
     config.reward_fn = {
         "edit_score": 0.2,
-        'subfig_clipI': 0.8,
+        'subfig_clipT': 0.8,
     }
 
     config.prompt_fn = "geneval"
