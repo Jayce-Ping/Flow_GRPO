@@ -231,7 +231,7 @@ def editscore_subfig_clip_flux():
     
     # flux
     config.project_name = 'FlowGRPO-Flux'
-    config.dataset = os.path.join(os.getcwd(), "dataset/Editing/temp")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
@@ -245,12 +245,12 @@ def editscore_subfig_clip_flux():
     config.test.num_steps = 20
     config.test.merge_step = 0
 
-    config.sample.num_steps = 8
+    config.sample.num_steps = 10
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
     config.sample.left_boundary = 1
     config.sample.noise_steps = [1]
-    config.sample.noise_level = 0.7
+    config.sample.noise_level = 0.9
     config.sample.merge_step = 0
     config.sample.guidance_scale = 3.5
     config.sample.global_std = True
