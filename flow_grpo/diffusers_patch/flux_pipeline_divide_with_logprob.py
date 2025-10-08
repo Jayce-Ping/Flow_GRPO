@@ -7,12 +7,16 @@ import math
 from typing import Optional, Union
 
 from diffusers import FluxPipeline, FluxTransformer2DModel
+from diffusers.utils import logging
+from diffusers.pipelines.flux.pipeline_flux import logger
+
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
-from ..scheduler import FlowMatchSlidingWindowScheduler, FlowMatchNoiseScheduler
-# from .denoising_step_with_logprob import denoising_sde_step_with_logprob
+
+from flow_grpo.scheduler import FlowMatchSlidingWindowScheduler, FlowMatchNoiseScheduler
 from flow_grpo.utils import divide_prompt, divide_latents, merge_latents, to_broadcast_tensor
+# from .denoising_step_with_logprob import denoising_sde_step_with_logprob
 
 def gaussian_log_prob(x, mean, var):
     return -((x - mean) ** 2) / (2 * var) - torch.log(torch.sqrt(var)) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
@@ -193,6 +197,7 @@ def compute_log_prob(
     noise_level = pipeline.scheduler.get_noise_level_for_timestep(timestep)
 
     # 2. Prepare prompt_embeds and latents if using dividing
+    logger.setLevel(logging.ERROR) # To silent CLIP overflow warning
     if timestep_index < config.sample.merge_step:
         sub_prompts = sum([divide_prompt(p)[1:] for p in prompt], []) # List of str, length = batch_size*rows*cols
         prompt_embeds, pooled_prompt_embeds, text_ids = pipeline.encode_prompt(
@@ -212,6 +217,7 @@ def compute_log_prob(
             device=device,
             max_sequence_length=config.max_sequence_length,
         )
+    logger.setLevel(logging.WARNING) # Restore logger level
 
     # 3. Prepare image_ids according to the latents
     latents, image_ids = pipeline.prepare_latents(
@@ -347,6 +353,7 @@ def pipeline_with_logprob(
     )
     
     # 3. Encode prompts
+    logger.setLevel(logging.ERROR) # To silent CLIP overflow warning
     (
         prompt_embeds,
         pooled_prompt_embeds,
@@ -375,6 +382,7 @@ def pipeline_with_logprob(
             max_sequence_length=max_sequence_length,
             lora_scale=lora_scale,
         )
+    logger.setLevel(logging.WARNING) # Restore logger level
 
     # 4. Prepare latent variables
     num_channels_latents = pipeline.transformer.config.in_channels // 4
