@@ -820,7 +820,7 @@ These two numbers should be equal
                 )
             # !!! Notice here, after every advantage calculation, the tracker is cleared so that no history is saved.
             # So comment the following clear code if `config.sample.use_history=True` is set
-            # stat_tracker.clear()
+            stat_tracker.clear()
         else:
             advantages = (gathered_rewards['avg'] - gathered_rewards['avg'].mean()) / (gathered_rewards['avg'].std() + 1e-4)
 
