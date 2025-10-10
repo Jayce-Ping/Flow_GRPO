@@ -1296,7 +1296,7 @@ These two numbers should be equal
             # assert accelerator.sync_gradients
 
         with torch.no_grad():
-            decay = return_decay(global_step, config.decay_type)
+            decay = return_decay(global_step, config.train.decay_type)
             for src_param, tgt_param in zip(
                 transformer_trainable_parameters, old_transformer_trainable_parameters, strict=True
             ):
