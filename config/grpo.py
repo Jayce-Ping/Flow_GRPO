@@ -226,7 +226,7 @@ def subfig_clip_flux():
     return config
 
 def editscore_subfig_clip_flux():
-    gpu_number = 8
+    gpu_number = 2
     config = compressibility()
     
     # flux
@@ -235,13 +235,13 @@ def editscore_subfig_clip_flux():
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
-    # config.logging_platform = "swanlab"
+    config.logging_platform = "swanlab"
 
     config.enable_flexible_size = False
     config.resolution = 1024
     config.max_sequence_length = 512
 
-    config.test.batch_size = 6
+    config.test.batch_size = 5
     config.test.num_steps = 20
     config.test.merge_step = 0
 
@@ -257,10 +257,10 @@ def editscore_subfig_clip_flux():
     config.sample.use_history = False
     config.sample.same_latent = False
 
-    config.enable_gradient_checkpointing = False
-    config.sample.batch_size = 1
+    config.enable_gradient_checkpointing = True
+    config.sample.batch_size = 4
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch
+    config.sample.unique_sample_num_per_epoch = 8 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -283,14 +283,14 @@ def editscore_subfig_clip_flux():
     assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
 
     config.train.batch_size = config.sample.batch_size
-    config.train.learning_rate = 3e-4 * config.train.batch_size
+    config.train.learning_rate = 3e-4
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch//2
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 0.99
     config.train.beta = 0
     config.train.ema = True
-    config.save_freq = 20 # epoch
-    config.eval_freq = 20
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10
     config.save_dir = os.path.join(SAVE_DIR, f'editscore_subclipT', f"flux_{gpu_number}gpu_8steps_2by2_half")
     config.reward_fn = {
         "edit_score": 0.3,
