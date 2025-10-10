@@ -693,7 +693,7 @@ def main(_):
     transformer.set_adapter("default")
     transformer_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
     transformer.set_adapter("old")
-    old_transformer_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters())))
+    old_transformer_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
     transformer.set_adapter("default")
 
     for src_param, tgt_param in zip(
