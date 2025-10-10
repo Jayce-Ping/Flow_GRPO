@@ -38,7 +38,7 @@ from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, pipelin
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
-from flow_grpo.datasets.sampler import DistributedKRepeatSampler
+from flow_grpo.datasets.sampler import DistributedGroupKRepeatSampler
 from flow_grpo.scheduler import FlowMatchNoiseScheduler
 from flow_grpo.memory_tracker import MemoryProfiler
 
@@ -749,7 +749,7 @@ def main(_):
         raise NotImplementedError("Specify `prompt_fn` in ['general_ocr', 'geneval']")
 
     # Create an infinite-loop DataLoader
-    train_sampler = DistributedKRepeatSampler( 
+    train_sampler = DistributedGroupKRepeatSampler( 
         dataset=train_dataset,
         batch_size=config.sample.batch_size,
         k=config.sample.num_images_per_prompt,

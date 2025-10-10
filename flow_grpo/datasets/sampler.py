@@ -41,6 +41,9 @@ class DistributedGroupKRepeatSampler(Sampler):
                 end = start + self.batch_size
                 yield repeated_indices[start:end]
 
+    def set_epoch(self, epoch : int):
+        self.epoch = epoch  # Used to synchronize random state across epochs
+
 class DistributedKRepeatSampler(Sampler):
     """
     This class is a new implementation of the distributed K-repeat sampler, used in current code.
@@ -96,8 +99,7 @@ class DistributedKRepeatSampler(Sampler):
         self.epoch = epoch  # Used to synchronize random state across epochs
 
 
-
-if __name__ == "__main__":
+def test_distributed_k_repeat_sampler():
     from prompt_dataset import TextPromptDataset
     num_processes = 4 # 3
     train_batch_size = 4 # 5
@@ -140,7 +142,7 @@ if __name__ == "__main__":
         ) for train_sampler in train_samplers
     ]
 
-    all_samples = []
+    all_samples = [[] for _ in range(num_processes)]
     epoch_num = 3
     for epoch in range(epoch_num):
         for j, sampler in enumerate(train_samplers):
@@ -148,11 +150,74 @@ if __name__ == "__main__":
             loader_iter = iter(train_dataloaders[j])
             for i in range(num_batches_per_epoch):
                 samples = next(loader_iter)
-                all_samples.extend(samples[0])
+                all_samples[j].extend(samples[0])
 
-    # for k,v in sorted(counter.items(), key=lambda item: item[0]):
-    #     short_k = k[:10] if len(k) > 10 else k
-    #     print(f"{short_k:>12}:{v:<6}")
-    counter = Counter(all_samples)
-    print(f"\nTotal unique samples: {len(counter)} / {unique_sample_per_epoch * epoch_num}")
-    print(f"Sample length {Counter(list(counter.values()))}")
+    for i in range(num_processes):
+        counter = Counter(all_samples[i])
+        print(f"\nProcess {i} - Total unique samples: {len(counter)} / {unique_sample_per_epoch * epoch_num}")
+        print(f"Sample length {Counter(list(counter.values()))}")
+
+
+def test_distributed_group_k_repeat_sampler():
+    from prompt_dataset import TextPromptDataset
+    num_processes = 2 # 3
+    train_batch_size = 2 # 5
+    num_images_per_prompt = 3 # 2
+    unique_sample_per_epoch = 16 # 13
+    sample_num_per_batch = num_processes * train_batch_size
+    sample_num_per_epoch = math.lcm(num_images_per_prompt * unique_sample_per_epoch, sample_num_per_batch)
+    num_batches_per_epoch = int(sample_num_per_epoch // sample_num_per_batch)
+    unique_sample_per_epoch = sample_num_per_epoch // num_images_per_prompt
+
+    for var_name in ['train_batch_size', 'num_images_per_prompt', 'num_processes', 'sample_num_per_epoch', 'sample_num_per_batch', 'num_batches_per_epoch', 'unique_sample_per_epoch']:
+        var_value = vars()[var_name]
+        print(f"{var_name:>30}: {var_value:<10}")
+    
+
+    # assert num_batches_per_epoch % 2 == 0, f"Please set config.sample.num_batches_per_epoch {num_batches_per_epoch} to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
+
+
+    dataset = 'dataset/ocr'
+    train_dataset = TextPromptDataset(dataset, 'train')
+    train_samplers = [
+        DistributedGroupKRepeatSampler(
+        dataset=train_dataset,
+        batch_size=train_batch_size,
+        k=num_images_per_prompt,
+        m=unique_sample_per_epoch,
+        num_replicas=num_processes,
+        rank=i,
+        seed=0)
+        for i in range(num_processes)
+    ]
+
+    train_dataloaders = [
+        DataLoader(
+            train_dataset,
+            batch_sampler=train_sampler,
+            num_workers=1,
+            collate_fn=TextPromptDataset.collate_fn,
+            # persistent_workers=True
+        ) for train_sampler in train_samplers
+    ]
+
+    all_samples = [[] for _ in range(num_processes)]
+    epoch_num = 3
+    for epoch in range(epoch_num):
+        for j, sampler in enumerate(train_samplers):
+            sampler.set_epoch(epoch)
+            loader_iter = iter(train_dataloaders[j])
+            for i in range(num_batches_per_epoch):
+                samples = next(loader_iter)
+                all_samples[j].extend(samples[0])
+
+    for i in range(num_processes):
+        counter = Counter(all_samples[i])
+        print(f"\nProcess {i} - Total unique samples: {len(counter)} / {unique_sample_per_epoch * epoch_num}")
+        print(f"Sample length {Counter(list(counter.values()))}")
+
+    # for k,v in sorted
+
+if __name__ == "__main__":
+    # test_distributed_k_repeat_sampler()
+    test_distributed_group_k_repeat_sampler()
