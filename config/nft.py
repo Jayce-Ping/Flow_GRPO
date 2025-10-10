@@ -29,23 +29,28 @@ def compressibility():
     config.use_lora = True
 
     # Sampling
-    config.sample.noise_steps = [2]
-    config.sample.merge_step = 2
+    config.sample.noise_steps = [1]
+    config.sample.merge_step = 0
     config.sample.use_sliding_window = False
     config.sample.left_boundary = 0
     config.sample.window_size = 20
     config.sample.batch_size = 1
     config.sample.num_steps = 20
-    config.sample.num_images_per_prompt = 1
+    config.sample.num_images_per_prompt = 3
+    config.sample.max_group_size = 16
     config.sample.num_batches_per_epoch = 4
     config.sample.guidance_scale = 3.5
     config.sample.cps = False
+    config.sample.noise_level = 0.7
+    config.sample.global_std = True
 
     # Training
     config.enable_flexible_size = True
     config.train.batch_size = 4
     config.train.gradient_accumulation_steps = 2
     config.enable_gradient_checkpointing = True
+    config.train.nft_beta = 1
+    config.train.decay_type = 1
 
     # Testing
     config.test.batch_size = 4
@@ -65,7 +70,7 @@ def compressibility():
     config.resume_from_id = None
     config.resume_from_step = None
     config.resume_from_epoch = None
-    config.project_name = 'FlowGRPO-Flux'
+    config.project_name = 'ConsistencyNFT-Flux'
     return config
 
 # -----------------------------------------------------------Flux---------------------------------------------------------------

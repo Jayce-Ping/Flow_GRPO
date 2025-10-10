@@ -44,7 +44,7 @@ def get_config():
     sample.guidance_scale = 4.5
     # batch size (per GPU!) to use for sampling.
     sample.batch_size = 1
-    sample.num_image_per_prompt = 1
+    sample.num_images_per_prompt = 1
     # number of batches to sample per epoch. the total number of samples per epoch is `num_batches_per_epoch *
     # batch_size * num_gpus`.
     sample.num_batches_per_epoch = 2

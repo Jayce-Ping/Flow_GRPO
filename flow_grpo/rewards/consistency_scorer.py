@@ -22,8 +22,10 @@ from flow_grpo.utils import get_yes_cond_prob_from_completion
 # VLLM log filter
 logging.getLogger("vllm").setLevel(logging.ERROR)
 logging.getLogger().setLevel(logging.ERROR)
-
 class ConsistencyScorer:
+    """
+        This class tasks a list of combined images (a grid layout image) and a list of corresponding prompts to compute consistency scores.
+    """
     def __init__(
             self,
             client: AsyncOpenAI,

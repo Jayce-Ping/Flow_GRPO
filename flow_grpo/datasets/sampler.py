@@ -3,6 +3,44 @@ import torch
 from torch.utils.data import Sampler, Dataset, DataLoader
 from collections import Counter
 
+
+class DistributedGroupKRepeatSampler(Sampler):
+    """
+    
+        This class make sure all samples in one group is on the same device.
+    """
+    def __init__(self, dataset : Dataset, batch_size : int, k : int, m : int, num_replicas : int, rank : int, seed :int = 0):
+        self.dataset = dataset
+        self.batch_size = batch_size  # Batch size per replica
+        self.k = k                    # Number of repetitions per sample
+        self.m = m                    # `Least` number of unique sample per epoch
+        self.num_replicas = num_replicas  # Total number of replicas, process num, gpu num
+        self.rank = rank              # Current replica rank
+        self.seed = seed              # Random seed for synchronization
+
+        # To make sure all samples in one group is on the same device, num_samples_per_device should be multiple of k
+        assert (k * m) % (num_replicas * batch_size) == 0, f"Please set config.sample.m (={m}) to make sure k*m (={k*m}) is divisible by num_replicas*batch_size (={num_replicas*batch_size})!"
+        self.sample_num_per_epoch = k * m  # Total sample number per epoch
+        self.num_batches_per_epoch = int(self.sample_num_per_epoch // (self.num_replicas * self.batch_size))  # Number of batches per epoch per replica
+        self.epoch = 0
+    
+    def __iter__(self):
+        while True:
+            # Generate a deterministic random sequence to ensure all replicas are synchronized
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+            
+            # Randomly select m unique samples
+            indices = torch.randperm(len(self.dataset), generator=g)[:self.m].tolist()
+
+            # Repeat each sample k times to generate m*k total samples.
+            repeated_indices = [idx for idx in indices for _ in range(self.k)]
+            # Distribute samples to replicas
+            for i in range(0, self.sample_num_per_epoch // self.num_replicas, self.batch_size):
+                start = self.rank * (self.sample_num_per_epoch // self.num_replicas) + i
+                end = start + self.batch_size
+                yield repeated_indices[start:end]
+
 class DistributedKRepeatSampler(Sampler):
     """
     This class is a new implementation of the distributed K-repeat sampler, used in current code.
@@ -63,14 +101,14 @@ if __name__ == "__main__":
     from prompt_dataset import TextPromptDataset
     num_processes = 4 # 3
     train_batch_size = 4 # 5
-    num_image_per_prompt = 13 # 2
+    num_images_per_prompt = 13 # 2
     unique_sample_per_epoch = 1 # 13
     sample_num_per_batch = num_processes * train_batch_size
-    sample_num_per_epoch = math.lcm(num_image_per_prompt * unique_sample_per_epoch, sample_num_per_batch)
+    sample_num_per_epoch = math.lcm(num_images_per_prompt * unique_sample_per_epoch, sample_num_per_batch)
     num_batches_per_epoch = int(sample_num_per_epoch // sample_num_per_batch)
-    unique_sample_per_epoch = sample_num_per_epoch // num_image_per_prompt
+    unique_sample_per_epoch = sample_num_per_epoch // num_images_per_prompt
 
-    for var_name in ['train_batch_size', 'num_image_per_prompt', 'num_processes', 'sample_num_per_epoch', 'sample_num_per_batch', 'num_batches_per_epoch', 'unique_sample_per_epoch']:
+    for var_name in ['train_batch_size', 'num_images_per_prompt', 'num_processes', 'sample_num_per_epoch', 'sample_num_per_batch', 'num_batches_per_epoch', 'unique_sample_per_epoch']:
         var_value = vars()[var_name]
         print(f"{var_name:>30}: {var_value:<10}")
     
@@ -84,7 +122,7 @@ if __name__ == "__main__":
         DistributedKRepeatSampler(
         dataset=train_dataset,
         batch_size=train_batch_size,
-        k=num_image_per_prompt,
+        k=num_images_per_prompt,
         m=unique_sample_per_epoch,
         num_replicas=num_processes,
         rank=i,

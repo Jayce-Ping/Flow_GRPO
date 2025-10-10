@@ -12,6 +12,18 @@ import numpy as np
 import openai
 from accelerate import Accelerator
 
+# ------------------------------------Combination Utils---------------------------------------
+
+def num_to_base_tuple(num, base, length):
+    """
+        Convert a `num` to given `base` and pad left with 0 to form a `length`-tuple
+    """
+    result = np.zeros(length, dtype=int)
+    for i in range(length - 1, -1, -1):
+        result[i] = num % base
+        num //= base
+    return tuple(result)
+
 # -------------------------------------Image Utils-------------------------------------
 
 def pil_image_to_base64(image : Image.Image, format="JPEG") -> str:

@@ -545,7 +545,7 @@ def main(_):
     train_sampler = DistributedKRepeatSampler( 
         dataset=train_dataset,
         batch_size=config.sample.batch_size,
-        k=config.sample.num_image_per_prompt,
+        k=config.sample.num_images_per_prompt,
         m=config.sample.unique_sample_num_per_epoch,
         num_replicas=accelerator.num_processes,
         rank=accelerator.process_index,
@@ -577,7 +577,7 @@ def main(_):
     sample_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(config.sample.batch_size, 1)
     train_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(config.train.batch_size, 1)
 
-    if config.sample.num_image_per_prompt == 1:
+    if config.sample.num_images_per_prompt == 1:
         config.per_prompt_stat_tracking = False
     # Initialize stat tracker
     if config.per_prompt_stat_tracking:
