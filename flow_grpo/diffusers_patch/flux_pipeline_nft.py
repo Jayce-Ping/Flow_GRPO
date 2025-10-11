@@ -481,9 +481,8 @@ def pipeline_with_logprob(
                 latents = latents.view(batch_size, layout[0], layout[1], -1, latents.shape[-1]) # (B, rows, cols, sub_seq_len, C)
                 latents = merge_latents(latents, height, width, sub_height, sub_width) # (B, seq_len, C)
 
-            if current_noise_level > 0:
-                all_latents.append(latents)
-                all_timestep_indices.append(i)
+            all_latents.append(latents)
+            all_timestep_indices.append(i)
     
             # call the callback, if provided
             if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % pipeline.scheduler.order == 0):

@@ -22,7 +22,7 @@ def num_to_base_tuple(num, base, length):
     for i in range(length - 1, -1, -1):
         result[i] = num % base
         num //= base
-    return tuple(result)
+    return tuple(result.tolist())
 
 # -------------------------------------Image Utils-------------------------------------
 

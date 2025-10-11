@@ -11,7 +11,7 @@ import sys
 import tempfile
 import time
 import torch
-import tqdm
+import tqdm as tqdm_
 from typing import List, Tuple, Any, Optional
 import shutil
 from itertools import permutations, combinations, product
@@ -42,7 +42,7 @@ from flow_grpo.datasets.sampler import DistributedGroupKRepeatSampler
 from flow_grpo.scheduler import FlowMatchNoiseScheduler
 from flow_grpo.memory_tracker import MemoryProfiler
 
-tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
+tqdm = partial(tqdm_.tqdm, dynamic_ncols=True)
 
 FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", "config/base.py", "Training configuration.")
@@ -84,6 +84,7 @@ def return_decay(step, decay_type):
 
 def augment_and_reward_compute(
     accelerator : Accelerator,
+    pipeline : FluxPipeline,
     config : Namespace,
     samples : List[dict],
     reward_fn,
@@ -107,9 +108,14 @@ def augment_and_reward_compute(
         sub_height = height // layout[0]
         sub_width = width // layout[1]
         subimage_cnt = layout[0] * layout[1]
-        all_sublatents = torch.stack([divide_latents(sample['latents'], height, width, sub_height, sub_width) for sample in group_samples], dim=0)
+        all_sublatents = torch.cat(
+            [
+                divide_latents(sample['latents'], height, width, sub_height, sub_width) # (1, layout[0], layout[1], sub_seq_len, C)
+                for sample in group_samples
+        ], dim=0)# (group_size, layout[0], layout[1], sub_seq_len, C)
+        all_sublatents = all_sublatents.view(group_size, subimage_cnt, *all_sublatents.shape[3:]) # (group_size, subimage_cnt, sub_seq_len, C)
         # A 2x2 image group of size 3 can generate 3^(2x2) = 81 different images, use a max_group_size to constraint
-        total_combinations = config.sample.group_size ** subimage_cnt
+        total_combinations = group_size ** subimage_cnt
         sample_num = total_combinations
         if max_group_size is not None:
             sample_num = min(max_group_size, sample_num)
@@ -134,9 +140,20 @@ def augment_and_reward_compute(
         # Decode index to tuple
         sample_indices = [num_to_base_tuple(idx, group_size, subimage_cnt) for idx in sample_indices]
 
-        for idx in sample_indices:
+        # The i-th sub-image is from the idx[i]-th image in the group
+        sample_indices = [
+            [(idx[i], i) for i in range(len(idx))]
+            for idx in sample_indices
+        ]
+
+        for indices in sample_indices:
+            sampled_sublatents = torch.stack(
+                [all_sublatents[i,j] for i,j in indices],
+                dim=0
+            ).view(1, layout[0], layout[1], *all_sublatents.shape[2:]) # (1, layout[0], layout[1], sub_seq_len, C)
+            
             sampled_sublatents = merge_latents(
-                torch.stack([all_sublatents[j,i] for i,j in enumerate(idx)], dim=0),
+                sampled_sublatents,
                 height,
                 width,
                 sub_height,
@@ -144,19 +161,31 @@ def augment_and_reward_compute(
             )
             new_sample = group_samples[0].copy()
             new_sample['latents'] = sampled_sublatents
-            new_sample['made_of'] = idx
+            new_sample['made_of'] = indices
             augmented_samples.append(new_sample)
 
     # Compute reward for each sample
     # TODO: group reward computation can be optimized here
     # Some subfigs will be paired multiple times for reward computation
-    for i in range(0, len(augmented_samples), config.train.batch_size):
+    cnt = defaultdict(int)
+    for i in tqdm(
+        range(0, len(augmented_samples), config.train.batch_size),
+        desc="Computing rewards",
+        disable=not accelerator.is_local_main_process
+    ):
         # Compute reward with train.batch_size to avoid OOM
         # HOW?
         # 1. encode criteria and communicate
-        # 2. modift sampler to make sure all group of one prompt is in one gpu (looks better)
+        # 2. modify sampler to make sure all group of one prompt is in one gpu (looks better)
         batch = augmented_samples[i : i + config.train.batch_size]
-        images = [tensor_to_pil_image(sample['latents'])[0] for sample in batch]
+        # Convert latents to images
+        latents = torch.cat([sample['latents'] for sample in batch], dim=0).to(accelerator.device)
+        latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
+        latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
+        latents = latents.to(dtype=pipeline.vae.dtype)
+        images = pipeline.vae.decode(latents, return_dict=False)[0]
+        images = pipeline.image_processor.postprocess(images, output_type='pil')
+        # Compute reward
         prompts = [sample['prompt'] for sample in batch]
         prompt_metadatas = [sample.get('metadata', {}) for sample in batch]
         future = executor.submit(reward_fn, images, prompts, prompt_metadatas)
@@ -170,7 +199,6 @@ def augment_and_reward_compute(
 
         for sample, reward in zip(batch, rewards):
             sample['rewards'] = reward
-            del sample['metadata']
 
     return augmented_samples
 
@@ -790,8 +818,8 @@ These two numbers should be equal
         stat_tracker = PerPromptStatTracker(config.sample.global_std, config.sample.use_history)
 
     # For some reason, autocast is necessary for non-lora training but for lora training it isn't necessary and it uses more memory
-    autocast = contextlib.nullcontext if config.use_lora else accelerator.autocast
-    # autocast = accelerator.autocast
+    # autocast = contextlib.nullcontext if config.use_lora else accelerator.autocast
+    autocast = accelerator.autocast
 
     # for deepspeed zero
     if accelerator.state.deepspeed_plugin:
@@ -906,7 +934,10 @@ These two numbers should be equal
             heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
             widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
             layouts = [prompt_meta.get('layout', '1x1') for prompt_meta in prompt_metadata]
-            layouts = [tuple(map(int, l.split('x'))) for l in layouts] # Convert '2x3' to (2, 3)
+            layouts = [
+                tuple(map(int, l.split('x'))) if isinstance(l, str) else tuple(map(int, l))
+                for l in layouts
+            ] # Convert '2x3' to (2, 3)
             # Fixed size training requires all heights and widths in the batch to be the same
             if not config.enable_flexible_size:
                 assert all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths), \
@@ -938,10 +969,10 @@ These two numbers should be equal
                             merge_step=config.sample.merge_step
                     )
                     # images: (batch_size, C, H, W) -> List[Tensor(C, H, W)] with length batch_size
-                    # all_latents: List[Tensor(batch_size C, H, W)] with length windowsize+1 -> List[Tensor(num_train_steps + 1, C, H, W)] with length batch_size
+                    # all_latents: List[Tensor(batch_size C, H, W)] with length windowsize+1 -> List[Tensor(num_steps + 1, C, H, W)] with length batch_size
                     images = list(images.unbind(0)) # List[Tensor(C, H, W)] with length batch_size
-                    all_latents = torch.stack(all_latents, dim=1) # (batch_size, num_train_steps + 1, C, H, W)
-                    all_latents = list(all_latents.unbind(0)) # List[Tensor(num_train_steps + 1, C, H, W)] with length batch_size
+                    all_latents = torch.stack(all_latents, dim=1) # (batch_size, num_steps + 1, C, H, W)
+                    all_latents = list(all_latents.unbind(0)) # List[Tensor(num_steps + 1, C, H, W)] with length batch_size
             else:
                 # Different sizes, have to do one by one
                 images = []
@@ -962,11 +993,11 @@ These two numbers should be equal
                                 merge_step=config.sample.merge_step
                         )
                     images.append(this_image.squeeze(0))  # add (C, H, W)
-                    all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_train_steps + 1, C, H, W)
+                    all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_steps + 1, C, H, W)
 
                 # images: List[Tensor(C, H, W)] with length batch_size
-                # all_latents: List[Tensor(num_train_steps + 1, C, H, W)] with length batch_size
-            
+                # all_latents: List[Tensor(num_steps + 1, C, H, W)] with length batch_size
+
             # Final `samples` is List[Dict], with length = config.sample.batch_size * config.sample.num_batches_per_epoch
             samples.extend(
                 [
@@ -977,7 +1008,7 @@ These two numbers should be equal
                         'prompt': prompts[index],
                         'metadata': prompt_metadata[index],
                         'timestep_indices': timestep_indices,
-                        'timesteps': pipeline.scheduler.timesteps[timestep_indices].cpu().numpy().tolist(),
+                        'timesteps': pipeline.scheduler.timesteps[timestep_indices].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'prompt_ids': prompt_ids[index].unsqueeze(0), # Keep batch dimension as 1
                         'prompt_embeds': prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'pooled_prompt_embeds': pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
@@ -993,15 +1024,15 @@ These two numbers should be equal
 
         transformer.set_adapter("default")
 
-        if hasattr(config.sample, 'subfig_permutation') and config.sample.subfig_permutation:
-            # Augment samples by combining different groups
-            samples = augment_and_reward_compute(
-                accelerator,
-                config,
-                samples,
-                reward_fn,
-                executor
-            )
+        # Augment samples by combining different groups
+        samples = augment_and_reward_compute(
+            accelerator,
+            pipeline,
+            config,
+            samples,
+            reward_fn,
+            executor
+        )
 
         # Gather rewards across all samples
         gathered_rewards = {
@@ -1084,6 +1115,7 @@ These two numbers should be equal
         for sample in samples:
             del sample["rewards"]
             del sample["prompt_ids"]
+            del sample['metadata']
 
         #################### TRAINING ####################
         if config.enable_mem_log:
@@ -1096,32 +1128,29 @@ These two numbers should be equal
             perm = torch.randperm(total_batch_size)
             samples = [samples[i] for i in perm]
 
-            if config.enable_flexible_size:
-                assert config.train.batch_size == 1, "Only batch size 1 is supported for flexible size training"
-            else:
-                # sample:{
-                # 'height': int,
-                # 'width': int,
-                # 'layout': (int, int),
-                # 'prompt': str,
-                # 'timestep_indices': list[int],
-                # 'latents': Tensor(1, num_train_steps + 1, C, H
-                # 'next_latents': Tensor(1, num_train_steps + 1, C, H, W),
-                # 'log_probs': Tensor(1, num_train_steps),
-                # 'advantages': Tensor(1, 1),
-                # }
-                keys = samples[0].keys()
-                samples = [samples[i:i+config.train.batch_size] for i in range(0, total_batch_size, config.train.batch_size)]
-                samples = [
-                    {
-                         # Catenate along batch dimension if the entry is Tensor
-                        k: torch.cat([s[k] for s in batch], dim=0)
-                        if isinstance(batch[0][k], torch.Tensor)
-                        else [batch[_][k] for _ in range(config.train.batch_size)] # for other type -  cat to a list
-                        for k in keys
-                    }
-                    for batch in samples
-                ]
+            # sample:{
+            # 'height': int,
+            # 'width': int,
+            # 'layout': (int, int),
+            # 'prompt': str,
+            # 'timestep_indices': list[int],
+            # 'latents': Tensor(1, num_train_steps + 1, C, H
+            # 'next_latents': Tensor(1, num_train_steps + 1, C, H, W),
+            # 'log_probs': Tensor(1, num_train_steps),
+            # 'advantages': Tensor(1, 1),
+            # }
+            keys = samples[0].keys()
+            samples = [samples[i:i+config.train.batch_size] for i in range(0, total_batch_size, config.train.batch_size)]
+            samples = [
+                {
+                        # Catenate along batch dimension if the entry is Tensor
+                    k: torch.cat([s[k] for s in batch], dim=0)
+                    if isinstance(batch[0][k], torch.Tensor)
+                    else [batch[_][k] for _ in range(config.train.batch_size)] # for other type -  cat to a list
+                    for k in keys
+                }
+                for batch in samples
+            ]
 
 
             pipeline.transformer.train()
@@ -1145,33 +1174,56 @@ These two numbers should be equal
 
                     with accelerator.accumulate(transformer):
                         # Use DiffusionNFT loss computation logic
+                        height = sample['height'][0]
+                        width = sample['width'][0]
+                        batch_size = sample['latents'].shape[0]
                         x0 = sample["latents"] # Clear latents
+                        x0_dtype = x0.dtype
+                        guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
 
-                        t = sample['timesteps'][:, j].to(accelerator.device) # shape (batch_size,)
+                        t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0_dtype) # shape (batch_size,)
 
-                        t_expanded = t.view(-1, *((1,) * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
+                        t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
 
                         noise = torch.randn_like(x0)
 
                         xt = (1 - t_expanded) * x0 + t_expanded * noise
+
+                        xt, latent_image_ids = pipeline.prepare_latents(
+                            batch_size=batch_size,
+                            num_channels_latents=xt.shape[2] // 4,
+                            height=height,
+                            width=width,
+                            device=accelerator.device,
+                            dtype=x0_dtype,
+                            generator=None,
+                            latents=xt
+                        )
+                        text_ids = torch.zeros(prompt_embeds.shape[1], 3).to(device=accelerator.device, dtype=x0_dtype)
 
                         with autocast():
                             with torch.no_grad():
                                 transformer.module.set_adapter("old")
                                 old_v_pred = transformer(
                                     hidden_states=xt,
-                                    timestep=t,
+                                    timestep=t / 1000,
+                                    guidance=guidance.expand(xt.shape[0]),
                                     encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                     pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                                    img_ids=latent_image_ids,
+                                    txt_ids=text_ids,
                                     return_dict=False,
                                 )[0].detach()
 
                             transformer.module.set_adapter("default")
                             new_v_pred = transformer(
                                 hidden_states=xt,
-                                timestep=t,
+                                timestep=t / 1000,
+                                guidance=guidance.expand(xt.shape[0]),
                                 encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                 pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                                img_ids=latent_image_ids,
+                                txt_ids=text_ids,
                                 return_dict=False,
                             )[0]
 
@@ -1179,9 +1231,12 @@ These two numbers should be equal
                                 with transformer.module.disable_adapter():
                                     v_ref = transformer(
                                         hidden_states=xt,
-                                        timestep=t,
+                                        timestep=t / 1000,
+                                        guidance=guidance.expand(xt.shape[0]),
                                         encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                         pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                                        img_ids=latent_image_ids,
+                                        txt_ids=text_ids,
                                         return_dict=False,
                                     )[0]
 
@@ -1201,10 +1256,8 @@ These two numbers should be equal
                         loss_terms["old_deviate_max"] = torch.max((new_v_pred - old_v_pred) ** 2).detach()
                         positive_prediction = config.train.nft_beta * new_v_pred + (1 - config.train.nft_beta) * old_v_pred.detach()
 
-                        implicit_negative_prediction = (
-                            1.0 + config.train.nft_beta
-                        ) * old_v_pred.detach() - config.train.nft_beta * new_v_pred
-
+                        implicit_negative_prediction = (1.0 + config.train.nft_beta) * old_v_pred.detach() - config.train.nft_beta * new_v_pred
+                        
                         # adaptive weighting
                         x0_prediction = xt - t_expanded * positive_prediction
                         with torch.no_grad():
@@ -1215,7 +1268,7 @@ These two numbers should be equal
                             )
 
                         positive_loss = ((x0_prediction - x0) ** 2 / weight_factor).mean(dim=tuple(range(1, x0.ndim)))
-
+        
                         negative_x0_prediction = xt - t_expanded * implicit_negative_prediction
                         with torch.no_grad():
                             negative_weight_factor = (
@@ -1227,7 +1280,7 @@ These two numbers should be equal
                             dim=tuple(range(1, x0.ndim))
                         )
 
-                        ori_policy_loss = r * positive_loss / config.train.nft_beta + (1.0 - r) * negative_loss / config.train.nft_beta
+                        ori_policy_loss = (r * positive_loss  + (1.0 - r) * negative_loss) / config.train.nft_beta
                         policy_loss = (ori_policy_loss * config.train.adv_clip_max).mean()
 
                         loss = policy_loss

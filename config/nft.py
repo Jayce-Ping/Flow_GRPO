@@ -15,7 +15,7 @@ FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 # FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21"
 # SAVE_DIR = 'logs'
 # SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
-SAVE_DIR = '/root/siton-tmp/Flow_GRPO/logs'
+SAVE_DIR = '/root/siton-tmp/Flow_NFT/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -47,6 +47,7 @@ def compressibility():
     config.enable_flexible_size = True
     config.train.batch_size = 4
     config.train.gradient_accumulation_steps = 2
+    config.train.gradient_step_per_epoch = 2
     config.enable_gradient_checkpointing = True
     config.train.nft_beta = 1
     config.train.decay_type = 1
@@ -116,8 +117,9 @@ def grid_consistency_clip_flux():
     ## batches
     config.enable_gradient_checkpointing = True
     config.sample.batch_size = 2
-    config.sample.num_images_per_prompt = 3
-    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch
+    config.sample.num_images_per_prompt = 2
+    config.sample.max_group_size = 8
+    config.sample.unique_sample_num_per_epoch = 4 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
@@ -132,12 +134,12 @@ def grid_consistency_clip_flux():
 
     config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
 
-    assert config.sample.num_batches_per_epoch % 2 == 0, "Please set config.sample.num_batches_per_epoch to an even number! This ensures that config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch / 2, so that gradients are updated twice per epoch."
-
     # Training
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
-    config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // 2
+    config.train.gradient_step_per_epoch = 1
+    assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
+    config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 0.99
     config.train.beta = 0
@@ -146,8 +148,8 @@ def grid_consistency_clip_flux():
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
-    config.save_freq = 20 # epoch
-    config.eval_freq = 20 # 0 for no eval applied
+    config.save_freq = 0 # epoch
+    config.eval_freq = 0 # 0 for no eval applied
 
     config.reward_fn = {
         "grid_layout": 1.0,
