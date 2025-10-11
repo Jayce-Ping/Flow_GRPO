@@ -134,8 +134,11 @@ def augment_and_reward_compute(
             sample_indices.append(base_idx)
 
         remaining = sample_num - len(sample_indices)
-        all_indices = set(range(total_combinations)) - set(sample_indices)
-        sample_indices.extend(random.sample(list(all_indices), remaining))
+        if remaining <= 0:
+            sample_indices = random.sample(sample_indices, sample_num)
+        else:
+            all_indices = set(range(total_combinations)) - set(sample_indices)
+            sample_indices.extend(random.sample(list(all_indices), remaining))
 
         # Decode index to tuple
         sample_indices = [num_to_base_tuple(idx, group_size, subimage_cnt) for idx in sample_indices]
@@ -787,13 +790,6 @@ def main(_):
         seed=config.seed
     )
 
-    assert config.sample.num_batches_per_epoch == train_sampler.num_batches_per_epoch, \
-        f"""
-config.sample.num_batches_per_epoch={config.sample.num_batches_per_epoch},
-train_sampler.num_batches_per_epoch={train_sampler.num_batches_per_epoch},
-These two numbers should be equal
-        """
-
     # Create a DataLoader; note that shuffling is not needed here because it’s controlled by the Sampler.
     train_dataloader = DataLoader(
         train_dataset,
@@ -915,7 +911,7 @@ These two numbers should be equal
         transformer.set_adapter("old")
         samples = []
         for i in tqdm(
-            range(train_sampler.num_batches_per_epoch),
+            range(train_sampler.num_batches_per_epoch), # This number is not equal to config.sample.num_batches_per_epoch, and should be smaller.
             desc=f"Epoch {epoch}: sampling",
             disable=not accelerator.is_local_main_process,
             position=0,
@@ -1143,7 +1139,7 @@ These two numbers should be equal
             samples = [samples[i:i+config.train.batch_size] for i in range(0, total_batch_size, config.train.batch_size)]
             samples = [
                 {
-                        # Catenate along batch dimension if the entry is Tensor
+                    # Catenate along batch dimension if the entry is Tensor
                     k: torch.cat([s[k] for s in batch], dim=0)
                     if isinstance(batch[0][k], torch.Tensor)
                     else [batch[_][k] for _ in range(config.train.batch_size)] # for other type -  cat to a list

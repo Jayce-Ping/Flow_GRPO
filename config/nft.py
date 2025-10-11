@@ -121,15 +121,13 @@ def grid_consistency_clip_flux():
     config.sample.max_group_size = 8
     config.sample.unique_sample_num_per_epoch = 4 # Number of unique prompts used in each epoch
     config.sample.sample_num_per_epoch = math.lcm(
-        config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
+        config.sample.max_group_size * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
     ) # Total number of sample on all processes, to make sure all unique prompts are included `num_images_per_prompt` times.
 
     # Update number of unique prompt per epoch and check balance
-    unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.num_images_per_prompt
-    num_images_per_prompt = config.sample.sample_num_per_epoch // config.sample.unique_sample_num_per_epoch
+    unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.max_group_size
     assert unique_sample_num_per_epoch % gpu_number == 0, f"""Assure all samples of one prompt are on the same GPU."""
-    config.sample.num_images_per_prompt = num_images_per_prompt
     config.sample.unique_sample_num_per_epoch = unique_sample_num_per_epoch
 
     config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
