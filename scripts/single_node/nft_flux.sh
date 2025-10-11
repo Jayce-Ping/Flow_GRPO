@@ -1,6 +1,6 @@
-export CUDA_VISIBLE_DEVICES=0,1
+# export CUDA_VISIBLE_DEVICES=0,1
 export WANDB_API_KEY="66795f41320baafdbf8b4a19b62dce232ded0c2e"
-export WANDB_MODE=disabled
+# export WANDB_MODE=disabled
 
 if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
     # Audo-set number of GPUs if not set

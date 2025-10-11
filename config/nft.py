@@ -14,7 +14,7 @@ spec.loader.exec_module(base)
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 # FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21"
 # SAVE_DIR = 'logs'
-SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
+SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_NFT/logs'
 # SAVE_DIR = '/root/siton-tmp/Flow_NFT/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
@@ -84,7 +84,7 @@ def grid_consistency_clip_flux():
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
-    config.logging_platform = "swanlab"
+    # config.logging_platform = "swanlab"
 
     config.enable_flexible_size = False
     config.resolution = 1024
@@ -162,7 +162,7 @@ def grid_consistency_clip_flux():
 
     config.aggregate_fn = agg_fn
 
-    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-nft-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT_8steps')
+    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT_8steps')
 
     return config
 
