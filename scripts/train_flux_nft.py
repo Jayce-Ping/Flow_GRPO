@@ -94,7 +94,7 @@ def augment_and_reward_compute(
     for sample in samples:
         prompt_to_samples[sample['prompt']].append(sample)
 
-    if hasattr(config.train, 'max_group_size'):
+    if hasattr(config.sample, 'max_group_size') and config.sample.max_group_size is not None:
         max_group_size = config.sample.max_group_size
     else:
         max_group_size = None

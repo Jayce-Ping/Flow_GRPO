@@ -14,8 +14,8 @@ spec.loader.exec_module(base)
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 # FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21"
 # SAVE_DIR = 'logs'
-# SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
-SAVE_DIR = '/root/siton-tmp/Flow_NFT/logs'
+SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
+# SAVE_DIR = '/root/siton-tmp/Flow_NFT/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -76,7 +76,7 @@ def compressibility():
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
 def grid_consistency_clip_flux():
-    gpu_number = 2
+    gpu_number = 7
     config = compressibility()
 
     config.project_name = 'FlowGRPO-Flux'
@@ -115,21 +115,22 @@ def grid_consistency_clip_flux():
     config.sample.global_std = True
 
     ## batches
-    config.enable_gradient_checkpointing = True
-    config.sample.batch_size = 2
-    config.sample.num_images_per_prompt = 2
-    config.sample.max_group_size = 8
-    config.sample.unique_sample_num_per_epoch = 4 # Number of unique prompts used in each epoch
+    config.enable_gradient_checkpointing = False
+    config.sample.batch_size = 1
+    config.sample.num_images_per_prompt = 3
+    config.sample.max_group_size = 16
+    config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch all gathered
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.max_group_size * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
-    ) # Total number of sample on all processes, to make sure all unique prompts are included `num_images_per_prompt` times.
+    ) # Total number of sample on all processes
 
     # Update number of unique prompt per epoch and check balance
     unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.max_group_size
     assert unique_sample_num_per_epoch % gpu_number == 0, f"""Assure all samples of one prompt are on the same GPU."""
     config.sample.unique_sample_num_per_epoch = unique_sample_num_per_epoch
 
+    # number of batches per epoch per GPU
     config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
 
     # Training
@@ -146,8 +147,8 @@ def grid_consistency_clip_flux():
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
-    config.save_freq = 0 # epoch
-    config.eval_freq = 0 # 0 for no eval applied
+    config.save_freq = 20 # epoch
+    config.eval_freq = 20 # 0 for no eval applied
 
     config.reward_fn = {
         "grid_layout": 1.0,
@@ -161,7 +162,7 @@ def grid_consistency_clip_flux():
 
     config.aggregate_fn = agg_fn
 
-    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT_8steps')
+    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-nft-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT_8steps')
 
     return config
 
