@@ -322,6 +322,109 @@ def multi_score(
 
     return _fn
 
+
+# ------------------------------------------------Rewards for grid-layout consistency-subfig------------------------------------------------
+
+def single_image_score(
+    device: str,
+    score_names: list[str]
+):
+    """
+    Convert a list of score names into a dictionary that maps each score to its scoreing function.
+    Args:
+        device: The device (e.g., "cuda" or "cpu") on which to run the reward functions.
+        
+        score_names (List[str]): A list of reward function names to include.
+    Returns:
+        Dict[str, Callable]: A dictionary mapping each score name to its corresponding scoring function.
+    Note:
+        A `single_image_score` function takes as input:
+            - images (List[Image.Image] or np.ndarray or torch.Tensor): The batch of images to evaluate.
+            - prompts (List[str]): The corresponding text prompts for the images.
+            - metadata (List[dict]): Additional metadata for each image/prompt pair.
+        The returned function outputs:
+            - A numpy array of scores for each image in the batch.
+            - A dictionary containing detailed reward information (mostly empty).
+    """
+    score_functions = {
+        "ocr": ocr_score,
+        "imagereward": imagereward_score,
+        "pickscore": pickscore_score,
+        "aesthetic": aesthetic_score,
+        "jpeg_compressibility": jpeg_compressibility,
+        "clipscore": clip_score,
+        "consistency_score": consistency_score,
+        "subfig_clipT": subfig_clipT_score,
+        'subfig_clipI': subfig_clipI_score,
+        'subfig_dreamsim': subfig_dreamsim_score,
+        "grid_layout": grid_layout_score,
+        'edit_score': edit_score,
+    }
+
+    score_fns = {}
+
+    for score_name in score_names:
+        factory = score_functions.get(score_name)
+        if factory is None:
+            raise ValueError(f"Unknown score: {score_name}")
+        params = inspect.signature(factory).parameters
+        if "device" in params:
+            score_fns[score_name] = factory(device)
+        else:
+            score_fns[score_name] = factory()
+    
+    return score_fns
+
+def pairwise_consistency_score(device):
+    # TODO
+    pass
+
+def pairwise_clipI_score(device):
+    # TODO
+    pass
+
+def pairwise_dreamsim_score(device):
+    # TODO
+    pass
+
+def pairwise_image_score(
+    device,
+    score_names: list[str]
+):
+    """
+    Convert a list of pairwise score names into a dictionary that maps each score to its scoring function.
+    Args:
+        device: The device (e.g., "cuda" or "cpu") on which to run the reward functions.
+        score_names (List[str]): A list of pairwise reward function names to include.
+    Returns:
+        Dict[str, Callable]: A dictionary mapping each pairwise score name to its corresponding scoring function
+    Note:
+        A `pairwise_image_score` function takes as input:
+            - images (List[Tuple[Image.Image, Image.Image]] or np.ndarray or torch.Tensor): The batch of image-pairs to evaluate. For example, 3 image-pairs: [(img1, img2), (img3, img4), (img5, img6)]
+            - prompts (List[Tuple[str, str]]): The corresponding text prompts for the image-pairs. For example, 3 prompt-pairs: [(prompt1, prompt2), (prompt3, prompt4), (prompt5, prompt6)]
+            - metadata (List[dict]): Additional metadata for each image/prompt pair.
+        The returned function outputs:
+            - A numpy array of scores for each image-pair in the batch.
+            - A dictionary containing detailed reward information (mostly empty).
+    """
+    score_functions = {
+        # TODO: add pairwise score functions here
+    }
+    score_fns = {}
+
+    for score_name in score_names:
+        factory = score_functions.get(score_name)
+        if factory is None:
+            raise ValueError(f"Unknown score: {score_name}")
+        params = inspect.signature(factory).parameters
+        if "device" in params:
+            score_fns[score_name] = factory(device)
+        else:
+            score_fns[score_name] = factory()
+
+    return score_fns
+
+
 def main():
     import torchvision.transforms as transforms
 

@@ -829,7 +829,7 @@ def main(_):
                 # Encode each sub-prompt if layout is given
                 with autocast():
                     with torch.no_grad():
-                        images, all_latents, timestep_indices, prompt_embeds, pooled_prompt_embeds = pipeline_with_logprob(
+                        images, all_latents, noise_timestep_indices, prompt_embeds, pooled_prompt_embeds = pipeline_with_logprob(
                             pipeline,
                             prompt=prompts,
                             num_inference_steps=config.sample.num_steps,
@@ -853,7 +853,7 @@ def main(_):
                 for index in range(len(prompts)):
                     with autocast():
                         with torch.no_grad():
-                            this_image, this_all_latents, timestep_indices, prompt_embeds, pooled_prompt_embeds = pipeline_with_logprob(
+                            this_image, this_all_latents, noise_timestep_indices, prompt_embeds, pooled_prompt_embeds = pipeline_with_logprob(
                                 pipeline,
                                 prompt=prompts[index],
                                 num_inference_steps=config.sample.num_steps,
@@ -893,8 +893,8 @@ def main(_):
                         'layout': layouts[index],
                         'prompt': prompts[index],
                         'metadata': prompt_metadata[index],
-                        'timestep_indices': timestep_indices,
-                        'timesteps': pipeline.scheduler.timesteps[timestep_indices].unsqueeze(0).cpu(), # Keep batch dimension as 1
+                        'timestep_indices': noise_timestep_indices,
+                        'timesteps': pipeline.scheduler.timesteps[noise_timestep_indices].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'prompt_ids': prompt_ids[index].unsqueeze(0), # Keep batch dimension as 1
                         'prompt_embeds': prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'pooled_prompt_embeds': pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1

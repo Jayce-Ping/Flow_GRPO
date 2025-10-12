@@ -349,7 +349,7 @@ def pipeline_with_logprob(
         lora_scale=lora_scale,
     )
 
-    if layout is not None:
+    if layout is not None and merge_step > 0:
         # Encode each sub-prompt if layout is given
         sub_height = height // layout[0]
         sub_width = width // layout[1]
@@ -378,7 +378,7 @@ def pipeline_with_logprob(
         latents,
     )
 
-    if layout is not None:
+    if layout is not None and merge_step > 0:
         # Prepare latents for subfig
         _, sub_latent_image_ids = pipeline.prepare_latents(
             batch_size=batch_size * layout[0] * layout[1],
@@ -420,7 +420,7 @@ def pipeline_with_logprob(
 
     # 6. Denoising loop
     all_latents = []
-    all_timestep_indices = []
+    all_noise_timestep_indices = []
     pipeline.scheduler.set_begin_index(0)
     with pipeline.progress_bar(total=num_inference_steps) as progress_bar:
         for i, t in enumerate(timesteps):
@@ -482,7 +482,8 @@ def pipeline_with_logprob(
                 latents = merge_latents(latents, height, width, sub_height, sub_width) # (B, seq_len, C)
 
             all_latents.append(latents)
-            all_timestep_indices.append(i)
+            if current_noise_level > 0:
+                all_noise_timestep_indices.append(i)
     
             # call the callback, if provided
             if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % pipeline.scheduler.order == 0):
@@ -497,4 +498,4 @@ def pipeline_with_logprob(
     # Offload all models
     pipeline.maybe_free_model_hooks()
 
-    return images, all_latents, all_timestep_indices, prompt_embeds, pooled_prompt_embeds
+    return images, all_latents, all_noise_timestep_indices, prompt_embeds, pooled_prompt_embeds

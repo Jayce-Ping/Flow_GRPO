@@ -368,7 +368,7 @@ def pipeline_with_logprob(
         lora_scale=lora_scale,
     )
 
-    if layout is not None:
+    if layout is not None and merge_step > 0:
         # Encode each sub-prompt if layout is given
         sub_height = height // layout[0]
         sub_width = width // layout[1]
@@ -397,7 +397,7 @@ def pipeline_with_logprob(
         latents,
     )
 
-    if layout is not None:
+    if layout is not None and merge_step > 0:
         # Prepare latents for subfig
         _, sub_latent_image_ids = pipeline.prepare_latents(
             batch_size=batch_size * layout[0] * layout[1],
