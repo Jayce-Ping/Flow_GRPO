@@ -34,7 +34,7 @@ from torch.utils.data import Dataset, DataLoader, Sampler
 
 from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, divide_prompt, divide_latents, merge_latents, num_to_base_tuple
 from flow_grpo.rewards.rewards import multi_score
-from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, pipeline_with_logprob, compute_log_prob
+from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, pipeline_with_logprob
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset

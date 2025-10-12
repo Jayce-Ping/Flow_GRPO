@@ -14,8 +14,8 @@ spec.loader.exec_module(base)
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 # FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21"
 # SAVE_DIR = 'logs'
-# SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_NFT/logs'
-SAVE_DIR = '/root/siton-tmp/Flow_NFT/logs'
+SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_NFT/logs'
+# SAVE_DIR = '/root/siton-tmp/Flow_NFT/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -152,7 +152,7 @@ def pickscore_flux_ratio():
     }
     config.aggregate_fn = None
 
-    config.save_dir = os.path.join(SAVE_DIR, f'pickscore', f'flux-{gpu_number}gpu-8steps')
+    config.save_dir = os.path.join(SAVE_DIR, f'pickscore', f'flux-ratio-{gpu_number}gpu-8steps')
 
     return config
 
