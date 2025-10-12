@@ -1066,6 +1066,8 @@ def main(_):
 
                         t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0_dtype) # shape (batch_size,)
                         next_t = sample['next_timesteps'][:, j].to(accelerator.device, dtype=x0_dtype) # shape (batch_size,)
+                        t = t / 1000
+                        next_t = next_t / 1000
 
                         t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
                         next_t_expanded = next_t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
@@ -1092,7 +1094,7 @@ def main(_):
                                 transformer.module.set_adapter("old")
                                 old_v_pred = transformer(
                                     hidden_states=xt,
-                                    timestep=t / 1000,
+                                    timestep=t,
                                     guidance=guidance.expand(xt.shape[0]),
                                     encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                     pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
@@ -1104,7 +1106,7 @@ def main(_):
                             transformer.module.set_adapter("default")
                             new_v_pred = transformer(
                                 hidden_states=xt,
-                                timestep=t / 1000,
+                                timestep=t,
                                 guidance=guidance.expand(xt.shape[0]),
                                 encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                 pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
@@ -1117,7 +1119,7 @@ def main(_):
                                 with transformer.module.disable_adapter():
                                     v_ref = transformer(
                                         hidden_states=xt,
-                                        timestep=t / 1000,
+                                        timestep=t,
                                         guidance=guidance.expand(xt.shape[0]),
                                         encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                         pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
@@ -1241,9 +1243,9 @@ def main(_):
                 transformer_trainable_parameters, old_transformer_trainable_parameters, strict=True
             ):
                 # In-place update - with ema decay
-                # tgt_param.data.mul_(decay).add_(src_param.detach().data, alpha=1 - decay)
+                tgt_param.data.mul_(decay).add_(src_param.detach().data, alpha=1 - decay)
                 # Copy new weight to old weight directly
-                tgt_param.data.copy_(src_param.detach().data)
+                # tgt_param.data.copy_(src_param.detach().data)
                 assert src_param is not tgt_param
 
         if config.enable_mem_log:

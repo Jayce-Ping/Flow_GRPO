@@ -1063,6 +1063,7 @@ def main(_):
                         guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
 
                         t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0_dtype) # shape (batch_size,)
+                        t = t / 1000
 
                         t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
 
@@ -1087,7 +1088,7 @@ def main(_):
                                 transformer.module.set_adapter("old")
                                 old_v_pred = transformer(
                                     hidden_states=xt,
-                                    timestep=t / 1000,
+                                    timestep=t,
                                     guidance=guidance.expand(xt.shape[0]),
                                     encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                     pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
@@ -1099,7 +1100,7 @@ def main(_):
                             transformer.module.set_adapter("default")
                             new_v_pred = transformer(
                                 hidden_states=xt,
-                                timestep=t / 1000,
+                                timestep=t,
                                 guidance=guidance.expand(xt.shape[0]),
                                 encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                 pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
@@ -1112,7 +1113,7 @@ def main(_):
                                 with transformer.module.disable_adapter():
                                     v_ref = transformer(
                                         hidden_states=xt,
-                                        timestep=t / 1000,
+                                        timestep=t,
                                         guidance=guidance.expand(xt.shape[0]),
                                         encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                         pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
