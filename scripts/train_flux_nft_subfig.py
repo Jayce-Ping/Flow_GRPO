@@ -1025,7 +1025,6 @@ def main(_):
                         'pooled_prompt_embeds': all_pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'latents': all_latents[index][-1].unsqueeze(0), # Keep batch dimension as 1, only keep the last clean latents
                         'initial_latents': all_latents[index][0].unsqueeze(0), # Keep batch dimension as 1, only keep the initial latents
-                        'rewards': {score_name: score_value[index] for score_name, score_value in rewards.items()},
                     }
                     for index in range(len(prompts))
                 ]
@@ -1038,6 +1037,7 @@ def main(_):
         transformer.set_adapter("default")
 
         # Augment samples by combining different groups
+        # Samples will be added 'rewards' field after this function
         samples = augment_and_reward_compute(
             accelerator,
             pipeline,
