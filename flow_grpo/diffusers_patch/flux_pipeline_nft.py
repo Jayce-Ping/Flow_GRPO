@@ -162,9 +162,10 @@ def pipeline_with_logprob(
 ) -> Tuple[
         torch.FloatTensor,
         List[torch.FloatTensor],
-        List[int],
         torch.FloatTensor,
-        torch.FloatTensor
+        torch.FloatTensor,
+        List[torch.FloatTensor],
+        torch.FloatTensor,
     ]:
     height = height or pipeline.default_sample_size * pipeline.vae_scale_factor
     width = width or pipeline.default_sample_size * pipeline.vae_scale_factor
@@ -296,7 +297,7 @@ def pipeline_with_logprob(
 
     # 6. Denoising loop
     all_latents = []
-    all_noise_timestep_indices = []
+    all_noise_timesteps = []
     pipeline.scheduler.set_begin_index(0)
     with pipeline.progress_bar(total=num_inference_steps) as progress_bar:
         for i, t in enumerate(timesteps):
@@ -359,7 +360,7 @@ def pipeline_with_logprob(
 
             all_latents.append(latents)
             if current_noise_level > 0:
-                all_noise_timestep_indices.append(i)
+                all_noise_timesteps.append(timestep)
     
             # call the callback, if provided
             if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % pipeline.scheduler.order == 0):
@@ -374,4 +375,4 @@ def pipeline_with_logprob(
     # Offload all models
     pipeline.maybe_free_model_hooks()
 
-    return images, all_latents, all_noise_timestep_indices, prompt_embeds, pooled_prompt_embeds
+    return images, all_latents, prompt_embeds, pooled_prompt_embeds, all_noise_timesteps, timesteps.expand(batch_size)

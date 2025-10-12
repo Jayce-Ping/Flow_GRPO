@@ -217,7 +217,7 @@ def pickscore_flux():
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 0.99
-    config.train.timesteps = None
+    config.train.timesteps = [1]
     config.train.beta = 0
     config.train.nft_beta = 1
     config.train.decay_type = 1
@@ -298,7 +298,7 @@ def grid_consistency_clip_flux():
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 0.99
-    config.train.timesteps = None
+    config.train.timesteps = [1]
     config.train.beta = 0
     config.train.nft_beta = 1
     config.train.decay_type = 1
