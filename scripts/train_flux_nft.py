@@ -1127,6 +1127,7 @@ def main(_):
                         )
                         normalized_advantages_clip = (advantages / config.train.adv_clip_max) / 2.0 + 0.5
                         r = torch.clamp(normalized_advantages_clip, 0, 1)
+                        loss_terms['r'] = torch.mean(r).detach()
                         loss_terms["x0_norm"] = torch.mean(x0**2).detach()
                         loss_terms["x0_norm_max"] = torch.max(x0**2).detach()
                         loss_terms["old_deviate"] = torch.mean((new_v_pred - old_v_pred) ** 2).detach()
@@ -1156,12 +1157,14 @@ def main(_):
                         negative_loss = ((negative_x0_prediction - x0) ** 2 / negative_weight_factor).mean(
                             dim=tuple(range(1, x0.ndim))
                         )
+                        loss_terms['positive_loss'] = torch.mean(positive_loss).detach()
+                        loss_terms['negative_loss'] = torch.mean(negative_loss).detach()
 
                         ori_policy_loss = (r * positive_loss  + (1.0 - r) * negative_loss) / config.train.nft_beta
                         policy_loss = (ori_policy_loss * config.train.adv_clip_max).mean()
 
                         loss = policy_loss
-    
+
                         loss_terms["policy_loss"] = policy_loss.detach()
                         loss_terms["unweighted_policy_loss"] = ori_policy_loss.mean().detach()
 
