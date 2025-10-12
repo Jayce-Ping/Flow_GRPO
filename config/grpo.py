@@ -14,8 +14,8 @@ spec.loader.exec_module(base)
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 # FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21"
 # SAVE_DIR = 'logs'
-# SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
-SAVE_DIR = '/root/siton-tmp/Flow_GRPO/logs'
+SAVE_DIR = '/scratch/users/astar/ares/cp3jia/FlowGRPO/logs'
+# SAVE_DIR = '/root/siton-tmp/Flow_GRPO/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -310,7 +310,7 @@ def grid_consistency_clip_flux():
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
-    config.logging_platform = "swanlab"
+    # config.logging_platform = "swanlab"
 
     config.enable_flexible_size = False
     config.resolution = 1024
@@ -376,18 +376,20 @@ def grid_consistency_clip_flux():
     config.eval_freq = 20 # 0 for no eval applied
 
     config.reward_fn = {
-        "grid_layout": 1.0,
+        # "grid_layout": 1.0,
         "consistency_score": 0.2,
         "subfig_clipT" : 0.8
     }
-    def agg_fn(grid_layout : np.ndarray, consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
-        return grid_layout * consistency_score + subfig_clipT
+    # def agg_fn(grid_layout : np.ndarray, consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
+    #     return grid_layout * consistency_score + subfig_clipT
+    agg_fn = None # Use weighed sum as default
     
     config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
 
     config.aggregate_fn = agg_fn
 
-    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT_8steps')
+    # config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT_8steps')
+    config.save_dir = os.path.join(SAVE_DIR, f'ConsistencyReward-Subclip', f'flux-{gpu_number}gpu-2by2-half_consistency-plus-clipT_8steps')
 
     return config
 

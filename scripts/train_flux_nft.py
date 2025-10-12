@@ -146,7 +146,7 @@ def eval(pipeline : FluxPipeline,
                 prompt = [prompts[i]]
                 prompt_meta = [prompt_metadata[i]]
                 with autocast():
-                    imgs, _, _, _, _ = pipeline_with_logprob(
+                    imgs, _, _, _, _, _ = pipeline_with_logprob(
                         pipeline,
                         prompt=prompt,
                         num_inference_steps=config.test.num_steps,
@@ -163,7 +163,7 @@ def eval(pipeline : FluxPipeline,
         else:
             # Batch inference if all sizes are the same
             with autocast():
-                images, _, _, _, _ = pipeline_with_logprob(
+                images, _, _, _, _, _ = pipeline_with_logprob(
                     pipeline,
                     prompt=prompts,
                     num_inference_steps=config.test.num_steps,

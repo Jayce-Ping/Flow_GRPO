@@ -238,7 +238,7 @@ def pickscore_flux():
     
 
 def grid_consistency_clip_flux():
-    gpu_number = 7
+    gpu_number = 4
     config = compressibility()
 
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
@@ -274,9 +274,9 @@ def grid_consistency_clip_flux():
     ## batches
     config.enable_gradient_checkpointing = False
     config.sample.batch_size = 1
-    config.sample.num_images_per_prompt = 3
+    config.sample.num_images_per_prompt = 4
     config.sample.max_group_size = 16
-    config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 40 # Number of unique prompts used in each epoch all gathered
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.max_group_size * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size

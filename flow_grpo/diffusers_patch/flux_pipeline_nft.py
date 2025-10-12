@@ -375,4 +375,5 @@ def pipeline_with_logprob(
     # Offload all models
     pipeline.maybe_free_model_hooks()
 
-    return images, all_latents, prompt_embeds, pooled_prompt_embeds, all_noise_timesteps, timesteps.expand(batch_size)
+    timesteps = timesteps.unsqueeze(0).expand(batch_size, -1) # (batch_size, num_inference_steps)
+    return images, all_latents, prompt_embeds, pooled_prompt_embeds, all_noise_timesteps, timesteps 
