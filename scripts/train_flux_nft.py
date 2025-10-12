@@ -526,11 +526,15 @@ def main(_):
         gradient_accumulation_steps = config.train.gradient_accumulation_steps
 
     # number of timesteps within each trajectory to train on
-    if config.sample.use_sliding_window:
-        num_train_timesteps = len(config.sample.noise_steps)
-    else:
-        num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
-    
+    # if config.sample.use_sliding_window:
+    #     num_train_timesteps = len(config.sample.noise_steps)
+    # else:
+    #     num_train_timesteps = int(config.sample.num_steps * config.train.timestep_fraction)
+    if config.train.timesteps is None:
+        config.train.timesteps = list(range(config.sample.num_steps))
+
+    num_train_timesteps = len(config.train.timesteps)
+
     accelerator_config = ProjectConfiguration(
         project_dir=os.path.join(config.logdir, config.run_name),
         automatic_checkpoint_naming=True,
@@ -894,7 +898,7 @@ def main(_):
                         'prompt': prompts[index],
                         'metadata': prompt_metadata[index],
                         'timestep_indices': noise_timestep_indices,
-                        'timesteps': pipeline.scheduler.timesteps[noise_timestep_indices].unsqueeze(0).cpu(), # Keep batch dimension as 1
+                        'timesteps': pipeline.scheduler.timesteps[config.train.timesteps].unsqueeze(0).cpu(),
                         'prompt_ids': prompt_ids[index].unsqueeze(0), # Keep batch dimension as 1
                         'prompt_embeds': prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'pooled_prompt_embeds': pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1

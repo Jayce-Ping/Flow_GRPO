@@ -51,6 +51,7 @@ def compressibility():
     config.enable_gradient_checkpointing = True
     config.train.nft_beta = 1
     config.train.decay_type = 1
+    config.train.timesteps = None
 
     # Testing
     config.test.batch_size = 4
@@ -97,7 +98,7 @@ def pickscore_flux():
     # Sampling
     ## sliding window scheduler
     config.sample.cps = False
-    config.sample.num_steps = 8
+    config.sample.num_steps = 10
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
     config.sample.left_boundary = 1
@@ -136,6 +137,7 @@ def pickscore_flux():
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 0.99
+    config.train.timesteps = None
     config.train.beta = 0
     config.train.nft_beta = 1
     config.train.decay_type = 1
@@ -216,6 +218,7 @@ def grid_consistency_clip_flux():
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 0.99
+    config.train.timesteps = None
     config.train.beta = 0
     config.train.nft_beta = 1
     config.train.decay_type = 1
