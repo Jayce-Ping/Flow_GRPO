@@ -34,7 +34,7 @@ from torch.utils.data import Dataset, DataLoader, Sampler
 
 from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, divide_prompt, divide_latents, merge_latents, num_to_base_tuple
 from flow_grpo.rewards.rewards import multi_score
-from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, pipeline_with_logprob
+from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, flux_pipeline
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
@@ -269,7 +269,7 @@ def eval(pipeline : FluxPipeline,
                 prompt = [prompts[i]]
                 prompt_meta = [prompt_metadata[i]]
                 with autocast():
-                    imgs, _, _, _, _, _ = pipeline_with_logprob(
+                    imgs, _, _, _, _, _ = flux_pipeline(
                         pipeline,
                         prompt=prompt,
                         num_inference_steps=config.test.num_steps,
@@ -286,7 +286,7 @@ def eval(pipeline : FluxPipeline,
         else:
             # Batch inference if all sizes are the same
             with autocast():
-                images, _, _, _, _, _ = pipeline_with_logprob(
+                images, _, _, _, _, _ = flux_pipeline(
                     pipeline,
                     prompt=prompts,
                     num_inference_steps=config.test.num_steps,
@@ -954,7 +954,7 @@ def main(_):
                 # Encode each sub-prompt if layout is given
                 with autocast():
                     with torch.no_grad():
-                        images, all_latents, all_prompt_embeds, all_pooled_prompt_embeds, all_noise_timesteps, all_timesteps = pipeline_with_logprob(
+                        images, all_latents, all_prompt_embeds, all_pooled_prompt_embeds, all_noise_timesteps, all_timesteps = flux_pipeline(
                             pipeline,
                             prompt=prompts,
                             num_inference_steps=config.sample.num_steps,
@@ -971,10 +971,12 @@ def main(_):
                     images = list(images.unbind(0)) # List[Tensor(C, H, W)] with length batch_size
                     all_latents = torch.stack(all_latents, dim=1) # (batch_size, num_steps + 1, C, H, W)
                     all_latents = list(all_latents.unbind(0)) # List[Tensor(num_steps + 1, C, H, W)] with length batch_size
-                    all_prompt_embeds = all_prompt_embeds.cpu() # (batch_size, seq_len, dim)
-                    all_pooled_prompt_embeds = all_pooled_prompt_embeds.cpu() # (batch_size, dim)
+                    all_prompt_embeds = all_prompt_embeds # (batch_size, seq_len, dim)
+                    all_pooled_prompt_embeds = all_pooled_prompt_embeds # (batch_size, dim)
                     all_prompt_embeds = list(all_prompt_embeds.unbind(0)) # List[Tensor(seq_len, dim)] with length batch_size
                     all_pooled_prompt_embeds = list(all_pooled_prompt_embeds.unbind(0)) # List[Tensor(dim)] with length batch_size
+                    all_noise_timesteps = list(all_noise_timesteps.unbind(0)) # List[Tensor(num_noise_steps)] with length batch_size
+                    all_timesteps = list(all_timesteps.unbind(0)) # List[Tensor(num_steps)] with length batch_size
             else:
                 # Different sizes, have to do one by one
                 images = []
@@ -986,7 +988,7 @@ def main(_):
                 for index in range(len(prompts)):
                     with autocast():
                         with torch.no_grad():
-                            this_image, this_all_latents, this_prompt_embeds, this_pooled_prompt_embeds, this_noise_timesteps, this_timesteps = pipeline_with_logprob(
+                            this_image, this_all_latents, this_prompt_embeds, this_pooled_prompt_embeds, this_noise_timesteps, this_timesteps = flux_pipeline(
                                 pipeline,
                                 prompt=prompts[index],
                                 num_inference_steps=config.sample.num_steps,
@@ -1002,8 +1004,8 @@ def main(_):
                     all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_steps + 1, C, H, W)
                     all_prompt_embeds.append(this_prompt_embeds.squeeze(0)) # (1, seq_len, dim) -> (seq_len, dim)
                     all_pooled_prompt_embeds.append(this_pooled_prompt_embeds.squeeze(0)) # (1, dim) -> (dim)
-                    all_noise_timesteps.append(this_noise_timesteps[0]) # list of (num_steps,) -> (num_steps,)
-                    all_timesteps.append(this_timesteps.squeeze(0)) # (1, num_steps) -> (num_steps)
+                    all_noise_timesteps.append(this_noise_timesteps.squeeze(0)) # (1, num_noise_steps) -> (num_noise_steps,)
+                    all_timesteps.append(this_timesteps.squeeze(0)) # (1, num_steps) -> (num_steps,)
 
                 # Now images and all_latents are lists
                 # images: List[Tensor(C, H, W)] with length batch_size
@@ -1024,7 +1026,7 @@ def main(_):
                         'prompt_embeds': all_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'pooled_prompt_embeds': all_pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'latents': all_latents[index][-1].unsqueeze(0), # Keep batch dimension as 1, only keep the last clean latents
-                        'initial_latents': all_latents[index][0].unsqueeze(0), # Keep batch dimension as 1, only keep the initial latents
+                        'initial_latents': all_latents[index][0].unsqueeze(0).cpu(), # Keep batch dimension as 1, only keep the initial latents
                     }
                     for index in range(len(prompts))
                 ]

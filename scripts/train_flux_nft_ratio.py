@@ -34,7 +34,7 @@ from torch.utils.data import Dataset, DataLoader, Sampler
 
 from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, divide_prompt, divide_latents, merge_latents, num_to_base_tuple
 from flow_grpo.rewards.rewards import multi_score
-from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, pipeline_with_logprob
+from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, flux_pipeline
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
@@ -146,7 +146,7 @@ def eval(pipeline : FluxPipeline,
                 prompt = [prompts[i]]
                 prompt_meta = [prompt_metadata[i]]
                 with autocast():
-                    imgs, _, _, _, _ = pipeline_with_logprob(
+                    imgs, _, _, _, _ = flux_pipeline(
                         pipeline,
                         prompt=prompt,
                         num_inference_steps=config.test.num_steps,
@@ -163,7 +163,7 @@ def eval(pipeline : FluxPipeline,
         else:
             # Batch inference if all sizes are the same
             with autocast():
-                images, _, _, _, _ = pipeline_with_logprob(
+                images, _, _, _, _ = flux_pipeline(
                     pipeline,
                     prompt=prompts,
                     num_inference_steps=config.test.num_steps,
@@ -833,7 +833,7 @@ def main(_):
                 # Encode each sub-prompt if layout is given
                 with autocast():
                     with torch.no_grad():
-                        images, all_latents, noise_timestep_indices, prompt_embeds, pooled_prompt_embeds = pipeline_with_logprob(
+                        images, all_latents, noise_timestep_indices, prompt_embeds, pooled_prompt_embeds = flux_pipeline(
                             pipeline,
                             prompt=prompts,
                             num_inference_steps=config.sample.num_steps,
@@ -857,7 +857,7 @@ def main(_):
                 for index in range(len(prompts)):
                     with autocast():
                         with torch.no_grad():
-                            this_image, this_all_latents, noise_timestep_indices, prompt_embeds, pooled_prompt_embeds = pipeline_with_logprob(
+                            this_image, this_all_latents, noise_timestep_indices, prompt_embeds, pooled_prompt_embeds = flux_pipeline(
                                 pipeline,
                                 prompt=prompts[index],
                                 num_inference_steps=config.sample.num_steps,

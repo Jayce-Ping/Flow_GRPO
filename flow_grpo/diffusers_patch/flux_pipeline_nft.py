@@ -134,7 +134,7 @@ def calculate_shift(
 
 
 @torch.no_grad()
-def pipeline_with_logprob(
+def flux_pipeline(
     pipeline : FluxPipeline,
     prompt: Union[str, List[str]] = None,
     prompt_2: Optional[Union[str, List[str]]] = None,
@@ -164,7 +164,7 @@ def pipeline_with_logprob(
         List[torch.FloatTensor],
         torch.FloatTensor,
         torch.FloatTensor,
-        List[torch.FloatTensor],
+        torch.FloatTensor,
         torch.FloatTensor,
     ]:
     height = height or pipeline.default_sample_size * pipeline.vae_scale_factor
@@ -376,4 +376,8 @@ def pipeline_with_logprob(
     pipeline.maybe_free_model_hooks()
 
     timesteps = timesteps.unsqueeze(0).expand(batch_size, -1) # (batch_size, num_inference_steps)
+    if len(all_noise_timesteps) > 0:
+        all_noise_timesteps = torch.stack(all_noise_timesteps, dim=1) # (batch_size, num_noise_steps)
+    else:
+        all_noise_timesteps = torch.zeros((batch_size, 0), device=device) # (batch_size, 0)
     return images, all_latents, prompt_embeds, pooled_prompt_embeds, all_noise_timesteps, timesteps 
