@@ -38,7 +38,7 @@ from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, pipelin
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
-from flow_grpo.datasets.sampler import DistributedKRepeatSampler, DistributedGroupKRepeatSampler
+from flow_grpo.datasets.sampler import DistributedGroupKRepeatSampler
 from flow_grpo.scheduler import FlowMatchNoiseScheduler
 from flow_grpo.memory_tracker import MemoryProfiler
 
@@ -81,6 +81,129 @@ def return_decay(step, decay_type):
     else:
         decay = (step - flat) * uprate
         return min(decay, uphold)
+
+def augment_and_reward_compute(
+    accelerator : Accelerator,
+    pipeline : FluxPipeline,
+    config : Namespace,
+    samples : List[dict],
+    reward_fn,
+    executor : futures.ThreadPoolExecutor,
+):  
+    prompt_to_samples = defaultdict(list)
+    for sample in samples:
+        prompt_to_samples[sample['prompt']].append(sample)
+
+    if hasattr(config.sample, 'max_group_size') and config.sample.max_group_size is not None:
+        max_group_size = config.sample.max_group_size
+    else:
+        max_group_size = None
+
+    augmented_samples = []
+    group_size = config.sample.num_images_per_prompt
+    for prompt, group_samples in prompt_to_samples.items():
+        height = group_samples[0].get('height', config.resolution)
+        width = group_samples[0].get('width', config.resolution)
+        layout = group_samples[0].get('layout', (1, 1))
+        sub_height = height // layout[0]
+        sub_width = width // layout[1]
+        subimage_cnt = layout[0] * layout[1]
+        all_sublatents = torch.cat(
+            [
+                divide_latents(sample['latents'], height, width, sub_height, sub_width) # (1, layout[0], layout[1], sub_seq_len, C)
+                for sample in group_samples
+        ], dim=0)# (group_size, layout[0], layout[1], sub_seq_len, C)
+        all_sublatents = all_sublatents.view(group_size, subimage_cnt, *all_sublatents.shape[3:]) # (group_size, subimage_cnt, sub_seq_len, C)
+        # A 2x2 image group of size 3 can generate 3^(2x2) = 81 different images, use a max_group_size to constraint
+        total_combinations = group_size ** subimage_cnt
+        sample_num = total_combinations
+        if max_group_size is not None:
+            sample_num = min(max_group_size, sample_num)
+
+        # Strategy 1: random sampling
+        # Choose `group_size` random indices from range(0, config.sample.max_group_size)
+        # sample_indices = random.sample(range(total_combinations), sample_num)
+        # sample_indices = [num_to_base_tuple(idx, group_size, subimage_cnt) for idx in sample_indices]
+        
+        # Strategy 2: balanced
+        sample_indices = []
+        # Make sure original images are included
+        for i in range(group_size):
+            base_tuple = tuple([i] * subimage_cnt)
+            base_idx = sum(i * (group_size ** pos) for pos, i in enumerate(reversed(base_tuple)))
+            sample_indices.append(base_idx)
+
+        remaining = sample_num - len(sample_indices)
+        if remaining <= 0:
+            sample_indices = random.sample(sample_indices, sample_num)
+        else:
+            all_indices = set(range(total_combinations)) - set(sample_indices)
+            sample_indices.extend(random.sample(list(all_indices), remaining))
+
+        # Decode index to tuple
+        sample_indices = [num_to_base_tuple(idx, group_size, subimage_cnt) for idx in sample_indices]
+
+        # The i-th sub-image is from the idx[i]-th image in the group
+        sample_indices = [
+            [(idx[i], i) for i in range(len(idx))]
+            for idx in sample_indices
+        ]
+
+        for indices in sample_indices:
+            sampled_sublatents = torch.stack(
+                [all_sublatents[i,j] for i,j in indices],
+                dim=0
+            ).view(1, layout[0], layout[1], *all_sublatents.shape[2:]) # (1, layout[0], layout[1], sub_seq_len, C)
+            
+            sampled_sublatents = merge_latents(
+                sampled_sublatents,
+                height,
+                width,
+                sub_height,
+                sub_width
+            )
+            new_sample = group_samples[0].copy()
+            new_sample['latents'] = sampled_sublatents
+            new_sample['made_of'] = indices
+            augmented_samples.append(new_sample)
+
+    # Compute reward for each sample
+    # TODO: group reward computation can be optimized here
+    # Some subfigs will be paired multiple times for reward computation
+    cnt = defaultdict(int)
+    for i in tqdm(
+        range(0, len(augmented_samples), config.train.batch_size),
+        desc="Computing rewards",
+        disable=not accelerator.is_local_main_process
+    ):
+        # Compute reward with train.batch_size to avoid OOM
+        # HOW?
+        # 1. encode criteria and communicate
+        # 2. modify sampler to make sure all group of one prompt is in one gpu (looks better)
+        batch = augmented_samples[i : i + config.train.batch_size]
+        # Convert latents to images
+        latents = torch.cat([sample['latents'] for sample in batch], dim=0).to(accelerator.device)
+        latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
+        latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
+        latents = latents.to(dtype=pipeline.vae.dtype)
+        images = pipeline.vae.decode(latents, return_dict=False)[0]
+        images = pipeline.image_processor.postprocess(images, output_type='pil')
+        # Compute reward
+        prompts = [sample['prompt'] for sample in batch]
+        prompt_metadatas = [sample.get('metadata', {}) for sample in batch]
+        future = executor.submit(reward_fn, images, prompts, prompt_metadatas)
+        rewards, reward_metadatas = future.result()
+
+        # Convert rewards from dict of list to list of dict
+        rewards = [
+            dict(zip(rewards.keys(), value))
+            for value in zip(*rewards.values())
+        ]
+
+        for sample, reward in zip(batch, rewards):
+            sample['rewards'] = reward
+
+    return augmented_samples
 
 
 @torch.no_grad()
@@ -657,7 +780,7 @@ def main(_):
         raise NotImplementedError("Specify `prompt_fn` in ['general_ocr', 'geneval']")
 
     # Create an infinite-loop DataLoader
-    train_sampler = DistributedKRepeatSampler( 
+    train_sampler = DistributedGroupKRepeatSampler( 
         dataset=train_dataset,
         batch_size=config.sample.batch_size,
         k=config.sample.num_images_per_prompt,
@@ -871,19 +994,6 @@ def main(_):
                 # images: List[Tensor(C, H, W)] with length batch_size
                 # all_latents: List[Tensor(num_steps + 1, C, H, W)] with length batch_size
 
-            # Compute rewards asynchronously
-            rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
-            # yield to to make sure reward computation starts
-            time.sleep(0)
-
-            # Wait for reward computation directly
-            rewards, rewards_metadata = rewards.result()
-
-            rewards = {
-                k: torch.tensor(v, device=accelerator.device)
-                for k, v in rewards.items()
-            }
-
             # Final `samples` is List[Dict], with length = config.sample.batch_size * config.sample.num_batches_per_epoch
             samples.extend(
                 [
@@ -899,7 +1009,6 @@ def main(_):
                         'prompt_embeds': prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'pooled_prompt_embeds': pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'latents': all_latents[index][-1].unsqueeze(0), # Keep batch dimension as 1, only keep the last clean latents
-                        'rewards': {score_name: score_value[index] for score_name, score_value in rewards.items()},
                     }
                     for index in range(len(prompts))
                 ]
@@ -910,6 +1019,16 @@ def main(_):
                 memory_profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
 
         transformer.set_adapter("default")
+
+        # Augment samples by combining different groups
+        samples = augment_and_reward_compute(
+            accelerator,
+            pipeline,
+            config,
+            samples,
+            reward_fn,
+            executor
+        )
 
         # Gather rewards across all samples
         gathered_rewards = {
