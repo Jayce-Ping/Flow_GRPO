@@ -1484,9 +1484,9 @@ def main(_):
                 transformer_trainable_parameters, old_transformer_trainable_parameters, strict=True
             ):
                 # In-place update
-                # tgt_param.data.mul_(decay).add_(src_param.detach().data, alpha=1 - decay)
+                tgt_param.data.mul_(decay).add_(src_param.detach().data, alpha=1 - decay)
                 # Copy directly from src to tgt without EMA
-                tgt_param.data.copy_(src_param.detach().data)
+                # tgt_param.data.copy_(src_param.detach().data)
                 assert src_param is not tgt_param
 
         if config.enable_mem_log:
