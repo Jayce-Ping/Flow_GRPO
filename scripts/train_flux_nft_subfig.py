@@ -1265,63 +1265,111 @@ def main(_):
                             -config.train.adv_clip_max,
                             config.train.adv_clip_max,
                         )
-                        normalized_advantages_clip = (advantages / config.train.adv_clip_max) / 2.0 + 0.5
-                        r = torch.clamp(normalized_advantages_clip, 0, 1)
-                        loss_terms["x0_norm"] = torch.mean(x0**2).detach()
-                        loss_terms["x0_norm_max"] = torch.max(x0**2).detach()
-                        loss_terms["old_deviate"] = torch.mean((new_v_pred - old_v_pred) ** 2).detach()
-                        loss_terms["old_deviate_max"] = torch.max((new_v_pred - old_v_pred) ** 2).detach()
-                        positive_prediction = config.train.nft_beta * new_v_pred + (1 - config.train.nft_beta) * old_v_pred.detach()
-
-                        implicit_negative_prediction = (1.0 + config.train.nft_beta) * old_v_pred.detach() - config.train.nft_beta * new_v_pred
-                        
-                        # adaptive weighting
-                        x0_prediction = xt - t_expanded * positive_prediction
-                        with torch.no_grad():
-                            weight_factor = (
-                                torch.abs(x0_prediction.double() - x0.double())
-                                .mean(dim=tuple(range(1, x0.ndim)), keepdim=True)
-                                .clip(min=0.00001)
+                        method = 'ppo'
+                        if method == 'ppo':
+                            x0_pred_new = (xt - t_expanded * new_v_pred)
+                            x0_pred_old = (xt - t_expanded * old_v_pred)
+                            # x0_pred_ref = (xt - t_expanded * v_ref)
+                            log_prob_new = -((x0 - x0_pred_new) ** 2).mean(dim=tuple(range(1, x0.ndim)))
+                            log_prob_old = -((x0 - x0_pred_old) ** 2).mean(dim=tuple(range(1, x0.ndim)))
+                            # log_prob_ref = -((x0 - x0_pred_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
+                            ratio = torch.exp(log_prob_new - log_prob_old)
+                            unclipped_loss = -advantages * ratio
+                            clipped_loss = -advantages * torch.clamp(
+                                ratio,
+                                1.0 - config.train.clip_range,
+                                1.0 + config.train.clip_range,
+                            )
+                            policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
+                            kl_loss = ((new_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
+                            kl_loss = torch.mean(kl_loss)
+                            loss = policy_loss + config.train.beta * kl_loss
+                            loss_terms["policy_loss"] = policy_loss.detach()
+                            loss_terms["unclipped_loss"] = unclipped_loss.mean().detach()
+                            loss_terms["clipped_loss"] = clipped_loss.mean().detach()
+                            loss_terms["kl_loss"] = kl_loss.mean().detach()
+                            loss_terms['total_loss'] = loss.detach()
+                            info['ratio'].append(ratio.abs().mean())
+                            info["clipfrac"].append(
+                                torch.mean(
+                                    (
+                                        torch.abs(ratio - 1.0) > config.train.clip_range
+                                    ).float()
+                                )
+                            )
+                            info["clipfrac_gt_one"].append(
+                                torch.mean(
+                                    (
+                                        ratio - 1.0 > config.train.clip_range
+                                    ).float()
+                                )
+                            )
+                            info["clipfrac_lt_one"].append(
+                                torch.mean(
+                                    (
+                                        1.0 - ratio > config.train.clip_range
+                                    ).float()
+                                )
                             )
 
-                        positive_loss = ((x0_prediction - x0) ** 2 / weight_factor).mean(dim=tuple(range(1, x0.ndim)))
+                        elif method == 'nft':
+                            normalized_advantages_clip = (advantages / config.train.adv_clip_max) / 2.0 + 0.5
+                            r = torch.clamp(normalized_advantages_clip, 0, 1)
+                            loss_terms["x0_norm"] = torch.mean(x0**2).detach()
+                            loss_terms["x0_norm_max"] = torch.max(x0**2).detach()
+                            loss_terms["old_deviate"] = torch.mean((new_v_pred - old_v_pred) ** 2).detach()
+                            loss_terms["old_deviate_max"] = torch.max((new_v_pred - old_v_pred) ** 2).detach()
+                            positive_prediction = config.train.nft_beta * new_v_pred + (1 - config.train.nft_beta) * old_v_pred.detach()
+
+                            implicit_negative_prediction = (1.0 + config.train.nft_beta) * old_v_pred.detach() - config.train.nft_beta * new_v_pred
+                            
+                            # adaptive weighting
+                            x0_prediction = xt - t_expanded * positive_prediction
+                            with torch.no_grad():
+                                weight_factor = (
+                                    torch.abs(x0_prediction.double() - x0.double())
+                                    .mean(dim=tuple(range(1, x0.ndim)), keepdim=True)
+                                    .clip(min=0.00001)
+                                )
+
+                            positive_loss = ((x0_prediction - x0) ** 2 / weight_factor).mean(dim=tuple(range(1, x0.ndim)))
+            
+                            negative_x0_prediction = xt - t_expanded * implicit_negative_prediction
+                            with torch.no_grad():
+                                negative_weight_factor = (
+                                    torch.abs(negative_x0_prediction.double() - x0.double())
+                                    .mean(dim=tuple(range(1, x0.ndim)), keepdim=True)
+                                    .clip(min=0.00001)
+                                )
+                            negative_loss = ((negative_x0_prediction - x0) ** 2 / negative_weight_factor).mean(
+                                dim=tuple(range(1, x0.ndim))
+                            )
+
+                            ori_policy_loss = (r * positive_loss  + (1.0 - r) * negative_loss) / config.train.nft_beta
+                            policy_loss = (ori_policy_loss * config.train.adv_clip_max).mean()
+
+                            loss = policy_loss
         
-                        negative_x0_prediction = xt - t_expanded * implicit_negative_prediction
-                        with torch.no_grad():
-                            negative_weight_factor = (
-                                torch.abs(negative_x0_prediction.double() - x0.double())
-                                .mean(dim=tuple(range(1, x0.ndim)), keepdim=True)
-                                .clip(min=0.00001)
+                            loss_terms["policy_loss"] = policy_loss.detach()
+                            loss_terms["unweighted_policy_loss"] = ori_policy_loss.mean().detach()
+
+                            kl_div_loss = ((new_v_pred - v_ref) ** 2).mean(
+                                dim=tuple(range(1, x0.ndim))
                             )
-                        negative_loss = ((negative_x0_prediction - x0) ** 2 / negative_weight_factor).mean(
-                            dim=tuple(range(1, x0.ndim))
-                        )
 
-                        ori_policy_loss = (r * positive_loss  + (1.0 - r) * negative_loss) / config.train.nft_beta
-                        policy_loss = (ori_policy_loss * config.train.adv_clip_max).mean()
+                            loss += config.train.beta * torch.mean(kl_div_loss)
+                            kl_div_loss = torch.mean(kl_div_loss)
 
-                        loss = policy_loss
-    
-                        loss_terms["policy_loss"] = policy_loss.detach()
-                        loss_terms["unweighted_policy_loss"] = ori_policy_loss.mean().detach()
+                            loss_terms["kl_div_loss"] = torch.mean(kl_div_loss).detach()
 
-                        kl_div_loss = ((new_v_pred - v_ref) ** 2).mean(
-                            dim=tuple(range(1, x0.ndim))
-                        )
+                            loss_terms["kl_div"] = torch.mean(
+                                ((new_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
+                            ).detach()
+                            loss_terms["old_kl_div"] = torch.mean(
+                                ((old_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
+                            ).detach()
 
-                        loss += config.train.beta * torch.mean(kl_div_loss)
-                        kl_div_loss = torch.mean(kl_div_loss)
-
-                        loss_terms["kl_div_loss"] = torch.mean(kl_div_loss).detach()
-
-                        loss_terms["kl_div"] = torch.mean(
-                            ((new_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
-                        ).detach()
-                        loss_terms["old_kl_div"] = torch.mean(
-                            ((old_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
-                        ).detach()
-
-                        loss_terms["total_loss"] = loss.detach()
+                            loss_terms["total_loss"] = loss.detach()
 
                         # Track loss tensors
                         if config.enable_mem_log:
