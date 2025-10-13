@@ -1199,7 +1199,6 @@ def main(_):
 
                         if method == 'ppo':
                             xt = sample['all_latents'][:, j].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t
-                            xt_next = sample['all_latents'][:, j+1].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t+1
                             xt_dtype = xt.dtype
                             guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
 
@@ -1210,6 +1209,10 @@ def main(_):
                             t_next = t_next / 1000.0 # scale to [0, 1]
                             t_next_expanded = t_next.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
                             dt = t_next_expanded - t_expanded
+                            
+                            # xt_next = sample['all_latents'][:, j+1].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t+1
+                            noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=xt_dtype) # Use original initial noise
+                            xt_next = xt + dt * (noise - xt) / (1 - t_expanded) # Euler step target
 
                             with autocast():
                                 with torch.no_grad():
@@ -1314,7 +1317,7 @@ def main(_):
                             noise = randn_tensor(x0.shape, generator=None, device=accelerator.device, dtype=x0_dtype) # Random noise
                             xt = (1 - t_expanded) * x0 + t_expanded * noise
 
-                            noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=x0_dtype) # Use original initial noise
+                            # noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=x0_dtype) # Use original initial noise
                             # xt = sample['all_latents'][:, j].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t
 
                             xt, latent_image_ids = pipeline.prepare_latents(
