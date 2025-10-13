@@ -1027,7 +1027,6 @@ def main(_):
                         'prompt_embeds': all_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'pooled_prompt_embeds': all_pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'latents': all_latents[index][-1].unsqueeze(0), # Keep batch dimension as 1, only keep the last clean latents
-                        'all_latents': all_latents[index].unsqueeze(0).cpu(), # Keep batch dimension as 1, only keep the initial latents
                     }
                     for index in range(len(prompts))
                 ]
@@ -1199,24 +1198,20 @@ def main(_):
                         batch_size = sample['latents'].shape[0]
 
                         if method == 'ppo':
-                            x0 = sample['all_latents'][:, -1].to(accelerator.device) # Clean latents
-                            xt = sample['all_latents'][:, j].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t
-                            xt_dtype = xt.dtype
+                            x0 = sample['latents'].to(accelerator.device) # Clean latents
                             guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
 
-                            t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0_dtype) # shape (batch_size,)
+                            t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0.dtype) # shape (batch_size,)
                             t = t / 1000.0 # scale to [0, 1]
                             t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
-                            t_next = sample['timesteps'][:, j+1].to(accelerator.device, dtype=x0_dtype)
+                            t_next = sample['timesteps'][:, j+1].to(accelerator.device, dtype=x0.dtype)
                             t_next = t_next / 1000.0 # scale to [0, 1]
                             t_next_expanded = t_next.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
                             dt = t_next_expanded - t_expanded
-                            
-                            xt_next = sample['all_latents'][:, j+1].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t+1
 
-                            # noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=xt_dtype) # Use original initial noise
-                            # noise = torch.randn_like(x0).to(accelerator.device, dtype=xt_dtype)
-                            # xt_next = xt + dt * (noise - x0)
+                            noise = torch.randn_like(x0).to(accelerator.device, dtype=x0.dtype)
+                            xt = (1 - t_expanded) * x0 + t_expanded * noise
+                            xt_next = (1 - t_next_expanded) * x0 + t_next_expanded * noise
 
                             with autocast():
                                 with torch.no_grad():
@@ -1322,9 +1317,6 @@ def main(_):
 
                             noise = torch.randn_like(x0).to(accelerator.device, dtype=x0_dtype)
                             xt = (1 - t_expanded) * x0 + t_expanded * noise
-
-                            # noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=x0_dtype) # Use original initial noise
-                            # xt = sample['all_latents'][:, j].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t
 
                             xt, latent_image_ids = pipeline.prepare_latents(
                                 batch_size=batch_size,

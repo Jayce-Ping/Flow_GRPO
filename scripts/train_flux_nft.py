@@ -916,7 +916,6 @@ def main(_):
                         'prompt_embeds': all_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'pooled_prompt_embeds': all_pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'latents': all_latents[index][-1].unsqueeze(0), # Keep batch dimension as 1, only keep the last clean latents
-                        'all_latents': all_latents[index].unsqueeze(0).cpu(), # Keep batch dimension as 1, only keep the initial latents
                         'rewards': {score_name: score_value[index] for score_name, score_value in rewards.items()},
                     }
                     for index in range(len(prompts))
@@ -1083,9 +1082,6 @@ def main(_):
 
                         noise = torch.randn_like(x0, device=accelerator.device, dtype=x0_dtype) # Random noise
                         xt = (1 - t_expanded) * x0 + t_expanded * noise
-
-                        # noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=x0_dtype) # Use original initial noise
-                        # xt = sample['all_latents'][:, j].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t
 
                         xt, latent_image_ids = pipeline.prepare_latents(
                             batch_size=batch_size,
