@@ -42,9 +42,10 @@ def compressibility():
     config.sample.cps = False
     config.sample.noise_level = 0.7
     config.sample.global_std = True
-    config.train.loss_type = 'nft'
+    config.sample.subfig_permutation = False
 
     # Training
+    config.train.loss_type = 'nft'
     config.enable_flexible_size = True
     config.train.batch_size = 4
     config.train.gradient_accumulation_steps = 2

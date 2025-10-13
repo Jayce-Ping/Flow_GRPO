@@ -38,7 +38,7 @@ from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, flux_pi
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
-from flow_grpo.datasets.sampler import DistributedGroupKRepeatSampler
+from flow_grpo.datasets.sampler import DistributedGroupKRepeatSampler, DistributedKRepeatSampler
 from flow_grpo.scheduler import FlowMatchNoiseScheduler
 from flow_grpo.memory_tracker import MemoryProfiler
 
@@ -81,6 +81,65 @@ def return_decay(step, decay_type):
     else:
         decay = (step - flat) * uprate
         return min(decay, uphold)
+
+def reward_compute(
+    accelerator : Accelerator,
+    pipeline : FluxPipeline,
+    config : Namespace,
+    samples : List[dict],
+    reward_fn,
+    executor : futures.ThreadPoolExecutor,
+):  
+    # Compute reward for each sample
+    for i in tqdm(
+        range(0, len(samples), config.train.batch_size),
+        desc="Computing rewards",
+        disable=not accelerator.is_local_main_process
+    ):
+        # Compute reward with train.batch_size to avoid OOM
+        # HOW?
+        # 1. encode criteria and communicate
+        # 2. modify sampler to make sure all group of one prompt is in one gpu (looks better)
+        batch = samples[i : i + config.train.batch_size]
+        heights = [sample.get('height', config.resolution) for sample in batch]
+        widths = [sample.get('width', config.resolution) for sample in batch]
+        if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
+            # Convert latents to images
+            latents = torch.cat([sample['latents'] for sample in batch], dim=0).to(accelerator.device)
+            latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
+            latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
+            latents = latents.to(dtype=pipeline.vae.dtype)
+            images = pipeline.vae.decode(latents, return_dict=False)[0]
+            images = pipeline.image_processor.postprocess(images, output_type='pil')
+        else:
+            images = []
+            for sample in batch:
+                height = sample.get('height', config.resolution)
+                width = sample.get('width', config.resolution)
+                latents = sample['latents'].to(accelerator.device)
+                latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
+                latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
+                latents = latents.to(dtype=pipeline.vae.dtype)
+                image = pipeline.vae.decode(latents, return_dict=False)[0]
+                image = pipeline.image_processor.postprocess(image, output_type='pil')[0]
+                images.append(image)
+        # Compute reward
+        prompts = [sample['prompt'] for sample in batch]
+        prompt_metadatas = [sample.get('metadata', {}) for sample in batch]
+        future = executor.submit(reward_fn, images, prompts, prompt_metadatas)
+        rewards, reward_metadatas = future.result()
+
+        # Convert rewards from dict of list to list of dict
+        rewards = [
+            dict(zip(rewards.keys(), value))
+            for value in zip(*rewards.values())
+        ]
+
+        for sample, reward in zip(batch, rewards):
+            sample['rewards'] = reward
+
+    return samples
+
 
 def augment_and_reward_compute(
     accelerator : Accelerator,
@@ -171,9 +230,8 @@ def augment_and_reward_compute(
     # Compute reward for each sample
     # TODO: group reward computation can be optimized here
     # Some subfigs will be paired multiple times for reward computation
-    cnt = defaultdict(int)
     for i in tqdm(
-        range(0, len(augmented_samples), config.train.batch_size),
+        range(0, len(augmented_samples)),
         desc="Computing rewards",
         disable=not accelerator.is_local_main_process
     ):
@@ -182,13 +240,28 @@ def augment_and_reward_compute(
         # 1. encode criteria and communicate
         # 2. modify sampler to make sure all group of one prompt is in one gpu (looks better)
         batch = augmented_samples[i : i + config.train.batch_size]
-        # Convert latents to images
-        latents = torch.cat([sample['latents'] for sample in batch], dim=0).to(accelerator.device)
-        latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
-        latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
-        latents = latents.to(dtype=pipeline.vae.dtype)
-        images = pipeline.vae.decode(latents, return_dict=False)[0]
-        images = pipeline.image_processor.postprocess(images, output_type='pil')
+        heights = [sample.get('height', config.resolution) for sample in batch]
+        widths = [sample.get('width', config.resolution) for sample in batch]
+        if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
+            # Convert latents to images
+            latents = torch.cat([sample['latents'] for sample in batch], dim=0).to(accelerator.device)
+            latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
+            latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
+            latents = latents.to(dtype=pipeline.vae.dtype)
+            images = pipeline.vae.decode(latents, return_dict=False)[0]
+            images = pipeline.image_processor.postprocess(images, output_type='pil')
+        else:
+            images = []
+            for sample in batch:
+                height = sample.get('height', config.resolution)
+                width = sample.get('width', config.resolution)
+                latents = sample['latents'].to(accelerator.device)
+                latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
+                latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
+                latents = latents.to(dtype=pipeline.vae.dtype)
+                image = pipeline.vae.decode(latents, return_dict=False)[0]
+                image = pipeline.image_processor.postprocess(image, output_type='pil')[0]
+                images.append(image)
         # Compute reward
         prompts = [sample['prompt'] for sample in batch]
         prompt_metadatas = [sample.get('metadata', {}) for sample in batch]
@@ -783,15 +856,28 @@ def main(_):
         raise NotImplementedError("Specify `prompt_fn` in ['general_ocr', 'geneval']")
 
     # Create an infinite-loop DataLoader
-    train_sampler = DistributedGroupKRepeatSampler( 
-        dataset=train_dataset,
-        batch_size=config.sample.batch_size,
-        k=config.sample.num_images_per_prompt,
-        m=config.sample.unique_sample_num_per_epoch,
-        num_replicas=accelerator.num_processes,
-        rank=accelerator.process_index,
-        seed=config.seed
-    )
+    if config.sample.subfig_permutation:
+        # If using subfig permutation, we need to make sure all samples of one prompt are on the same device
+        # so use DistributedGroupKRepeatSampler here
+        train_sampler = DistributedGroupKRepeatSampler( 
+            dataset=train_dataset,
+            batch_size=config.sample.batch_size,
+            k=config.sample.num_images_per_prompt,
+            m=config.sample.unique_sample_num_per_epoch,
+            num_replicas=accelerator.num_processes,
+            rank=accelerator.process_index,
+            seed=config.seed
+        )
+    else:
+        train_sampler = DistributedKRepeatSampler(
+            dataset=train_dataset,
+            batch_size=config.sample.batch_size,
+            k=config.sample.num_images_per_prompt,
+            m=config.sample.unique_sample_num_per_epoch,
+            num_replicas=accelerator.num_processes,
+            rank=accelerator.process_index,
+            seed=config.seed
+        )
 
     # Create a DataLoader; note that shuffling is not needed here because it’s controlled by the Sampler.
     train_dataloader = DataLoader(
@@ -1040,14 +1126,26 @@ def main(_):
 
         # Augment samples by combining different groups
         # Samples will be added 'rewards' field after this function
-        samples = augment_and_reward_compute(
-            accelerator,
-            pipeline,
-            config,
-            samples,
-            reward_fn,
-            executor
-        )
+        if config.sample.subfig_permutation:
+            # Use subfig permutation augmentation and optimized reward computation
+            samples = augment_and_reward_compute(
+                accelerator,
+                pipeline,
+                config,
+                samples,
+                reward_fn,
+                executor
+            )
+        else:
+            # Directly compute reward without augmentation
+            samples = reward_compute(
+                accelerator,
+                pipeline,
+                config,
+                samples,
+                reward_fn,
+                executor
+            )
 
         # Gather rewards across all samples
         gathered_rewards = {
@@ -1189,7 +1287,7 @@ def main(_):
 
                     with accelerator.accumulate(transformer):
                         # Use DiffusionNFT loss computation logic
-                        method = config.train.loss_type.lower()
+                        loss_type = config.train.loss_type.lower()
                         height = sample['height'][0]
                         width = sample['width'][0]
 
@@ -1197,7 +1295,7 @@ def main(_):
 
                         batch_size = sample['latents'].shape[0]
 
-                        if method == 'ppo':
+                        if loss_type == 'ppo':
                             x0 = sample['latents'].to(accelerator.device) # Clean latents
                             guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
 
@@ -1303,7 +1401,7 @@ def main(_):
                                 )
                             )
 
-                        if method == 'nft':
+                        if loss_type == 'nft':
                             x0 = sample["latents"] # Clear latents
                             x0_dtype = x0.dtype
                             guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
