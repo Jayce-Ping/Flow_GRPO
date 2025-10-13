@@ -296,7 +296,7 @@ def flux_pipeline(
     guidance = torch.full([1], guidance_scale, device=device, dtype=torch.float32)
 
     # 6. Denoising loop
-    all_latents = []
+    all_latents = [latents]
     all_noise_timesteps = []
     pipeline.scheduler.set_begin_index(0)
     with pipeline.progress_bar(total=num_inference_steps) as progress_bar:
@@ -304,8 +304,6 @@ def flux_pipeline(
             pipeline._current_timestep = t
             # Get noise_level. If not given in the arguments, use the sliding window scheduler's method to retrieve it.
             current_noise_level = noise_level if noise_level is not None else pipeline.scheduler.get_noise_level_for_timestep(t)
-            if current_noise_level > 0:
-                all_latents.append(latents)
 
             if layout is not None and i < merge_step:
                 # use sub-prompts and sub-latents if layout is given and not yet merged
@@ -319,10 +317,6 @@ def flux_pipeline(
                 current_pooled_prompt_embeds = pooled_prompt_embeds
                 img_ids = latent_image_ids
 
-            # print("Latents shape:", latents.shape)
-            # print("Img_ids shape:", img_ids.shape)
-            # print("Prompt_embeds shape:", current_prompt_embeds.shape)
-            # print("Pooled_prompt_embeds shape:", current_pooled_prompt_embeds.shape)
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
             timestep = t.expand(latents.shape[0]).to(latents.dtype)
 

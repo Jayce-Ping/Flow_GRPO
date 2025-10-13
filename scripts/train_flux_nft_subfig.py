@@ -23,7 +23,7 @@ from accelerate.utils import set_seed, ProjectConfiguration
 from collections import defaultdict
 from concurrent import futures
 from diffusers import FluxPipeline, FluxTransformer2DModel
-from diffusers.utils.torch_utils import is_compiled_module
+from diffusers.utils.torch_utils import is_compiled_module, randn_tensor
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
 from functools import partial
 from ml_collections import config_flags
@@ -1026,7 +1026,7 @@ def main(_):
                         'prompt_embeds': all_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'pooled_prompt_embeds': all_pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'latents': all_latents[index][-1].unsqueeze(0), # Keep batch dimension as 1, only keep the last clean latents
-                        'initial_latents': all_latents[index][0].unsqueeze(0).cpu(), # Keep batch dimension as 1, only keep the initial latents
+                        'all_latents': all_latents[index].unsqueeze(0).cpu(), # Keep batch dimension as 1, only keep the initial latents
                     }
                     for index in range(len(prompts))
                 ]
@@ -1201,10 +1201,11 @@ def main(_):
 
                         t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
 
-                        noise = torch.randn_like(x0) # Random noise
-                        # noise = sample["initial_latents"].to(accelerator.device, dtype=x0_dtype) # Use original initial noise
-
+                        noise = randn_tensor(x0.shape, generator=None, device=accelerator.device, dtype=x0_dtype) # Random noise
                         xt = (1 - t_expanded) * x0 + t_expanded * noise
+                        
+                        noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=x0_dtype) # Use original initial noise
+                        # xt = sample['all_latents'][:, j].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t
 
                         xt, latent_image_ids = pipeline.prepare_latents(
                             batch_size=batch_size,
