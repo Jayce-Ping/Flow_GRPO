@@ -1081,7 +1081,7 @@ def main(_):
 
                         t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
 
-                        noise = randn_tensor(x0.shape, generator=None, device=accelerator.device, dtype=x0_dtype) # Random noise
+                        noise = torch.randn_like(x0, device=accelerator.device, dtype=x0_dtype) # Random noise
                         xt = (1 - t_expanded) * x0 + t_expanded * noise
 
                         # noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=x0_dtype) # Use original initial noise
