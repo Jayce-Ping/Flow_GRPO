@@ -42,6 +42,7 @@ def compressibility():
     config.sample.cps = False
     config.sample.noise_level = 0.7
     config.sample.global_std = True
+    config.train.loss_type = 'nft'
 
     # Training
     config.enable_flexible_size = True

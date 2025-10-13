@@ -1189,7 +1189,7 @@ def main(_):
 
                     with accelerator.accumulate(transformer):
                         # Use DiffusionNFT loss computation logic
-                        method = 'ppo'
+                        method = config.train.loss_type.lower()
                         height = sample['height'][0]
                         width = sample['width'][0]
 
@@ -1198,6 +1198,7 @@ def main(_):
                         batch_size = sample['latents'].shape[0]
 
                         if method == 'ppo':
+                            x0 = sample['all_latents'][:, -1].to(accelerator.device) # Clean latents
                             xt = sample['all_latents'][:, j].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t
                             xt_dtype = xt.dtype
                             guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
@@ -1211,8 +1212,10 @@ def main(_):
                             dt = t_next_expanded - t_expanded
                             
                             # xt_next = sample['all_latents'][:, j+1].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t+1
-                            noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=xt_dtype) # Use original initial noise
-                            xt_next = xt + dt * (noise - xt) / (1 - t_expanded) # Euler step target
+
+                            # noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=xt_dtype) # Use original initial noise
+                            noise = torch.randn_like(x0).to(accelerator.device, dtype=xt_dtype)
+                            xt_next = xt + dt * (noise - x0)
 
                             with autocast():
                                 with torch.no_grad():
