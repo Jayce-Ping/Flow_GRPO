@@ -1189,65 +1189,32 @@ def main(_):
 
                     with accelerator.accumulate(transformer):
                         # Use DiffusionNFT loss computation logic
+                        method = 'ppo'
                         height = sample['height'][0]
                         width = sample['width'][0]
+
+                        loss_terms = {}
+
                         batch_size = sample['latents'].shape[0]
-                        x0 = sample["latents"] # Clear latents
-                        x0_dtype = x0.dtype
-                        guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
 
-                        t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0_dtype) # shape (batch_size,)
-                        t = t / 1000.0 # scale to [0, 1]
+                        if method == 'ppo':
+                            xt = sample['all_latents'][:, j].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t
+                            xt_next = sample['all_latents'][:, j+1].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t+1
+                            xt_dtype = xt.dtype
+                            guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
 
-                        t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
+                            t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0_dtype) # shape (batch_size,)
+                            t = t / 1000.0 # scale to [0, 1]
+                            t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
+                            t_next = sample['timesteps'][:, j+1].to(accelerator.device, dtype=x0_dtype)
+                            t_next = t_next / 1000.0 # scale to [0, 1]
+                            t_next_expanded = t_next.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
+                            dt = t_next_expanded - t_expanded
 
-                        noise = randn_tensor(x0.shape, generator=None, device=accelerator.device, dtype=x0_dtype) # Random noise
-                        xt = (1 - t_expanded) * x0 + t_expanded * noise
-                        
-                        noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=x0_dtype) # Use original initial noise
-                        # xt = sample['all_latents'][:, j].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t
-
-                        xt, latent_image_ids = pipeline.prepare_latents(
-                            batch_size=batch_size,
-                            num_channels_latents=xt.shape[2] // 4,
-                            height=height,
-                            width=width,
-                            device=accelerator.device,
-                            dtype=x0_dtype,
-                            generator=None,
-                            latents=xt
-                        )
-                        text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0_dtype)
-
-                        with autocast():
-                            with torch.no_grad():
-                                transformer.module.set_adapter("old")
-                                old_v_pred = transformer(
-                                    hidden_states=xt,
-                                    timestep=t / 1000,
-                                    guidance=guidance.expand(xt.shape[0]),
-                                    encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-                                    pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-                                    img_ids=latent_image_ids,
-                                    txt_ids=text_ids,
-                                    return_dict=False,
-                                )[0].detach()
-
-                            transformer.module.set_adapter("default")
-                            new_v_pred = transformer(
-                                hidden_states=xt,
-                                timestep=t / 1000,
-                                guidance=guidance.expand(xt.shape[0]),
-                                encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-                                pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-                                img_ids=latent_image_ids,
-                                txt_ids=text_ids,
-                                return_dict=False,
-                            )[0]
-
-                            with torch.no_grad():
-                                with transformer.module.disable_adapter():
-                                    v_ref = transformer(
+                            with autocast():
+                                with torch.no_grad():
+                                    transformer.module.set_adapter("old")
+                                    old_v_pred = transformer(
                                         hidden_states=xt,
                                         timestep=t / 1000,
                                         guidance=guidance.expand(xt.shape[0]),
@@ -1256,24 +1223,45 @@ def main(_):
                                         img_ids=latent_image_ids,
                                         txt_ids=text_ids,
                                         return_dict=False,
-                                    )[0]
+                                    )[0].detach()
 
-                        loss_terms = {}
-                        
-                        # NFT logic
-                        advantages = torch.clamp(
-                            sample["advantages"],
-                            -config.train.adv_clip_max,
-                            config.train.adv_clip_max,
-                        )
-                        method = 'ppo'
-                        if method == 'ppo':
-                            x0_pred_new = (xt - t_expanded * new_v_pred)
-                            x0_pred_old = (xt - t_expanded * old_v_pred)
-                            # x0_pred_ref = (xt - t_expanded * v_ref)
-                            log_prob_new = -((x0 - x0_pred_new) ** 2).mean(dim=tuple(range(1, x0.ndim)))
-                            log_prob_old = -((x0 - x0_pred_old) ** 2).mean(dim=tuple(range(1, x0.ndim)))
-                            # log_prob_ref = -((x0 - x0_pred_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
+                                transformer.module.set_adapter("default")
+                                new_v_pred = transformer(
+                                    hidden_states=xt,
+                                    timestep=t / 1000,
+                                    guidance=guidance.expand(xt.shape[0]),
+                                    encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                                    pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                                    img_ids=latent_image_ids,
+                                    txt_ids=text_ids,
+                                    return_dict=False,
+                                )[0]
+
+                                with torch.no_grad():
+                                    with transformer.module.disable_adapter():
+                                        v_ref = transformer(
+                                            hidden_states=xt,
+                                            timestep=t / 1000,
+                                            guidance=guidance.expand(xt.shape[0]),
+                                            encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                                            pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                                            img_ids=latent_image_ids,
+                                            txt_ids=text_ids,
+                                            return_dict=False,
+                                        )[0]
+
+                            xt_next_old = xt + dt * old_v_pred
+                            xt_next_new = xt + dt * new_v_pred
+                            xt_next_ref = xt + dt * v_ref
+
+                            log_prob_old = -((xt_next - xt_next_old) ** 2).mean(dim=tuple(range(1, xt.ndim)))
+                            log_prob_new = -((xt_next - xt_next_new) ** 2).mean(dim=tuple(range(1, xt.ndim)))
+                            # log_prob_ref = -((xt_next - xt_next_ref) ** 2).mean(dim=tuple(range(1, xt.ndim)))
+                            advantages = torch.clamp(
+                                sample["advantages"],
+                                -config.train.adv_clip_max,
+                                config.train.adv_clip_max,
+                            )
                             ratio = torch.exp(log_prob_new - log_prob_old)
                             unclipped_loss = -advantages * ratio
                             clipped_loss = -advantages * torch.clamp(
@@ -1282,7 +1270,7 @@ def main(_):
                                 1.0 + config.train.clip_range,
                             )
                             policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
-                            kl_loss = ((new_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
+                            kl_loss = -((xt_next_ref - xt_next_new) ** 2).mean(dim=tuple(range(1, xt.ndim))) * 0.5
                             kl_loss = torch.mean(kl_loss)
                             loss = policy_loss + config.train.beta * kl_loss
                             loss_terms["policy_loss"] = policy_loss.detach()
@@ -1313,7 +1301,79 @@ def main(_):
                                 )
                             )
 
-                        elif method == 'nft':
+                        if method == 'nft':
+                            x0 = sample["latents"] # Clear latents
+                            x0_dtype = x0.dtype
+                            guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
+
+                            t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0_dtype) # shape (batch_size,)
+                            t = t / 1000.0 # scale to [0, 1]
+
+                            t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
+
+                            noise = randn_tensor(x0.shape, generator=None, device=accelerator.device, dtype=x0_dtype) # Random noise
+                            xt = (1 - t_expanded) * x0 + t_expanded * noise
+
+                            noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=x0_dtype) # Use original initial noise
+                            # xt = sample['all_latents'][:, j].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t
+
+                            xt, latent_image_ids = pipeline.prepare_latents(
+                                batch_size=batch_size,
+                                num_channels_latents=xt.shape[2] // 4,
+                                height=height,
+                                width=width,
+                                device=accelerator.device,
+                                dtype=x0_dtype,
+                                generator=None,
+                                latents=xt
+                            )
+                            text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0_dtype)
+
+                            with autocast():
+                                with torch.no_grad():
+                                    transformer.module.set_adapter("old")
+                                    old_v_pred = transformer(
+                                        hidden_states=xt,
+                                        timestep=t / 1000,
+                                        guidance=guidance.expand(xt.shape[0]),
+                                        encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                                        pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                                        img_ids=latent_image_ids,
+                                        txt_ids=text_ids,
+                                        return_dict=False,
+                                    )[0].detach()
+
+                                transformer.module.set_adapter("default")
+                                new_v_pred = transformer(
+                                    hidden_states=xt,
+                                    timestep=t / 1000,
+                                    guidance=guidance.expand(xt.shape[0]),
+                                    encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                                    pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                                    img_ids=latent_image_ids,
+                                    txt_ids=text_ids,
+                                    return_dict=False,
+                                )[0]
+
+                                with torch.no_grad():
+                                    with transformer.module.disable_adapter():
+                                        v_ref = transformer(
+                                            hidden_states=xt,
+                                            timestep=t / 1000,
+                                            guidance=guidance.expand(xt.shape[0]),
+                                            encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                                            pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                                            img_ids=latent_image_ids,
+                                            txt_ids=text_ids,
+                                            return_dict=False,
+                                        )[0]
+                            
+                            # NFT logic
+                            advantages = torch.clamp(
+                                sample["advantages"],
+                                -config.train.adv_clip_max,
+                                config.train.adv_clip_max,
+                            )
                             normalized_advantages_clip = (advantages / config.train.adv_clip_max) / 2.0 + 0.5
                             r = torch.clamp(normalized_advantages_clip, 0, 1)
                             loss_terms["x0_norm"] = torch.mean(x0**2).detach()
