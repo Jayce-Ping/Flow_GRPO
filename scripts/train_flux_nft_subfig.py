@@ -148,7 +148,7 @@ def augment_and_reward_compute(
     samples : List[dict],
     reward_fn,
     executor : futures.ThreadPoolExecutor,
-):  
+):
     prompt_to_samples = defaultdict(list)
     for sample in samples:
         prompt_to_samples[sample['prompt']].append(sample)
@@ -278,6 +278,243 @@ def augment_and_reward_compute(
             sample['rewards'] = reward
 
     return augmented_samples
+
+def augment_and_reward_compute_opt(
+    accelerator : Accelerator,
+    pipeline : FluxPipeline,
+    config : Namespace,
+    samples : List[dict],
+    reward_fn,
+    executor : futures.ThreadPoolExecutor,
+):  
+    prompt_to_samples = defaultdict(list)
+    for sample in samples:
+        prompt_to_samples[sample['prompt']].append(sample)
+
+    if hasattr(config.sample, 'max_group_size') and config.sample.max_group_size is not None:
+        max_group_size = config.sample.max_group_size
+    else:
+        max_group_size = None
+
+    augmented_samples = []
+    group_size = config.sample.num_images_per_prompt
+
+    # Store subfig images and scores to avoid redundant computation
+    # key: (prompt, group_idx, subimg_idx) -> value: decoded PIL image
+    subfig_image_cache = {}
+    # key: (prompt, score_name) -> value: dict mapping (group_idx, subimg_idx) to score
+    single_score_cache = {}
+    # key: (prompt, score_name) -> value: dict mapping ((group_idx1, subimg_idx1), (group_idx2, subimg_idx2)) to score
+    pairwise_score_cache = {}
+    
+    for prompt, group_samples in prompt_to_samples.items():
+        assert len(group_samples) == group_size, f"Expected {group_size} samples for prompt {prompt}, but got {len(group_samples)}"
+        height = group_samples[0].get('height', config.resolution)
+        width = group_samples[0].get('width', config.resolution)
+        layout = group_samples[0].get('layout', (1, 1))
+        sub_height = height // layout[0]
+        sub_width = width // layout[1]
+        subimage_cnt = layout[0] * layout[1]
+        all_sublatents = torch.cat(
+            [
+                divide_latents(sample['latents'], height, width, sub_height, sub_width) # (1, layout[0], layout[1], sub_seq_len, C)
+                for sample in group_samples
+        ], dim=0)# (group_size, layout[0], layout[1], sub_seq_len, C)
+        all_sublatents = all_sublatents.reshape(group_size, subimage_cnt, *all_sublatents.shape[3:]) # (group_size, subimage_cnt, sub_seq_len, C)
+        
+        # Decode and cache all subfig images
+        for group_idx in range(group_size):
+            for subimg_idx in range(subimage_cnt):
+                cache_key = (prompt, group_idx, subimg_idx)
+                if cache_key not in subfig_image_cache:
+                    sublatent = all_sublatents[group_idx, subimg_idx:subimg_idx+1]  # (1, sub_seq_len, C)
+                    sublatent = sublatent.to(accelerator.device)
+                    sublatent = pipeline._unpack_latents(sublatent, sub_height, sub_width, pipeline.vae_scale_factor)
+                    sublatent = (sublatent / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
+                    sublatent = sublatent.to(dtype=pipeline.vae.dtype)
+                    subimage = pipeline.vae.decode(sublatent, return_dict=False)[0]
+                    subimage = pipeline.image_processor.postprocess(subimage, output_type='pil')[0]
+                    subfig_image_cache[cache_key] = subimage
+        
+        # A 2x2 image group of size 3 can generate 3^(2x2) = 81 different images, use a max_group_size to constraint
+        total_combinations = group_size ** subimage_cnt
+        sample_num = total_combinations
+        if max_group_size is not None:
+            sample_num = min(max_group_size, sample_num)
+
+        # Strategy: balanced sampling
+        sample_indices = []
+        # Make sure original images are included
+        for i in range(group_size):
+            base_tuple = tuple([i] * subimage_cnt)
+            base_idx = sum(val * (group_size ** pos) for pos, val in enumerate(reversed(base_tuple)))
+            sample_indices.append(base_idx)
+
+        remaining = sample_num - len(sample_indices)
+        if remaining <= 0:
+            sample_indices = random.sample(sample_indices, sample_num)
+        else:
+            all_indices = set(range(total_combinations)) - set(sample_indices)
+            sample_indices.extend(random.sample(list(all_indices), remaining))
+
+        # Decode index to tuple
+        sample_indices = [num_to_base_tuple(idx, group_size, subimage_cnt) for idx in sample_indices]
+
+        # The i-th sub-image is from the idx[i]-th image in the group
+        sample_indices = [
+            [(idx[i], i) for i in range(len(idx))]
+            for idx in sample_indices
+        ]
+
+        for indices in sample_indices:
+            sampled_sublatents = torch.stack(
+                [all_sublatents[i,j] for i,j in indices],
+                dim=0
+            ).reshape(1, layout[0], layout[1], *all_sublatents.shape[2:]) # (1, layout[0], layout[1], sub_seq_len, C)
+            
+            sampled_sublatents = merge_latents(
+                sampled_sublatents,
+                height,
+                width,
+                sub_height,
+                sub_width
+            )
+            new_sample = group_samples[0].copy()
+            new_sample['latents'] = sampled_sublatents
+            new_sample['made_of'] = indices
+            augmented_samples.append(new_sample)
+
+    # Compute all required single and pairwise rewards
+    _compute_cached_rewards(
+        accelerator,
+        pipeline,
+        config,
+        reward_fn,
+        executor,
+        subfig_image_cache,
+        single_score_cache,
+        pairwise_score_cache,
+        augmented_samples
+    )
+    
+    # Aggregate rewards for each augmented sample
+    # TODO
+    for sample in tqdm(
+        augmented_samples,
+        desc="Aggregating rewards",
+        disable=not accelerator.is_local_main_process
+    ):
+        prompt = sample['prompt']
+        indices = sample['made_of']  # [(group_idx, subimg_idx), ...]
+
+        # Aggregate single image rewards
+        aggregated_rewards = {}
+        for score_name in single_score_cache.get(prompt, {}).keys():
+            scores = [
+                single_score_cache[prompt][score_name][(group_idx, subimg_idx)]
+                for group_idx, subimg_idx in indices
+            ]
+            # Calculate mean score for this augmented sample
+            aggregated_rewards[score_name] = np.mean(scores)
+
+        # Aggregate pairwise rewards
+        for score_name in pairwise_score_cache.get(prompt, {}).keys():
+            pairwise_scores = []
+            # 计算所有子图对之间的pairwise score
+            for i in range(len(indices)):
+                for j in range(i+1, len(indices)):
+                    idx1 = indices[i]
+                    idx2 = indices[j]
+                    # 确保使用排序后的键以利用对称性
+                    pair_key = tuple(sorted([idx1, idx2]))
+                    if pair_key in pairwise_score_cache[prompt][score_name]:
+                        pairwise_scores.append(pairwise_score_cache[prompt][score_name][pair_key])
+            
+            if pairwise_scores:
+                aggregated_rewards[score_name] = np.mean(pairwise_scores)
+        
+        # 计算最终的平均reward（如果reward_fn有特定的聚合逻辑，需要相应调整）
+        if aggregated_rewards:
+            aggregated_rewards['avg'] = np.mean(list(aggregated_rewards.values()))
+        
+        sample['rewards'] = aggregated_rewards
+
+    return augmented_samples
+
+
+def _compute_cached_rewards(
+    accelerator,
+    pipeline,
+    config,
+    reward_fn,
+    executor,
+    subfig_image_cache,
+    single_score_cache,
+    pairwise_score_cache,
+    augmented_samples
+):
+    """
+    计算并缓存所有需要的单图和pairwise reward
+    """
+    # 从reward_fn中提取single和pairwise的score函数
+    # 假设reward_fn是multi_score返回的函数，我们需要区分single和pairwise score
+    # 这里需要修改reward_fn的结构，使其能够分别返回single和pairwise的score函数
+    
+    # 收集所有需要计算的子图
+    prompt_to_subfigs = defaultdict(set)
+    prompt_to_subfig_pairs = defaultdict(set)
+    
+    for sample in augmented_samples:
+        prompt = sample['prompt']
+        indices = sample['made_of']
+        
+        # 收集单图
+        for group_idx, subimg_idx in indices:
+            prompt_to_subfigs[prompt].add((group_idx, subimg_idx))
+        
+        # 收集子图对
+        for i in range(len(indices)):
+            for j in range(i+1, len(indices)):
+                idx1 = indices[i]
+                idx2 = indices[j]
+                pair_key = tuple(sorted([idx1, idx2]))
+                prompt_to_subfig_pairs[prompt].add(pair_key)
+    
+    # 批量计算单图reward
+    for prompt, subfig_set in prompt_to_subfigs.items():
+        subfig_list = list(subfig_set)
+        images = [subfig_image_cache[(prompt, group_idx, subimg_idx)] for group_idx, subimg_idx in subfig_list]
+        prompts = [prompt] * len(images)
+        metadata = [{}] * len(images)
+        
+        # 调用reward_fn计算（这里假设reward_fn能处理单图）
+        future = executor.submit(reward_fn, images, prompts, metadata)
+        rewards, reward_metadatas = future.result()
+        
+        # 缓存结果
+        if prompt not in single_score_cache:
+            single_score_cache[prompt] = {}
+        
+        for score_name, score_values in rewards.items():
+            if score_name == 'avg':
+                continue
+            if score_name not in single_score_cache[prompt]:
+                single_score_cache[prompt][score_name] = {}
+            
+            for idx, (group_idx, subimg_idx) in enumerate(subfig_list):
+                single_score_cache[prompt][score_name][(group_idx, subimg_idx)] = score_values[idx]
+    
+    # 批量计算pairwise reward（如果有pairwise score函数）
+    # TODO: 这部分需要根据实际的pairwise score函数实现
+    # for prompt, pair_set in prompt_to_subfig_pairs.items():
+    #     pair_list = list(pair_set)
+    #     image_pairs = [
+    #         (subfig_image_cache[(prompt, idx1[0], idx1[1])], 
+    #          subfig_image_cache[(prompt, idx2[0], idx2[1])])
+    #         for idx1, idx2 in pair_list
+    #     ]
+    #     # 调用pairwise reward函数
+    #     # ...
 
 
 @torch.no_grad()
@@ -1310,6 +1547,18 @@ def main(_):
                             noise = torch.randn_like(x0).to(accelerator.device, dtype=x0.dtype)
                             xt = (1 - t_expanded) * x0 + t_expanded * noise
                             xt_next = (1 - t_next_expanded) * x0 + t_next_expanded * noise
+
+                            xt, latent_image_ids = pipeline.prepare_latents(
+                                batch_size=batch_size,
+                                num_channels_latents=xt.shape[2] // 4,
+                                height=height,
+                                width=width,
+                                device=accelerator.device,
+                                dtype=x0_dtype,
+                                generator=None,
+                                latents=xt
+                            )
+                            text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0_dtype)
 
                             with autocast():
                                 with torch.no_grad():
