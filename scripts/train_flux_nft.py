@@ -1079,7 +1079,7 @@ def main(_):
                         t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0_dtype) # shape (batch_size,)
                         t = t / 1000
 
-                        t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
+                        t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
 
                         noise = torch.randn_like(x0, device=accelerator.device, dtype=x0_dtype) # Random noise
                         xt = (1 - t_expanded) * x0 + t_expanded * noise
