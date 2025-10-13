@@ -1256,11 +1256,9 @@ def main(_):
                             xt_next_new = xt + dt * new_v_pred
                             xt_next_ref = xt + dt * v_ref
 
-                            # log_prob_old = -((xt_next - xt_next_old)**2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
-                            # log_prob_new = -((xt_next - xt_next_new)**2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
-                            log_prob_old = -((xt_next - xt_next_old) ** 2).mean(dim=tuple(range(1, xt.ndim)))
-                            log_prob_new = -((xt_next - xt_next_new) ** 2).mean(dim=tuple(range(1, xt.ndim)))
-                            # log_prob_ref = -((xt_next - xt_next_ref) ** 2).mean(dim=tuple(range(1, xt.ndim)))
+                            log_prob_old = -((xt_next - xt_next_old)**2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
+                            log_prob_new = -((xt_next - xt_next_new)**2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
+                            log_prob_ref = -((xt_next - xt_next_ref)**2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
                             advantages = torch.clamp(
                                 sample["advantages"],
                                 -config.train.adv_clip_max,
@@ -1274,7 +1272,7 @@ def main(_):
                                 1.0 + config.train.clip_range,
                             )
                             policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
-                            kl_loss = ((xt_next_ref - xt_next_new) ** 2).mean(dim=tuple(range(1, xt.ndim))) * 0.5
+                            kl_loss = ((xt_next_ref - xt_next_new) ** 2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
                             kl_loss = torch.mean(kl_loss)
                             loss = policy_loss + config.train.beta * kl_loss
                             loss_terms["policy_loss"] = policy_loss.detach()
