@@ -1211,18 +1211,18 @@ def main(_):
                             t_next_expanded = t_next.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
                             dt = t_next_expanded - t_expanded
                             
-                            # xt_next = sample['all_latents'][:, j+1].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t+1
+                            xt_next = sample['all_latents'][:, j+1].to(accelerator.device, dtype=x0_dtype) # Use original noised latents at step t+1
 
                             # noise = sample["all_latents"][:, 0].to(accelerator.device, dtype=xt_dtype) # Use original initial noise
-                            noise = torch.randn_like(x0).to(accelerator.device, dtype=xt_dtype)
-                            xt_next = xt + dt * (noise - x0)
+                            # noise = torch.randn_like(x0).to(accelerator.device, dtype=xt_dtype)
+                            # xt_next = xt + dt * (noise - x0)
 
                             with autocast():
                                 with torch.no_grad():
                                     transformer.module.set_adapter("old")
                                     old_v_pred = transformer(
                                         hidden_states=xt,
-                                        timestep=t / 1000,
+                                        timestep=t,
                                         guidance=guidance.expand(xt.shape[0]),
                                         encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                         pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
@@ -1234,7 +1234,7 @@ def main(_):
                                 transformer.module.set_adapter("default")
                                 new_v_pred = transformer(
                                     hidden_states=xt,
-                                    timestep=t / 1000,
+                                    timestep=t,
                                     guidance=guidance.expand(xt.shape[0]),
                                     encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                     pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
@@ -1247,7 +1247,7 @@ def main(_):
                                     with transformer.module.disable_adapter():
                                         v_ref = transformer(
                                             hidden_states=xt,
-                                            timestep=t / 1000,
+                                            timestep=t,
                                             guidance=guidance.expand(xt.shape[0]),
                                             encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                             pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
@@ -1260,6 +1260,8 @@ def main(_):
                             xt_next_new = xt + dt * new_v_pred
                             xt_next_ref = xt + dt * v_ref
 
+                            # log_prob_old = -((xt_next - xt_next_old)**2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
+                            # log_prob_new = -((xt_next - xt_next_new)**2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
                             log_prob_old = -((xt_next - xt_next_old) ** 2).mean(dim=tuple(range(1, xt.ndim)))
                             log_prob_new = -((xt_next - xt_next_new) ** 2).mean(dim=tuple(range(1, xt.ndim)))
                             # log_prob_ref = -((xt_next - xt_next_ref) ** 2).mean(dim=tuple(range(1, xt.ndim)))
@@ -1340,7 +1342,7 @@ def main(_):
                                     transformer.module.set_adapter("old")
                                     old_v_pred = transformer(
                                         hidden_states=xt,
-                                        timestep=t / 1000,
+                                        timestep=t,
                                         guidance=guidance.expand(xt.shape[0]),
                                         encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                         pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
@@ -1352,7 +1354,7 @@ def main(_):
                                 transformer.module.set_adapter("default")
                                 new_v_pred = transformer(
                                     hidden_states=xt,
-                                    timestep=t / 1000,
+                                    timestep=t,
                                     guidance=guidance.expand(xt.shape[0]),
                                     encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                     pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
@@ -1365,7 +1367,7 @@ def main(_):
                                     with transformer.module.disable_adapter():
                                         v_ref = transformer(
                                             hidden_states=xt,
-                                            timestep=t / 1000,
+                                            timestep=t,
                                             guidance=guidance.expand(xt.shape[0]),
                                             encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
                                             pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
@@ -1486,7 +1488,9 @@ def main(_):
                 transformer_trainable_parameters, old_transformer_trainable_parameters, strict=True
             ):
                 # In-place update
-                tgt_param.data.mul_(decay).add_(src_param.detach().data, alpha=1 - decay)
+                # tgt_param.data.mul_(decay).add_(src_param.detach().data, alpha=1 - decay)
+                # Copy directly from src to tgt without EMA
+                tgt_param.data.copy_(src_param.detach().data)
                 assert src_param is not tgt_param
 
         if config.enable_mem_log:
