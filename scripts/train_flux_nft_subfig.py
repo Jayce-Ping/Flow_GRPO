@@ -1278,14 +1278,14 @@ def main(_):
                                 1.0 + config.train.clip_range,
                             )
                             policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
-                            kl_loss = -((xt_next_ref - xt_next_new) ** 2).mean(dim=tuple(range(1, xt.ndim))) * 0.5
+                            kl_loss = ((xt_next_ref - xt_next_new) ** 2).mean(dim=tuple(range(1, xt.ndim))) * 0.5
                             kl_loss = torch.mean(kl_loss)
                             loss = policy_loss + config.train.beta * kl_loss
                             loss_terms["policy_loss"] = policy_loss.detach()
                             loss_terms["unclipped_loss"] = unclipped_loss.mean().detach()
                             loss_terms["clipped_loss"] = clipped_loss.mean().detach()
                             loss_terms["kl_loss"] = kl_loss.mean().detach()
-                            loss_terms['total_loss'] = loss.detach()
+                            loss_terms['loss'] = loss.detach()
                             info['ratio'].append(ratio.abs().mean())
                             info["clipfrac"].append(
                                 torch.mean(
@@ -1425,20 +1425,16 @@ def main(_):
                             kl_div_loss = ((new_v_pred - v_ref) ** 2).mean(
                                 dim=tuple(range(1, x0.ndim))
                             )
-
-                            loss += config.train.beta * torch.mean(kl_div_loss)
                             kl_div_loss = torch.mean(kl_div_loss)
 
-                            loss_terms["kl_div_loss"] = torch.mean(kl_div_loss).detach()
+                            loss += config.train.beta * kl_div_loss
 
-                            loss_terms["kl_div"] = torch.mean(
-                                ((new_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
-                            ).detach()
+                            loss_terms["kl_div"] = kl_div_loss.detach()
                             loss_terms["old_kl_div"] = torch.mean(
                                 ((old_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
                             ).detach()
 
-                            loss_terms["total_loss"] = loss.detach()
+                            loss_terms["loss"] = loss.detach()
 
                         # Track loss tensors
                         if config.enable_mem_log:

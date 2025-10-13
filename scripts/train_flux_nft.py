@@ -1192,15 +1192,12 @@ def main(_):
                         kl_div_loss = ((new_v_pred - v_ref) ** 2).mean(
                             dim=tuple(range(1, x0.ndim))
                         )
-
-                        loss += config.train.beta * torch.mean(kl_div_loss)
                         kl_div_loss = torch.mean(kl_div_loss)
 
-                        loss_terms["kl_div_loss"] = torch.mean(kl_div_loss).detach()
+                        loss += config.train.beta * kl_div_loss
 
-                        loss_terms["kl_div"] = torch.mean(
-                            ((new_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
-                        ).detach()
+                        loss_terms["kl_div_loss"] = kl_div_loss.detach()
+
                         loss_terms["old_kl_div"] = torch.mean(
                             ((old_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
                         ).detach()
