@@ -77,29 +77,29 @@ def compressibility():
 
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
-def pickscore_flux_ratio():
+def subclipI_flux():
     gpu_number = 4
     config = compressibility()
 
-    config.dataset = os.path.join(os.getcwd(), "dataset/pickscore")
-    config.prompt_fn = "general_ocr"
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/train_half_2by2")
+    config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
     # config.logging_platform = "swanlab"
 
     config.enable_flexible_size = False
-    config.resolution = 512
+    config.resolution = 1024
     config.max_sequence_length = 512
 
     # Testing
-    config.test.batch_size = 16
+    config.test.batch_size = 5
     config.test.num_steps = 20
     config.test.merge_step = 0
 
     # Sampling
     ## sliding window scheduler
     config.sample.cps = False
-    config.sample.num_steps = 10
+    config.sample.num_steps = 20
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
     config.sample.left_boundary = 1
@@ -113,8 +113,8 @@ def pickscore_flux_ratio():
 
     ## batches
     config.enable_gradient_checkpointing = False
-    config.sample.batch_size = 3
-    config.sample.num_images_per_prompt = 16
+    config.sample.batch_size = 1
+    config.sample.num_images_per_prompt = 4
     config.sample.max_group_size = 16
     config.sample.unique_sample_num_per_epoch = 40 # Number of unique prompts used in each epoch all gathered
     config.sample.sample_num_per_epoch = math.lcm(
@@ -149,11 +149,15 @@ def pickscore_flux_ratio():
     config.eval_freq = 10 # 0 for no eval applied
 
     config.reward_fn = {
-        "pickscore": 1.0,
+        "subfig_clipI" : 1
     }
-    config.aggregate_fn = None
+    agg_fn = None
 
-    config.save_dir = os.path.join(SAVE_DIR, f'pickscore', f'flux-ratio-{gpu_number}gpu-8steps')
+    config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+
+    config.aggregate_fn = agg_fn
+
+    config.save_dir = os.path.join(SAVE_DIR, f'subclipI', f'flux-{gpu_number}gpu-2by2-half_8steps')
 
     return config
 
@@ -316,7 +320,7 @@ def grid_consistency_clip_flux():
     }
     def agg_fn(grid_layout : np.ndarray, consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
         return grid_layout * consistency_score + subfig_clipT
-    
+
     config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
 
     config.aggregate_fn = agg_fn
