@@ -102,6 +102,7 @@ def augment_and_reward_compute(
     augmented_samples = []
     group_size = config.sample.num_images_per_prompt
     for prompt, group_samples in prompt_to_samples.items():
+        assert len(group_samples) == group_size, f"Expected {group_size} samples for prompt {prompt}, but got {len(group_samples)}"
         height = group_samples[0].get('height', config.resolution)
         width = group_samples[0].get('width', config.resolution)
         layout = group_samples[0].get('layout', (1, 1))
@@ -113,7 +114,7 @@ def augment_and_reward_compute(
                 divide_latents(sample['latents'], height, width, sub_height, sub_width) # (1, layout[0], layout[1], sub_seq_len, C)
                 for sample in group_samples
         ], dim=0)# (group_size, layout[0], layout[1], sub_seq_len, C)
-        all_sublatents = all_sublatents.view(group_size, subimage_cnt, *all_sublatents.shape[3:]) # (group_size, subimage_cnt, sub_seq_len, C)
+        all_sublatents = all_sublatents.reshape(group_size, subimage_cnt, *all_sublatents.shape[3:]) # (group_size, subimage_cnt, sub_seq_len, C)
         # A 2x2 image group of size 3 can generate 3^(2x2) = 81 different images, use a max_group_size to constraint
         total_combinations = group_size ** subimage_cnt
         sample_num = total_combinations
@@ -130,7 +131,7 @@ def augment_and_reward_compute(
         # Make sure original images are included
         for i in range(group_size):
             base_tuple = tuple([i] * subimage_cnt)
-            base_idx = sum(i * (group_size ** pos) for pos, i in enumerate(reversed(base_tuple)))
+            base_idx = sum(val * (group_size ** pos) for pos, val in enumerate(reversed(base_tuple)))
             sample_indices.append(base_idx)
 
         remaining = sample_num - len(sample_indices)
@@ -153,7 +154,7 @@ def augment_and_reward_compute(
             sampled_sublatents = torch.stack(
                 [all_sublatents[i,j] for i,j in indices],
                 dim=0
-            ).view(1, layout[0], layout[1], *all_sublatents.shape[2:]) # (1, layout[0], layout[1], sub_seq_len, C)
+            ).reshape(1, layout[0], layout[1], *all_sublatents.shape[2:]) # (1, layout[0], layout[1], sub_seq_len, C)
             
             sampled_sublatents = merge_latents(
                 sampled_sublatents,
