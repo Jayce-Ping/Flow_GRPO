@@ -133,6 +133,7 @@ def subclipI_flux():
     config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
 
     # Training
+    config.train.loss_type = 'nft'
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
     config.train.gradient_step_per_epoch = 1
@@ -218,6 +219,7 @@ def pickscore_flux():
     config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
 
     # Training
+    config.train.loss_type = 'nft'
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
     config.train.gradient_step_per_epoch = 1
@@ -300,6 +302,7 @@ def grid_consistency_clip_flux():
     config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
 
     # Training
+    config.train.loss_type = 'nft'
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
     config.train.gradient_step_per_epoch = 1
