@@ -1579,14 +1579,15 @@ def main(_):
             # assert accelerator.sync_gradients
 
         with torch.no_grad():
-            decay = return_decay(global_step, config.train.decay_type)
+            if config.train.loss_type.lower() == 'ppo':
+                decay = 0.0
+            else:
+                decay = return_decay(global_step, config.train.decay_type)
             for src_param, tgt_param in zip(
                 transformer_trainable_parameters, old_transformer_trainable_parameters, strict=True
             ):
                 # In-place update
                 tgt_param.data.mul_(decay).add_(src_param.detach().data, alpha=1 - decay)
-                # Copy directly from src to tgt without EMA
-                # tgt_param.data.copy_(src_param.detach().data)
                 assert src_param is not tgt_param
 
         if config.enable_mem_log:
