@@ -111,6 +111,7 @@ def subclipI_flux():
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.guidance_scale = 3.5
+    config.sample.subfig_permutation = True
 
     ## batches
     config.enable_gradient_checkpointing = False
@@ -195,6 +196,7 @@ def pickscore_flux():
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.guidance_scale = 3.5
+    config.sample.subfig_permutation = False
 
     ## batches
     config.enable_gradient_checkpointing = False
@@ -276,6 +278,7 @@ def grid_consistency_clip_flux():
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.guidance_scale = 3.5
+    config.sample.subfig_permutation = True
 
     ## batches
     config.enable_gradient_checkpointing = False
