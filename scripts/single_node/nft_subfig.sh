@@ -15,4 +15,4 @@ accelerate launch \
     --num_processes=$NUM_GPUS \
     --main_process_port 29501 \
     scripts/train_flux_nft_subfig.py \
-    --config config/nft.py:subclipI_flux
+    --config config/nft.py:consistencyReward_clip_flux

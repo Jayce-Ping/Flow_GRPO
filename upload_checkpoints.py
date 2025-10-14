@@ -41,12 +41,12 @@ def delete_checkpoint_dir(path_in_repo, repo_id, commit_message="Delete folder",
     print(f"Folder '{path_in_repo}' successfully deleted from '{repo_id}'.")
 
 if __name__ == "__main__":
-    label = "Delete duplicate checkpoints"
-    SAVE_DIR = '/root/autodl-tmp/Flow_GRPO/logs'
-    folder_name = 'grid-consistency-subclip/flux-7gpu-2by2-half_grid-times-consistency-plus-clipT_8steps'
+    label = "flux, 4gpu, sampling 20steps, qwen consistency"
+    SAVE_DIR = '/home/users/astar/ares/cp3jia/scratch/Flow_NFT/logs'
+    folder_name = 'grid-consistency-subclip/flux-4gpu-2by2-half_grid-times-consistency-plus-clipT_20steps'
     folder_path = os.path.join(SAVE_DIR, folder_name)
     path_in_repo = folder_name
-    repo_id = "Jayce-Ping/Flux-GRPO"
+    repo_id = "Jayce-Ping/Flux-NFT"
 
     if not label:
         label = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
