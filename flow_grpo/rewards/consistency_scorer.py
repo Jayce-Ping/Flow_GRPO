@@ -16,7 +16,7 @@ import numpy as np
 import openai
 from openai import OpenAI, AsyncOpenAI
 from PIL import Image
-from flow_grpo.utils import pil_image_to_base64, divide_image, extract_grid_info
+from flow_grpo.utils import pil_image_to_base64, divide_image, extract_grid_info, hash_pil_image
 from flow_grpo.utils import get_yes_cond_prob_from_completion
 
 # VLLM log filter
@@ -32,7 +32,8 @@ class ConsistencyScorer:
             model='Qwen2.5-VL-7B-Instruct',
             max_concurrent=100,
             max_retries=10,
-            timeout=60
+            timeout=60,
+            max_cache_size=1024,
         ):
         self.client = client
         self.model = model
@@ -40,6 +41,15 @@ class ConsistencyScorer:
         self.max_retries = max_retries
         self.timeout = timeout
         self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
+        self.max_cache_size = max_cache_size if max_cache_size is not None else math.inf
+        self.cache : dict[tuple[str, str, str], float] = {} # (img1_hash, img2_hash, criteria_text) -> score
+
+    def add_to_cache(self, key: tuple[str, str, str], value: float):
+        if len(self.cache) >= self.max_cache_size:
+            # Remove the oldest item in the cache (FIFO)
+            self.cache.pop(next(iter(self.cache)))
+
+        self.cache[key] = value
 
     def __call__(self, images : list[Image.Image], prompts : list[str], metadatas : list[dict], canonicalize: bool = False) -> list[float]:
         return asyncio.run(self.__async_call__(images, prompts, metadatas, canonicalize))
@@ -96,7 +106,10 @@ class ConsistencyScorer:
         Async version of compute_image_consistency with concurrency control.
         """
 
-        async def process_image_pair(image1, image2):
+        async def process_image_pair(image1, image2) -> float:
+            cache_key = (hash_pil_image(image1), hash_pil_image(image2), criteria_text)
+            if cache_key in self.cache:
+                return self.cache[cache_key]
             messages = [
                 {
                     "role": "user",
@@ -120,14 +133,17 @@ class ConsistencyScorer:
                             top_logprobs=top_logprobs,
                             timeout=self.timeout
                         )
-                        return completion
+
+                    score = get_yes_cond_prob_from_completion(completion, canonicalize=canonicalize)
+                    self.add_to_cache(cache_key, score)
+                    return score
+
                 except Exception as e:
                     print(f"API error on attempt {attempt+1}/{self.max_retries}: {e}")
                     if attempt < self.max_retries - 1:
                         await asyncio.sleep(2 ** attempt)
                     else:
-                        return None
-
+                        return 0.0  # Return a default score on failure, do not cache failed attempts
 
         grid_info = extract_grid_info(prompt)
         sub_images = divide_image(image, grid_info)
@@ -139,6 +155,6 @@ class ConsistencyScorer:
             tasks.append(task)
 
         # Execute all tasks concurrently
-        completions = await asyncio.gather(*tasks)
+        scores = await asyncio.gather(*tasks)
 
-        return [get_yes_cond_prob_from_completion(c, canonicalize=canonicalize) for c in completions]
+        return scores

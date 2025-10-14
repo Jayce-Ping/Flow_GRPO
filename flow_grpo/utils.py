@@ -4,6 +4,7 @@ from io import BytesIO
 from typing import List, Union, Optional, Dict
 from itertools import permutations, combinations, chain
 import math
+import hashlib
 
 import torch.distributed as dist
 from PIL import Image
@@ -25,6 +26,16 @@ def num_to_base_tuple(num, base, length):
     return tuple(result.tolist())
 
 # -------------------------------------Image Utils-------------------------------------
+
+def hash_pil_image(image: Image.Image) -> str:
+    """
+        Generate a hash string for a PIL Image.
+        Args:
+            image (Image.Image): PIL Image object
+        Returns:
+            str: Hash string of the image
+    """
+    return hashlib.md5(image.tobytes()).hexdigest()
 
 def pil_image_to_base64(image : Image.Image, format="JPEG") -> str:
     """
