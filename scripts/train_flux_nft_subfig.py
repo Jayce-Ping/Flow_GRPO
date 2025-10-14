@@ -1554,11 +1554,11 @@ def main(_):
                                 height=height,
                                 width=width,
                                 device=accelerator.device,
-                                dtype=x0_dtype,
+                                dtype=x0.dtype,
                                 generator=None,
                                 latents=xt
                             )
-                            text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0_dtype)
+                            text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0.dtype)
 
                             with autocast():
                                 with torch.no_grad():
@@ -1652,15 +1652,14 @@ def main(_):
 
                         if loss_type == 'nft':
                             x0 = sample["latents"] # Clear latents
-                            x0_dtype = x0.dtype
                             guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
 
-                            t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0_dtype) # shape (batch_size,)
+                            t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0.dtype) # shape (batch_size,)
                             t = t / 1000.0 # scale to [0, 1]
 
                             t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
 
-                            noise = torch.randn_like(x0).to(accelerator.device, dtype=x0_dtype)
+                            noise = torch.randn_like(x0).to(accelerator.device, dtype=x0.dtype)
                             xt = (1 - t_expanded) * x0 + t_expanded * noise
 
                             xt, latent_image_ids = pipeline.prepare_latents(
@@ -1669,11 +1668,11 @@ def main(_):
                                 height=height,
                                 width=width,
                                 device=accelerator.device,
-                                dtype=x0_dtype,
+                                dtype=x0.dtype,
                                 generator=None,
                                 latents=xt
                             )
-                            text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0_dtype)
+                            text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0.dtype)
 
                             with autocast():
                                 with torch.no_grad():
