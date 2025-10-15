@@ -1097,7 +1097,8 @@ def main(_):
                             width=widths[0],
                             generator=generators,
                             layout=layouts[0],
-                            merge_step=config.sample.merge_step
+                            merge_step=config.sample.merge_step,
+                            cps=config.sample.cps
                     )
                     images = list(images.unbind(0)) # List[Tensor(C, H, W)] with length batch_size
                     all_latents = torch.stack(all_latents, dim=1) # (batch_size, num_steps + 1, seq_len, C)
@@ -1129,7 +1130,8 @@ def main(_):
                                 width=widths[index],
                                 generator=generators[index] if generators is not None else None,
                                 layout=layouts[index],
-                                merge_step=config.sample.merge_step
+                                merge_step=config.sample.merge_step,
+                                cps=config.sample.cps
                         )
                     images.append(this_image.squeeze(0))  # add (C, H, W)
                     all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_steps + 1, seq_len, C)
