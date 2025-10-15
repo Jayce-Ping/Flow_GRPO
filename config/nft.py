@@ -359,8 +359,8 @@ def grid_consistency_clip_flux():
 
     # Sampling
     ## sliding window scheduler
-    config.sample.cps = True
-    config.sample.num_steps = 8
+    config.sample.cps = False
+    config.sample.num_steps = 10
     config.sample.use_sliding_window = True
     config.sample.window_size = 1
     config.sample.left_boundary = 1
@@ -409,8 +409,8 @@ def grid_consistency_clip_flux():
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
-    config.save_freq = 20 # epoch
-    config.eval_freq = 20 # 0 for no eval applied
+    config.save_freq = 5 # epoch
+    config.eval_freq = 5 # 0 for no eval applied
 
     config.reward_fn = {
         "grid_layout": 1.0,
@@ -424,7 +424,7 @@ def grid_consistency_clip_flux():
 
     config.aggregate_fn = agg_fn
 
-    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT_8steps')
+    config.save_dir = os.path.join(SAVE_DIR, f'grid-consistency-subclip', f'flux-{gpu_number}gpu-2by2-half_grid-times-consistency-plus-clipT_10steps')
 
     return config
 
