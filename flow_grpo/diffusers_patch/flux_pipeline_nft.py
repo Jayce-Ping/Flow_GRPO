@@ -202,6 +202,7 @@ def compute_log_prob(
         seq_len=latents.shape[1],
         device=device,
     )
+    sigma_max = pipeline.scheduler.sigmas[1]
 
     # TODO: Add correct merge logic here
     # 2. Prepare prompt_embeds and latents if using dividing
@@ -276,7 +277,8 @@ def compute_log_prob(
         noise_level=noise_level,
         prev_sample=next_latents.float(),
         cps=config.sample.cps,
-        return_log_prob=True
+        return_log_prob=True,
+        sigma_max=sigma_max
     )
 
     # if timestep_index < config.sample.merge_step:
@@ -506,7 +508,7 @@ def flux_pipeline(
                 sample=latents.float(),
                 noise_level=current_noise_level,
                 prev_sample=None,
-                sigma_max=timesteps[1].item(),
+                sigma_max=timesteps[1].item() / 1000,
                 cps=cps,
                 return_log_prob=False,
             )
