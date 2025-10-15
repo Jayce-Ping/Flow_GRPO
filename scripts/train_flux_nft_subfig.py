@@ -83,6 +83,7 @@ def reward_compute(
     max_log_num : int = 30,
     step : int = 0
 ):  
+    log_items = []
     # Compute reward for each sample
     for i in tqdm(
         range(0, len(samples), config.train.batch_size),
@@ -135,19 +136,22 @@ def reward_compute(
             sample['rewards'] = reward
 
         if accelerator.is_main_process and i * config.train.batch_size < max_log_num:
-            # Log some images
-            logging_platform.log(
-                {
-                    "train_images": [
-                        logging_platform.Image(
-                            image,
-                            caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
-                        )
-                        for idx, (image, prompt, reward) in enumerate(zip(images, prompts, rewards))
-                    ]
-                },
-                step=step,
-            )
+            log_items.extend(list(zip(images, prompts, rewards)))
+
+    if accelerator.is_main_process:
+        # Log some images
+        logging_platform.log(
+            {
+                "train_images": [
+                    logging_platform.Image(
+                        image,
+                        caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
+                    )
+                    for idx, (image, prompt, reward) in enumerate(log_items)
+                ]
+            },
+            step=step,
+        )
 
     return samples
 
@@ -245,6 +249,7 @@ def augment_and_reward_compute(
     # Compute reward for each sample
     # TODO: group reward computation can be optimized here - DONE: by adding cache in reward model
     # Some subfigs will be paired multiple times for reward computation
+    log_items = []
     for i in tqdm(
         range(0, len(augmented_samples), config.train.batch_size),
         desc="Computing rewards",
@@ -296,19 +301,22 @@ def augment_and_reward_compute(
 
         
         if accelerator.is_main_process and i * config.train.batch_size < max_log_num:
-            # Log some augmented images
-            logging_platform.log(
-                {
-                    "train_images": [
-                        logging_platform.Image(
-                            image,
-                            caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
-                        )
-                        for idx, (image, prompt, reward) in enumerate(zip(images, prompts, rewards))
-                    ]
-                },
-                step=step
-            )
+            log_items.extend(list(zip(images, prompts, rewards)))
+
+    if accelerator.is_main_process:
+        # Log some augmented images
+        logging_platform.log(
+            {
+                "train_images": [
+                    logging_platform.Image(
+                        image,
+                        caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
+                    )
+                    for idx, (image, prompt, reward) in enumerate(zip(images, prompts, rewards))
+                ]
+            },
+            step=step
+        )
 
     return augmented_samples
 
