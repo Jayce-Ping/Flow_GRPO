@@ -83,12 +83,15 @@ def return_decay(step, decay_type):
         return min(decay, uphold)
 
 def reward_compute(
+    logging_platform,
     accelerator : Accelerator,
     pipeline : FluxPipeline,
     config : Namespace,
     samples : List[dict],
     reward_fn,
     executor : futures.ThreadPoolExecutor,
+    max_log_num : int = 30,
+    step : int = 0
 ):  
     # Compute reward for each sample
     for i in tqdm(
@@ -132,6 +135,21 @@ def reward_compute(
         future = executor.submit(reward_fn, images, prompts, prompt_metadatas)
         rewards, reward_metadatas = future.result()
 
+        if accelerator.is_main_process and i * config.train.batch_size < max_log_num:
+            # Log some images
+            logging_platform.log(
+                {
+                    "train_images": [
+                        logging_platform.Image(
+                            image,
+                            caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
+                        )
+                        for idx, (image, prompt, reward) in enumerate(zip(images, prompts, rewards))
+                    ]
+                },
+                step=step,
+            )
+
         # Convert rewards from dict of list to list of dict
         rewards = [
             dict(zip(rewards.keys(), value))
@@ -145,12 +163,15 @@ def reward_compute(
 
 
 def augment_and_reward_compute(
+    logging_platform,
     accelerator : Accelerator,
     pipeline : FluxPipeline,
     config : Namespace,
     samples : List[dict],
     reward_fn,
     executor : futures.ThreadPoolExecutor,
+    max_log_num : int = 30,
+    step : int = 0,
 ):
     prompt_to_samples = defaultdict(list)
     for sample in samples:
@@ -229,7 +250,6 @@ def augment_and_reward_compute(
             ) # (num_timesteps, seq_len, C)
             new_sample = group_samples[0].copy()
             new_sample['all_latents'] = sampled_sublatents.unsqueeze(0) # (1, num_timesteps, seq_len, C)
-            new_sample['made_of'] = indices
             augmented_samples.append(new_sample)
 
     # Compute reward for each sample
@@ -274,6 +294,21 @@ def augment_and_reward_compute(
         prompt_metadatas = [sample.get('metadata', {}) for sample in batch]
         future = executor.submit(reward_fn, images, prompts, prompt_metadatas)
         rewards, reward_metadatas = future.result()
+
+        if accelerator.is_main_process and i * config.train.batch_size < max_log_num:
+            # Log some augmented images
+            logging_platform.log(
+                {
+                    "train_images": [
+                        logging_platform.Image(
+                            image,
+                            caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
+                        )
+                        for idx, (image, prompt, reward) in enumerate(zip(images, prompts, rewards))
+                    ]
+                },
+                step=step
+            )
 
         # Convert rewards from dict of list to list of dict
         rewards = [
@@ -1133,22 +1168,28 @@ def main(_):
         if config.sample.subfig_permutation:
             # Use subfig permutation augmentation and optimized reward computation
             samples = augment_and_reward_compute(
+                logging_platform,
                 accelerator,
                 pipeline,
                 config,
                 samples,
                 reward_fn,
-                executor
+                executor,
+                max_log_num=30,
+                step=global_step
             )
         else:
             # Directly compute reward without augmentation
             samples = reward_compute(
+                logging_platform,
                 accelerator,
                 pipeline,
                 config,
                 samples,
                 reward_fn,
-                executor
+                executor,
+                max_log_num=30,
+                step=global_step
             )
 
         # Gather rewards across all samples
