@@ -13,6 +13,18 @@ import numpy as np
 import openai
 from accelerate import Accelerator
 
+# ------------------------------------Random Utils---------------------------------------
+def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generator]:
+    generators = []
+    for batch_pos, prompt in enumerate(prompts):
+        # Use a stable hash (SHA256), then convert it to an integer seed
+        hash_digest = hashlib.sha256(prompt.encode()).digest()
+        prompt_hash_int = int.from_bytes(hash_digest[:4], 'big')  # Take the first 4 bytes as part of the seed
+        seed = (base_seed + prompt_hash_int) % (2**31) # Ensure the number is within a valid range
+        gen = torch.Generator().manual_seed(seed)
+        generators.append(gen)
+    return generators
+
 # ------------------------------------Combination Utils---------------------------------------
 
 def num_to_base_tuple(num, base, length):

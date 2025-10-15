@@ -32,7 +32,8 @@ from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftMode
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
-from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, divide_prompt, divide_latents, merge_latents, num_to_base_tuple
+from flow_grpo.logging_utils import set_online_log
+from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, divide_prompt, divide_latents, merge_latents, num_to_base_tuple, create_generator
 from flow_grpo.rewards.rewards import multi_score
 from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, flux_pipeline, compute_log_prob
 from flow_grpo.ema import EMAModuleWrapper
@@ -48,17 +49,6 @@ FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", "config/base.py", "Training configuration.")
 
 logger = get_logger(__name__)
-
-def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generator]:
-    generators = []
-    for batch_pos, prompt in enumerate(prompts):
-        # Use a stable hash (SHA256), then convert it to an integer seed
-        hash_digest = hashlib.sha256(prompt.encode()).digest()
-        prompt_hash_int = int.from_bytes(hash_digest[:4], 'big')  # Take the first 4 bytes as part of the seed
-        seed = (base_seed + prompt_hash_int) % (2**31) # Ensure the number is within a valid range
-        gen = torch.Generator().manual_seed(seed)
-        generators.append(gen)
-    return generators
 
 def return_decay(step, decay_type):
     if decay_type == 0:
@@ -654,108 +644,6 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
 
     return pipeline, text_encoders, tokenizers
 
-def setup_wandb_log(accelerator, config):
-    """
-        Initialize wandb training log
-    """
-    import wandb
-    if config.resume_from_id is not None:
-        project_name = config.project_name
-        run_id = config.resume_from_id
-        # Get history
-        api_run = wandb.Api().run(f"{project_name}/{run_id}")
-        history = api_run.history()
-        if not history.empty:
-            if config.resume_from_step is None:
-                config.resume_from_step = int(history['_step'].iloc[-1])
-            if config.resume_from_epoch is None:
-                config.resume_from_epoch = config.resume_from_step // 2
-            logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
-        else:
-            logger.info("No previous history found, starting from beginning")
-            config.resume_from_step = 0
-            config.resume_from_epoch = 0
-
-        if accelerator.is_main_process:
-            run = wandb.init(
-                project=config.project_name,
-                config=config.to_dict(),
-                id=run_id,
-                resume='must'
-            )
-        else:
-            run = None
-    else:
-        unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
-        if not config.run_name:
-            config.run_name = unique_id
-        else:
-            config.run_name += "_" + unique_id
-        if accelerator.is_main_process:
-            run = wandb.init(
-                project=config.project_name,
-                config=config.to_dict()
-            )
-        else:
-            run = None
-
-    return run, wandb
-
-def setup_swanlab_log(accelerator, config):
-    """
-        Initialize swanlab training log
-    """
-    import swanlab
-    if config.resume_from_id:
-        project_name = config.project_name
-        run_id = config.resume_from_id
-        # Get history
-        api = swanlab.OpenApi()
-        run_summary = api.get_summary(project=project_name, exp_id=run_id)
-        if config.resume_from_step is None:
-            config.resume_from_step = run_summary.data['epoch']['max']['step']
-        if config.resume_from_epoch is None:
-            config.resume_from_epoch = run_summary.data['epoch']['max']['value']
-        logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
-
-        if accelerator.is_main_process:
-            run = swanlab.init(
-                project=project_name,
-                config=config.to_dict(),
-                resume=True,
-                id=run_id
-            )
-        else:
-            run = None
-    else:
-        unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
-        if not config.run_name:
-            config.run_name = unique_id
-        else:
-            config.run_name += "_" + unique_id
-
-        if accelerator.is_main_process:
-            run = swanlab.init(
-                project=config.project_name,
-                config=config.to_dict()
-            )
-        else:
-            run = None
-
-    return run, swanlab
-
-def set_online_log(accelerator, config):
-    """
-        Initialize logging with platform
-    """
-    if config.logging_platform == 'wandb':
-        run, logging_platform = setup_wandb_log(accelerator, config)
-    elif config.logging_platform == 'swanlab':
-        run, logging_platform = setup_swanlab_log(accelerator, config)
-    else:
-        raise ValueError(f"Unsupported logging platform: {config.logging_platform}")
-    
-    return run, logging_platform
 
 def main(_):
     # basic Accelerate and logging setup
