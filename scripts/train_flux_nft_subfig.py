@@ -34,7 +34,7 @@ from torch.utils.data import Dataset, DataLoader, Sampler
 
 from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, divide_prompt, divide_latents, merge_latents, num_to_base_tuple
 from flow_grpo.rewards.rewards import multi_score
-from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, flux_pipeline
+from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, flux_pipeline, compute_log_prob
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
@@ -105,7 +105,7 @@ def reward_compute(
         widths = [sample.get('width', config.resolution) for sample in batch]
         if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
             # Convert latents to images
-            latents = torch.cat([sample['latents'] for sample in batch], dim=0).to(accelerator.device)
+            latents = torch.cat([sample['all_latents'][-1] for sample in batch], dim=0).to(accelerator.device)
             latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
             latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
             latents = latents.to(dtype=pipeline.vae.dtype)
@@ -116,7 +116,7 @@ def reward_compute(
             for sample in batch:
                 height = sample.get('height', config.resolution)
                 width = sample.get('width', config.resolution)
-                latents = sample['latents'].to(accelerator.device)
+                latents = sample['all_latents'][-1].to(accelerator.device)
                 latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
                 latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
                 latents = latents.to(dtype=pipeline.vae.dtype)
@@ -168,12 +168,12 @@ def augment_and_reward_compute(
         sub_height = height // layout[0]
         sub_width = width // layout[1]
         subimage_cnt = layout[0] * layout[1]
-        all_sublatents = torch.cat(
+        all_sublatents = torch.stack(
             [
-                divide_latents(sample['latents'], height, width, sub_height, sub_width) # (1, layout[0], layout[1], sub_seq_len, C)
+                divide_latents(sample['all_latents'], height, width, sub_height, sub_width) # (num_timesteps, layout[0], layout[1], sub_seq_len, C)
                 for sample in group_samples
-        ], dim=0)# (group_size, layout[0], layout[1], sub_seq_len, C)
-        all_sublatents = all_sublatents.reshape(group_size, subimage_cnt, *all_sublatents.shape[3:]) # (group_size, subimage_cnt, sub_seq_len, C)
+        ], dim=0)# (group_size, num_timesteps, layout[0], layout[1], sub_seq_len, C)
+        all_sublatents = all_sublatents.reshape(group_size, -1, subimage_cnt, *all_sublatents.shape[4:]) # (group_size, num_timesteps, subimage_cnt, sub_seq_len, C)
         # A 2x2 image group of size 3 can generate 3^(2x2) = 81 different images, use a max_group_size to constraint
         total_combinations = group_size ** subimage_cnt
         sample_num = total_combinations
@@ -211,10 +211,12 @@ def augment_and_reward_compute(
 
         for indices in sample_indices:
             sampled_sublatents = torch.stack(
-                [all_sublatents[i,j] for i,j in indices],
+                [all_sublatents[i, :, j] for i,j in indices],
                 dim=0
-            ).reshape(1, layout[0], layout[1], *all_sublatents.shape[2:]) # (1, layout[0], layout[1], sub_seq_len, C)
-            
+            ) # (num_timesteps, subimage_cnt, sub_seq_len, C)
+            # Reshape to (num_timesteps, layout[0], layout[1], sub_seq_len, C) for merge
+            sampled_sublatents = sampled_sublatents.reshape(-1, layout[0], layout[1], *sampled_sublatents.shape[2:])
+
             sampled_sublatents = merge_latents(
                 sampled_sublatents,
                 height,
@@ -223,7 +225,7 @@ def augment_and_reward_compute(
                 sub_width
             )
             new_sample = group_samples[0].copy()
-            new_sample['latents'] = sampled_sublatents
+            new_sample['all_latents'] = sampled_sublatents.unsqueeze(0) # (1, num_timesteps, seq_len, C)
             new_sample['made_of'] = indices
             augmented_samples.append(new_sample)
 
@@ -244,7 +246,7 @@ def augment_and_reward_compute(
         widths = [sample.get('width', config.resolution) for sample in batch]
         if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
             # Convert latents to images
-            latents = torch.cat([sample['latents'] for sample in batch], dim=0).to(accelerator.device)
+            latents = torch.cat([sample['all_latents'][-1] for sample in batch], dim=0).to(accelerator.device)
             latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
             latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
             latents = latents.to(dtype=pipeline.vae.dtype)
@@ -255,7 +257,7 @@ def augment_and_reward_compute(
             for sample in batch:
                 height = sample.get('height', config.resolution)
                 width = sample.get('width', config.resolution)
-                latents = sample['latents'].to(accelerator.device)
+                latents = sample['all_latents'][-1].to(accelerator.device)
                 latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
                 latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
                 latents = latents.to(dtype=pipeline.vae.dtype)
@@ -1053,11 +1055,9 @@ def main(_):
                             layout=layouts[0],
                             merge_step=config.sample.merge_step
                     )
-                    # images: (batch_size, C, H, W) -> List[Tensor(C, H, W)] with length batch_size
-                    # all_latents: List[Tensor(batch_size C, H, W)] with length windowsize+1 -> List[Tensor(num_steps + 1, C, H, W)] with length batch_size
                     images = list(images.unbind(0)) # List[Tensor(C, H, W)] with length batch_size
-                    all_latents = torch.stack(all_latents, dim=1) # (batch_size, num_steps + 1, C, H, W)
-                    all_latents = list(all_latents.unbind(0)) # List[Tensor(num_steps + 1, C, H, W)] with length batch_size
+                    all_latents = torch.stack(all_latents, dim=1) # (batch_size, num_steps + 1, seq_len, C)
+                    all_latents = list(all_latents.unbind(0)) # List[Tensor(num_steps + 1, seq_len, C)] with length batch_size
                     all_prompt_embeds = all_prompt_embeds # (batch_size, seq_len, dim)
                     all_pooled_prompt_embeds = all_pooled_prompt_embeds # (batch_size, dim)
                     all_prompt_embeds = list(all_prompt_embeds.unbind(0)) # List[Tensor(seq_len, dim)] with length batch_size
@@ -1088,15 +1088,11 @@ def main(_):
                                 merge_step=config.sample.merge_step
                         )
                     images.append(this_image.squeeze(0))  # add (C, H, W)
-                    all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_steps + 1, C, H, W)
+                    all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_steps + 1, seq_len, C)
                     all_prompt_embeds.append(this_prompt_embeds.squeeze(0)) # (1, seq_len, dim) -> (seq_len, dim)
                     all_pooled_prompt_embeds.append(this_pooled_prompt_embeds.squeeze(0)) # (1, dim) -> (dim)
                     all_noise_timesteps.append(this_noise_timesteps.squeeze(0)) # (1, num_noise_steps) -> (num_noise_steps,)
                     all_timesteps.append(this_timesteps.squeeze(0)) # (1, num_steps) -> (num_steps,)
-
-                # Now images and all_latents are lists
-                # images: List[Tensor(C, H, W)] with length batch_size
-                # all_latents: List[Tensor(num_steps + 1, C, H, W)] with length batch_size
 
             # Final `samples` is List[Dict], with length = config.sample.batch_size * config.sample.num_batches_per_epoch
             samples.extend(
@@ -1112,7 +1108,7 @@ def main(_):
                         'prompt_ids': prompt_ids[index].unsqueeze(0), # Keep batch dimension as 1
                         'prompt_embeds': all_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'pooled_prompt_embeds': all_pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
-                        'latents': all_latents[index][-1].unsqueeze(0), # Keep batch dimension as 1, only keep the last clean latents
+                        'all_latents': all_latents[index].unsqueeze(0), # Keep batch dimension as 1, shape (1, num_steps + 1, seq_len, C)
                     }
                     for index in range(len(prompts))
                 ]
@@ -1246,10 +1242,7 @@ def main(_):
             # 'width': int,
             # 'layout': (int, int),
             # 'prompt': str,
-            # 'timestep_indices': list[int],
-            # 'latents': Tensor(1, num_train_steps + 1, C, H
-            # 'next_latents': Tensor(1, num_train_steps + 1, C, H, W),
-            # 'log_probs': Tensor(1, num_train_steps),
+            # 'all_latents': Tensor(1, config.sample.num_steps + 1, seq_len, c),
             # 'advantages': Tensor(1, 1),
             # }
             keys = samples[0].keys()
@@ -1290,91 +1283,45 @@ def main(_):
                         loss_type = config.train.loss_type.lower()
                         height = sample['height'][0]
                         width = sample['width'][0]
-
                         loss_terms = {}
 
-                        batch_size = sample['latents'].shape[0]
-
                         if loss_type == 'ppo':
-                            x0 = sample['latents'].to(accelerator.device) # Clean latents
-                            guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
-
-                            t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0.dtype) # shape (batch_size,)
-                            t = t / 1000.0 # scale to [0, 1]
-                            t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1, 1)
-                            t_next = sample['timesteps'][:, j+1].to(accelerator.device, dtype=x0.dtype)
-                            t_next = t_next / 1000.0 # scale to [0, 1]
-                            t_next_expanded = t_next.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
-                            dt = t_next_expanded - t_expanded
-
-                            noise = torch.randn_like(x0).to(accelerator.device, dtype=x0.dtype)
-                            xt = (1 - t_expanded) * x0 + t_expanded * noise
-                            xt_next = (1 - t_next_expanded) * x0 + t_next_expanded * noise
-
-                            xt, latent_image_ids = pipeline.prepare_latents(
-                                batch_size=batch_size,
-                                num_channels_latents=xt.shape[2] // 4,
-                                height=height,
-                                width=width,
-                                device=accelerator.device,
-                                dtype=x0.dtype,
-                                generator=None,
-                                latents=xt
-                            )
-                            text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0.dtype)
-
                             with autocast():
+                                transformer.module.set_adapter("default")
+                                prev_sample, log_prob, prev_sample_mean, std_dev_t = compute_log_prob(
+                                    transformer=transformer,
+                                    pipeline=pipeline,
+                                    sample=sample,
+                                    j=j,
+                                    config=config,
+                                )
                                 with torch.no_grad():
                                     transformer.module.set_adapter("old")
-                                    old_v_pred = transformer(
-                                        hidden_states=xt,
-                                        timestep=t,
-                                        guidance=guidance.expand(xt.shape[0]),
-                                        encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-                                        pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-                                        img_ids=latent_image_ids,
-                                        txt_ids=text_ids,
-                                        return_dict=False,
-                                    )[0].detach()
-
-                                transformer.module.set_adapter("default")
-                                new_v_pred = transformer(
-                                    hidden_states=xt,
-                                    timestep=t,
-                                    guidance=guidance.expand(xt.shape[0]),
-                                    encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-                                    pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-                                    img_ids=latent_image_ids,
-                                    txt_ids=text_ids,
-                                    return_dict=False,
-                                )[0]
-
-                                with torch.no_grad():
+                                    _, old_log_prob, old_prev_sample_mean, _ = compute_log_prob(
+                                        transformer=transformer,
+                                        pipeline=pipeline,
+                                        sample=sample,
+                                        j=j,
+                                        config=config,
+                                    )
                                     with transformer.module.disable_adapter():
-                                        v_ref = transformer(
-                                            hidden_states=xt,
-                                            timestep=t,
-                                            guidance=guidance.expand(xt.shape[0]),
-                                            encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-                                            pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-                                            img_ids=latent_image_ids,
-                                            txt_ids=text_ids,
-                                            return_dict=False,
-                                        )[0]
+                                        _, ref_log_prob, ref_prev_sample_mean, _ = compute_log_prob(
+                                            transformer=transformer,
+                                            pipeline=pipeline,
+                                            sample=sample,
+                                            j=j,
+                                            config=config,
+                                        )
 
-                            xt_next_old = xt + dt * old_v_pred
-                            xt_next_new = xt + dt * new_v_pred
-                            xt_next_ref = xt + dt * v_ref
-
-                            log_prob_old = -((xt_next - xt_next_old)**2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
-                            log_prob_new = -((xt_next - xt_next_new)**2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
-                            log_prob_ref = -((xt_next - xt_next_ref)**2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
+                            # grpo logic
                             advantages = torch.clamp(
                                 sample["advantages"],
                                 -config.train.adv_clip_max,
                                 config.train.adv_clip_max,
                             )
-                            ratio = torch.exp(log_prob_new - log_prob_old)
+
+                            ratio = torch.exp(log_prob - old_log_prob)
+                            # print("ratio", ratio)
                             unclipped_loss = -advantages * ratio
                             clipped_loss = -advantages * torch.clamp(
                                 ratio,
@@ -1382,8 +1329,10 @@ def main(_):
                                 1.0 + config.train.clip_range,
                             )
                             policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
-                            kl_loss = ((xt_next_ref - xt_next_new) ** 2 / (2*t_next**2)).mean(dim=tuple(range(1, xt.ndim)))
+
+                            kl_loss = ((prev_sample_mean - ref_prev_sample_mean) ** 2).mean(dim=tuple(range(1, prev_sample_mean.ndim)), keepdim=True) / (2 * std_dev_t ** 2)
                             kl_loss = torch.mean(kl_loss)
+
                             loss = policy_loss + config.train.beta * kl_loss
                             loss_terms["policy_loss"] = policy_loss.detach()
                             loss_terms["unclipped_loss"] = unclipped_loss.mean().detach()
@@ -1414,7 +1363,8 @@ def main(_):
                             )
 
                         if loss_type == 'nft':
-                            x0 = sample["latents"] # Clear latents
+                            x0 = sample["all_latents"][-1].to(accelerator.device) # Clear latents
+                            batch_size = x0.shape[0]
                             guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
 
                             t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0.dtype) # shape (batch_size,)
