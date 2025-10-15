@@ -104,6 +104,8 @@ def reward_compute(
         heights = [sample.get('height', config.resolution) for sample in batch]
         widths = [sample.get('width', config.resolution) for sample in batch]
         if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
+            height = heights[0]
+            width = widths[0]
             # Convert latents to images
             latents = torch.cat([sample['all_latents'][-1] for sample in batch], dim=0).to(accelerator.device)
             latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
