@@ -1260,7 +1260,7 @@ def main(_):
                     # Catenate along batch dimension if the entry is Tensor
                     k: torch.cat([s[k] for s in batch], dim=0)
                     if isinstance(batch[0][k], torch.Tensor)
-                    else [batch[_][k] for _ in range(config.train.batch_size)] # for other type -  cat to a list
+                    else [batch[_][k] for _ in range(len(batch))] # for other type -  cat to a list
                     for k in keys
                 }
                 for batch in samples
@@ -1294,6 +1294,7 @@ def main(_):
                         loss_terms = {}
 
                         if loss_type == 'ppo':
+                            batch_size = sample['all_latents'].shape[0]
                             with autocast():
                                 transformer.module.set_adapter("default")
                                 prev_sample, log_prob, prev_sample_mean, std_dev_t = compute_log_prob(
@@ -1371,7 +1372,7 @@ def main(_):
                             )
 
                         if loss_type == 'nft':
-                            x0 = sample["all_latents"][-1].to(accelerator.device) # Clear latents
+                            x0 = sample["all_latents"][:, -1].to(accelerator.device) # Clear latents
                             batch_size = x0.shape[0]
                             guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
 
