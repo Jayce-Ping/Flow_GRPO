@@ -1330,19 +1330,6 @@ def main(_):
                             text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0.dtype)
 
                             with autocast():
-                                with torch.no_grad():
-                                    transformer.module.set_adapter("old")
-                                    old_v_pred = transformer(
-                                        hidden_states=xt,
-                                        timestep=t,
-                                        guidance=guidance.expand(xt.shape[0]),
-                                        encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-                                        pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-                                        img_ids=latent_image_ids,
-                                        txt_ids=text_ids,
-                                        return_dict=False,
-                                    )[0].detach()
-
                                 transformer.module.set_adapter("default")
                                 new_v_pred = transformer(
                                     hidden_states=xt,
@@ -1356,6 +1343,17 @@ def main(_):
                                 )[0]
 
                                 with torch.no_grad():
+                                    transformer.module.set_adapter("old")
+                                    old_v_pred = transformer(
+                                        hidden_states=xt,
+                                        timestep=t,
+                                        guidance=guidance.expand(xt.shape[0]),
+                                        encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                                        pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                                        img_ids=latent_image_ids,
+                                        txt_ids=text_ids,
+                                        return_dict=False,
+                                    )[0].detach()
                                     with transformer.module.disable_adapter():
                                         v_ref = transformer(
                                             hidden_states=xt,
