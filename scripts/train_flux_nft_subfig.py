@@ -312,7 +312,7 @@ def augment_and_reward_compute(
                         image,
                         caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
                     )
-                    for idx, (image, prompt, reward) in enumerate(zip(images, prompts, rewards))
+                    for idx, (image, prompt, reward) in enumerate(log_items)
                 ]
             },
             step=step
