@@ -177,7 +177,11 @@ def compute_log_prob(
     scheduler = pipeline.scheduler
     timestep = sample["timesteps"][:, j] # (B,)
     timestep_next = sample["timesteps"][:, j + 1] if j + 1 < sample["timesteps"].shape[1] else torch.zeros_like(timestep) # (B,)
-    noise_level = config.sample.noise_level if timestep in sample['noise_timesteps'] else 0.0
+
+    if bool((sample['noise_timesteps'] == timestep).all(dim=1).any()):
+        noise_level = config.sample.noise_level
+    else:
+        noise_level = 0.0
 
     batch_size = latents.shape[0]
     num_channels_latents = pipeline.transformer.config.in_channels // 4
