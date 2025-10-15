@@ -111,13 +111,13 @@ class FlowMatchNoiseScheduler(FlowMatchEulerDiscreteScheduler):
             noise_steps = range(0, self.config.num_train_timesteps)
 
         self.noise_level = noise_level
-        self._left_boundary = min(noise_steps)
+        self._left_boundary = min(noise_steps) if len(noise_steps) > 0 else 0
 
         assert self.noise_level >= 0, "Noise level must be non-negative."
         assert self._left_boundary >= 0, "Left boundary must be non-negative."
 
         self.noise_steps = torch.tensor(noise_steps, dtype=torch.int64)
-        self._window_size = max(noise_steps) - self._left_boundary + 1
+        self._window_size = (max(noise_steps) - self._left_boundary + 1) if len(noise_steps) > 0 else 0
         self.merge_step = merge_step
 
     @property

@@ -327,6 +327,7 @@ def eval(pipeline : FluxPipeline,
             memory_profiler.snapshot(f"eval_batch_{batch_idx}_start")
 
         prompts, prompt_metadata = test_batch
+        generator = create_generator(prompts, config.seed + accelerator.process_index)
 
         heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
         widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
@@ -350,6 +351,7 @@ def eval(pipeline : FluxPipeline,
                         prompt=prompt,
                         num_inference_steps=config.test.num_steps,
                         guidance_scale=config.sample.guidance_scale,
+                        generator=generator[i],
                         output_type="pt",
                         height=heights[i],
                         width=widths[i],
@@ -367,6 +369,7 @@ def eval(pipeline : FluxPipeline,
                     prompt=prompts,
                     num_inference_steps=config.test.num_steps,
                     guidance_scale=config.sample.guidance_scale,
+                    generator=generator,
                     output_type="pt",
                     height=heights[0],
                     width=widths[0],
