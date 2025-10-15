@@ -1254,6 +1254,7 @@ def main(_):
                                             config=config,
                                         )
 
+                            transformer.module.set_adapter("default")
                             # grpo logic
                             advantages = torch.clamp(
                                 sample["advantages"],
@@ -1366,7 +1367,8 @@ def main(_):
                                             txt_ids=text_ids,
                                             return_dict=False,
                                         )[0]
-                            
+
+                            transformer.module.set_adapter("default")
                             # NFT logic
                             advantages = torch.clamp(
                                 sample["advantages"],
