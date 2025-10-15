@@ -236,7 +236,7 @@ def augment_and_reward_compute(
     # TODO: group reward computation can be optimized here - DONE: by adding cache in reward model
     # Some subfigs will be paired multiple times for reward computation
     for i in tqdm(
-        range(0, len(augmented_samples)),
+        range(0, len(augmented_samples), config.train.batch_size),
         desc="Computing rewards",
         disable=not accelerator.is_local_main_process
     ):
@@ -248,6 +248,8 @@ def augment_and_reward_compute(
         heights = [sample.get('height', config.resolution) for sample in batch]
         widths = [sample.get('width', config.resolution) for sample in batch]
         if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
+            height = heights[0]
+            width = widths[0]
             # Convert the cleaned latents to images
             latents = torch.cat([sample['all_latents'][:, -1] for sample in batch], dim=0).to(accelerator.device)
             latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
