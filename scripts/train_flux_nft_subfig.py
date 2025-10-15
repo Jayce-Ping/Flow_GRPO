@@ -135,6 +135,15 @@ def reward_compute(
         future = executor.submit(reward_fn, images, prompts, prompt_metadatas)
         rewards, reward_metadatas = future.result()
 
+        # Convert rewards from dict of list to list of dict
+        rewards = [
+            dict(zip(rewards.keys(), value))
+            for value in zip(*rewards.values())
+        ]
+
+        for sample, reward in zip(batch, rewards):
+            sample['rewards'] = reward
+
         if accelerator.is_main_process and i * config.train.batch_size < max_log_num:
             # Log some images
             logging_platform.log(
@@ -149,15 +158,6 @@ def reward_compute(
                 },
                 step=step,
             )
-
-        # Convert rewards from dict of list to list of dict
-        rewards = [
-            dict(zip(rewards.keys(), value))
-            for value in zip(*rewards.values())
-        ]
-
-        for sample, reward in zip(batch, rewards):
-            sample['rewards'] = reward
 
     return samples
 
@@ -295,6 +295,16 @@ def augment_and_reward_compute(
         future = executor.submit(reward_fn, images, prompts, prompt_metadatas)
         rewards, reward_metadatas = future.result()
 
+        # Convert rewards from dict of list to list of dict
+        rewards = [
+            dict(zip(rewards.keys(), value))
+            for value in zip(*rewards.values())
+        ]
+
+        for sample, reward in zip(batch, rewards):
+            sample['rewards'] = reward
+
+        
         if accelerator.is_main_process and i * config.train.batch_size < max_log_num:
             # Log some augmented images
             logging_platform.log(
@@ -309,15 +319,6 @@ def augment_and_reward_compute(
                 },
                 step=step
             )
-
-        # Convert rewards from dict of list to list of dict
-        rewards = [
-            dict(zip(rewards.keys(), value))
-            for value in zip(*rewards.values())
-        ]
-
-        for sample, reward in zip(batch, rewards):
-            sample['rewards'] = reward
 
     return augmented_samples
 
