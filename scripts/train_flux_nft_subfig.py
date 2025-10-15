@@ -107,7 +107,7 @@ def reward_compute(
             height = heights[0]
             width = widths[0]
             # Convert latents to images
-            latents = torch.cat([sample['all_latents'][-1] for sample in batch], dim=0).to(accelerator.device)
+            latents = torch.cat([sample['all_latents'][:, -1] for sample in batch], dim=0).to(accelerator.device)
             latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
             latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
             latents = latents.to(dtype=pipeline.vae.dtype)
@@ -118,7 +118,7 @@ def reward_compute(
             for sample in batch:
                 height = sample.get('height', config.resolution)
                 width = sample.get('width', config.resolution)
-                latents = sample['all_latents'][-1].to(accelerator.device)
+                latents = sample['all_latents'][:, -1].to(accelerator.device)
                 latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
                 latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
                 latents = latents.to(dtype=pipeline.vae.dtype)
