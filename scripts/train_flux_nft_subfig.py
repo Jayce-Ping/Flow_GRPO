@@ -106,7 +106,7 @@ def reward_compute(
         if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
             height = heights[0]
             width = widths[0]
-            # Convert latents to images
+            # Convert cleaned latents to images
             latents = torch.cat([sample['all_latents'][:, -1] for sample in batch], dim=0).to(accelerator.device)
             latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
             latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
@@ -118,6 +118,7 @@ def reward_compute(
             for sample in batch:
                 height = sample.get('height', config.resolution)
                 width = sample.get('width', config.resolution)
+                # Convert cleaned latents to images
                 latents = sample['all_latents'][:, -1].to(accelerator.device)
                 latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
                 latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
@@ -172,7 +173,7 @@ def augment_and_reward_compute(
         subimage_cnt = layout[0] * layout[1]
         all_sublatents = torch.stack(
             [
-                divide_latents(sample['all_latents'], height, width, sub_height, sub_width) # (num_timesteps, layout[0], layout[1], sub_seq_len, C)
+                divide_latents(sample['all_latents'].squeeze(0), height, width, sub_height, sub_width) # (num_timesteps, layout[0], layout[1], sub_seq_len, C)
                 for sample in group_samples
         ], dim=0)# (group_size, num_timesteps, layout[0], layout[1], sub_seq_len, C)
         all_sublatents = all_sublatents.reshape(group_size, -1, subimage_cnt, *all_sublatents.shape[4:]) # (group_size, num_timesteps, subimage_cnt, sub_seq_len, C)
@@ -213,10 +214,10 @@ def augment_and_reward_compute(
 
         for indices in sample_indices:
             sampled_sublatents = torch.stack(
-                [all_sublatents[i, :, j] for i,j in indices],
-                dim=0
+                [all_sublatents[i, :, j] for i,j in indices], # (num_timesteps, sub_seq_len, C)
+                dim=1
             ) # (num_timesteps, subimage_cnt, sub_seq_len, C)
-            # Reshape to (num_timesteps, layout[0], layout[1], sub_seq_len, C) for merge
+            # Reshape to (num_timesteps, layout[0], layout[1], sub_seq_len, C) for merging
             sampled_sublatents = sampled_sublatents.reshape(-1, layout[0], layout[1], *sampled_sublatents.shape[2:])
 
             sampled_sublatents = merge_latents(
@@ -225,7 +226,7 @@ def augment_and_reward_compute(
                 width,
                 sub_height,
                 sub_width
-            )
+            ) # (num_timesteps, seq_len, C)
             new_sample = group_samples[0].copy()
             new_sample['all_latents'] = sampled_sublatents.unsqueeze(0) # (1, num_timesteps, seq_len, C)
             new_sample['made_of'] = indices
@@ -247,8 +248,8 @@ def augment_and_reward_compute(
         heights = [sample.get('height', config.resolution) for sample in batch]
         widths = [sample.get('width', config.resolution) for sample in batch]
         if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
-            # Convert latents to images
-            latents = torch.cat([sample['all_latents'][-1] for sample in batch], dim=0).to(accelerator.device)
+            # Convert the cleaned latents to images
+            latents = torch.cat([sample['all_latents'][:, -1] for sample in batch], dim=0).to(accelerator.device)
             latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
             latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
             latents = latents.to(dtype=pipeline.vae.dtype)
@@ -259,7 +260,7 @@ def augment_and_reward_compute(
             for sample in batch:
                 height = sample.get('height', config.resolution)
                 width = sample.get('width', config.resolution)
-                latents = sample['all_latents'][-1].to(accelerator.device)
+                latents = sample['all_latents'][:, -1].to(accelerator.device)
                 latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
                 latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
                 latents = latents.to(dtype=pipeline.vae.dtype)
