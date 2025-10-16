@@ -1677,10 +1677,7 @@ def main(_):
             # assert accelerator.sync_gradients
 
         with torch.no_grad():
-            if config.train.loss_type.lower() == 'ppo':
-                decay = 0.0
-            else:
-                decay = return_decay(global_step, config.train.decay_type)
+            decay = return_decay(global_step, config.train.decay_type)
             for src_param, tgt_param in zip(
                 transformer_trainable_parameters, old_transformer_trainable_parameters, strict=True
             ):
