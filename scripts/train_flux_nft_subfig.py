@@ -414,6 +414,147 @@ def compute_ppo_loss(
 
     return loss, info
 
+def compute_nft_step_loss(
+    config : Namespace,
+    accelerator : Accelerator,
+    pipeline: FluxPipeline,
+    transformer: FluxTransformer2DModel,
+    sample : dict,
+    timestep_index : int,
+    autocast,
+    info : dict,
+):
+    """
+    NFT loss that directly predict x_{t-1} from x_t
+    """
+    height = sample['height'][0]
+    width = sample['width'][0]
+    x0 = sample["all_latents"][:, -1].to(accelerator.device) # Clear latents
+    batch_size = x0.shape[0]
+    guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
+
+    t = sample['timesteps'][:, timestep_index].to(accelerator.device, dtype=x0.dtype) # shape (batch_size,)
+    t_next = sample['timesteps'][:, timestep_index + 1].to(accelerator.device, dtype=x0.dtype) # shape (batch_size,)
+    t = t / 1000.0 # scale to [0, 1]
+    t_next = t_next / 1000.0
+
+    t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
+    t_next_expanded = t_next.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
+    dt = t_next_expanded - t_expanded
+
+    xt = sample['all_latents'][:, timestep_index].to(accelerator.device) # Noisy latents at step t
+    xt_next = sample['all_latents'][:, timestep_index + 1].to(accelerator.device) # Noisy latents at step t_next
+
+    xt, latent_image_ids = pipeline.prepare_latents(
+        batch_size=batch_size,
+        num_channels_latents=xt.shape[2] // 4,
+        height=height,
+        width=width,
+        device=accelerator.device,
+        dtype=x0.dtype,
+        generator=None,
+        latents=xt
+    )
+    text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0.dtype)
+
+    with autocast():
+        transformer.module.set_adapter("default")
+        new_v_pred = transformer(
+            hidden_states=xt,
+            timestep=t,
+            guidance=guidance.expand(xt.shape[0]),
+            encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+            pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+            img_ids=latent_image_ids,
+            txt_ids=text_ids,
+            return_dict=False,
+        )[0]
+
+        with torch.no_grad():
+            transformer.module.set_adapter("old")
+            old_v_pred = transformer(
+                hidden_states=xt,
+                timestep=t,
+                guidance=guidance.expand(xt.shape[0]),
+                encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                img_ids=latent_image_ids,
+                txt_ids=text_ids,
+                return_dict=False,
+            )[0].detach()
+            with transformer.module.disable_adapter():
+                v_ref = transformer(
+                    hidden_states=xt,
+                    timestep=t,
+                    guidance=guidance.expand(xt.shape[0]),
+                    encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                    pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                    img_ids=latent_image_ids,
+                    txt_ids=text_ids,
+                    return_dict=False,
+                )[0]
+
+    transformer.module.set_adapter("default")
+    # NFT logic
+    advantages = torch.clamp(
+        sample["advantages"],
+        -config.train.adv_clip_max,
+        config.train.adv_clip_max,
+    )
+    normalized_advantages_clip = (advantages / config.train.adv_clip_max) / 2.0 + 0.5
+    r = torch.clamp(normalized_advantages_clip, 0, 1)
+    info["old_deviate"] = torch.mean((new_v_pred - old_v_pred) ** 2).detach()
+    info["old_deviate_max"] = torch.max((new_v_pred - old_v_pred) ** 2).detach()
+    positive_prediction = config.train.nft_beta * new_v_pred + (1 - config.train.nft_beta) * old_v_pred.detach()
+
+    implicit_negative_prediction = (1.0 + config.train.nft_beta) * old_v_pred.detach() - config.train.nft_beta * new_v_pred
+    
+    # adaptive weighting
+    xt_next_pred = xt + dt * positive_prediction
+    with torch.no_grad():
+        weight_factor = (
+            torch.abs(xt_next_pred.double() - xt_next.double())
+            .mean(dim=tuple(range(1, xt.ndim)), keepdim=True)
+            .clip(min=0.00001)
+        )
+
+    positive_loss = ((xt_next_pred - xt_next) ** 2 / weight_factor).mean(dim=tuple(range(1, xt_next.ndim)))
+
+    negative_xt_next_pred = xt + dt * implicit_negative_prediction
+    with torch.no_grad():
+        negative_weight_factor = (
+            torch.abs(negative_xt_next_pred.double() - xt_next.double())
+            .mean(dim=tuple(range(1, xt_next.ndim)), keepdim=True)
+            .clip(min=0.00001)
+        )
+    negative_loss = ((negative_xt_next_pred - xt_next) ** 2 / negative_weight_factor).mean(
+        dim=tuple(range(1, xt_next.ndim))
+    )
+
+    ori_policy_loss = (r * positive_loss  + (1.0 - r) * negative_loss) / config.train.nft_beta
+    policy_loss = (ori_policy_loss * config.train.adv_clip_max).mean()
+
+    loss = policy_loss
+
+    info["policy_loss"] = policy_loss.detach()
+    info["unweighted_policy_loss"] = ori_policy_loss.mean().detach()
+
+    kl_div_loss = ((new_v_pred - v_ref) ** 2).mean(
+        dim=tuple(range(1, x0.ndim))
+    )
+    kl_div_loss = torch.mean(kl_div_loss)
+
+    loss += config.train.beta * kl_div_loss
+
+    info["kl_div"] = kl_div_loss.detach()
+    info["old_kl_div"] = torch.mean(
+        ((old_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
+    ).detach()
+
+    info["loss"] = loss.detach()
+
+    return loss, info
+
 def compute_nft_loss(
     config : Namespace,
     accelerator : Accelerator,
@@ -424,6 +565,9 @@ def compute_nft_loss(
     autocast,
     info : dict,
 ):
+    """
+    NFT loss that directly predict x_0 from x_t
+    """
     height = sample['height'][0]
     width = sample['width'][0]
     x0 = sample["all_latents"][:, -1].to(accelerator.device) # Clear latents
@@ -1459,7 +1603,7 @@ def main(_):
                     with accelerator.accumulate(transformer):
                         # Use DiffusionNFT loss computation logic
                         loss_type = config.train.loss_type.lower()
-                        
+
                         if loss_type == 'ppo':
                             loss, info = compute_ppo_loss(
                                 config=config,
@@ -1482,6 +1626,19 @@ def main(_):
                                 autocast=autocast,
                                 info=info,
                             )
+                        elif loss_type == 'nft_step':
+                            loss, info = compute_nft_step_loss(
+                                config=config,
+                                accelerator=accelerator,
+                                pipeline=pipeline,
+                                transformer=transformer,
+                                sample=sample,
+                                timestep_index=j,
+                                autocast=autocast,
+                                info=info,
+                            )
+                        else:
+                            raise ValueError(f"Unknown loss type: {config.train.loss_type}. Supported types are ['ppo', 'nft', 'nft_step']")
 
                         # Track loss tensors
                         if config.enable_mem_log:
