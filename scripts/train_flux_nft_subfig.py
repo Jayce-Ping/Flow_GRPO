@@ -329,8 +329,8 @@ def compute_ppo_loss(
     sample : dict,
     timestep_index : int,
     autocast,
-    info : dict,
 ):
+    info = {}
     batch_size = sample['all_latents'].shape[0]
     with autocast():
         pipeline.transformer.train()
@@ -390,30 +390,27 @@ def compute_ppo_loss(
     info["clipped_loss"] = clipped_loss.mean().detach()
     info["kl_loss"] = kl_loss.mean().detach()
     info['loss'] = loss.detach()
-    info['ratio'].append(ratio.abs().mean())
-    info["approx_kl"].append(
-    0.5 * torch.mean((log_prob - old_log_prob) ** 2)
+    info['ratio'] = ratio.abs().mean()
+    info["approx_kl"] = 0.5 * torch.mean((log_prob - old_log_prob) ** 2)
+    info["clipfrac"] = torch.mean(
+        (
+            torch.abs(ratio - 1.0) > config.train.clip_range
+        ).float()
     )
-    info["clipfrac"].append(
-        torch.mean(
-            (
-                torch.abs(ratio - 1.0) > config.train.clip_range
-            ).float()
-        )
+    info["clipfrac_gt_one"] = torch.mean(
+        (
+            ratio - 1.0 > config.train.clip_range
+        ).float()
     )
-    info["clipfrac_gt_one"].append(
-        torch.mean(
-            (
-                ratio - 1.0 > config.train.clip_range
-            ).float()
-        )
+    info["clipfrac_lt_one"] = torch.mean(
+        (
+            1.0 - ratio > config.train.clip_range
+        ).float()
     )
-    info["clipfrac_lt_one"].append(
-        torch.mean(
-            (
-                1.0 - ratio > config.train.clip_range
-            ).float()
-        )
+    info["clipfrac_lt_one"] = torch.mean(
+        (
+            1.0 - ratio > config.train.clip_range
+        ).float()
     )
 
     return loss, info
@@ -425,12 +422,12 @@ def compute_nft_step_loss(
     transformer: FluxTransformer2DModel,
     sample : dict,
     timestep_index : int,
-    autocast,
-    info : dict,
+    autocast
 ):
     """
     NFT loss that directly predict x_{t-1} from x_t
     """
+    info = {}
     height = sample['height'][0]
     width = sample['width'][0]
     x0 = sample["all_latents"][:, -1].to(accelerator.device) # Clear latents
@@ -566,12 +563,12 @@ def compute_nft_loss(
     transformer: FluxTransformer2DModel,
     sample : dict,
     timestep_index : int,
-    autocast,
-    info : dict,
+    autocast
 ):
     """
     NFT loss that directly predict x_0 from x_t
     """
+    info = {}
     height = sample['height'][0]
     width = sample['width'][0]
     x0 = sample["all_latents"][:, -1].to(accelerator.device) # Clear latents
@@ -1609,18 +1606,17 @@ def main(_):
                         loss_type = config.train.loss_type.lower()
 
                         if loss_type == 'ppo':
-                            loss, info = compute_ppo_loss(
+                            loss, loss_info = compute_ppo_loss(
                                 config=config,
                                 accelerator=accelerator,
                                 pipeline=pipeline,
                                 transformer=transformer,
                                 sample=sample,
                                 timestep_index=j,
-                                info=info,
                                 autocast=autocast,
                             )
                         elif loss_type == 'nft':
-                            loss, info = compute_nft_loss(
+                            loss, loss_info = compute_nft_loss(
                                 config=config,
                                 accelerator=accelerator,
                                 pipeline=pipeline,
@@ -1628,10 +1624,9 @@ def main(_):
                                 sample=sample,
                                 timestep_index=j,
                                 autocast=autocast,
-                                info=info,
                             )
                         elif loss_type == 'nft_step':
-                            loss, info = compute_nft_step_loss(
+                            loss, loss_info = compute_nft_step_loss(
                                 config=config,
                                 accelerator=accelerator,
                                 pipeline=pipeline,
@@ -1639,10 +1634,12 @@ def main(_):
                                 sample=sample,
                                 timestep_index=j,
                                 autocast=autocast,
-                                info=info,
                             )
                         else:
                             raise ValueError(f"Unknown loss type: {config.train.loss_type}. Supported types are ['ppo', 'nft', 'nft_step']")
+
+                        for k, v in loss_info.items():
+                            info[k].append(v.detach())
 
                         # Track loss tensors
                         if config.enable_mem_log:
