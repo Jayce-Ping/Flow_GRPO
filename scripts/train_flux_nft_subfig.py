@@ -339,7 +339,7 @@ def compute_ppo_loss(
             transformer=transformer,
             pipeline=pipeline,
             sample=sample,
-            j=timestep_index,
+            timestep_index=timestep_index,
             config=config,
         )
         with torch.no_grad():
@@ -350,7 +350,7 @@ def compute_ppo_loss(
                 transformer=transformer,
                 pipeline=pipeline,
                 sample=sample,
-                j=timestep_index,
+                timestep_index=timestep_index,
                 config=config,
             )
             with transformer.module.disable_adapter():
@@ -358,7 +358,7 @@ def compute_ppo_loss(
                     transformer=transformer,
                     pipeline=pipeline,
                     sample=sample,
-                    j=timestep_index,
+                    timestep_index=timestep_index,
                     config=config,
                 )
 
@@ -383,7 +383,7 @@ def compute_ppo_loss(
 
     kl_loss = ((prev_sample_mean - ref_prev_sample_mean) ** 2).mean(dim=tuple(range(1, prev_sample_mean.ndim)), keepdim=True) / (2 * std_dev_t ** 2 + 1e-7)
     kl_loss = torch.mean(kl_loss)
-
+    
     loss = policy_loss + config.train.beta * kl_loss
     info["policy_loss"] = policy_loss.detach()
     info["unclipped_loss"] = unclipped_loss.mean().detach()
@@ -1358,7 +1358,7 @@ def main(_):
                 # Encode each sub-prompt if layout is given
                 with autocast():
                     with torch.no_grad():
-                        images, all_latents, all_prompt_embeds, all_pooled_prompt_embeds, all_noise_timesteps, all_timesteps = flux_pipeline(
+                        images, all_latents, all_prompt_embeds, all_pooled_prompt_embeds, noise_timestep_indices, all_timesteps = flux_pipeline(
                             pipeline,
                             prompt=prompts,
                             num_inference_steps=config.sample.num_steps,
@@ -1378,7 +1378,6 @@ def main(_):
                     all_pooled_prompt_embeds = all_pooled_prompt_embeds # (batch_size, dim)
                     all_prompt_embeds = list(all_prompt_embeds.unbind(0)) # List[Tensor(seq_len, dim)] with length batch_size
                     all_pooled_prompt_embeds = list(all_pooled_prompt_embeds.unbind(0)) # List[Tensor(dim)] with length batch_size
-                    all_noise_timesteps = list(all_noise_timesteps.unbind(0)) # List[Tensor(num_noise_steps)] with length batch_size
                     all_timesteps = list(all_timesteps.unbind(0)) # List[Tensor(num_steps)] with length batch_size
             else:
                 # Different sizes, have to do one by one
@@ -1386,12 +1385,11 @@ def main(_):
                 all_latents = []
                 all_prompt_embeds = []
                 all_pooled_prompt_embeds = []
-                all_noise_timesteps = []
                 all_timesteps = []
                 for index in range(len(prompts)):
                     with autocast():
                         with torch.no_grad():
-                            this_image, this_all_latents, this_prompt_embeds, this_pooled_prompt_embeds, this_noise_timesteps, this_timesteps = flux_pipeline(
+                            this_image, this_all_latents, this_prompt_embeds, this_pooled_prompt_embeds, noise_timestep_indices, this_timesteps = flux_pipeline(
                                 pipeline,
                                 prompt=prompts[index],
                                 num_inference_steps=config.sample.num_steps,
@@ -1407,8 +1405,7 @@ def main(_):
                     images.append(this_image.squeeze(0))  # add (C, H, W)
                     all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_steps + 1, seq_len, C)
                     all_prompt_embeds.append(this_prompt_embeds.squeeze(0)) # (1, seq_len, dim) -> (seq_len, dim)
-                    all_pooled_prompt_embeds.append(this_pooled_prompt_embeds.squeeze(0)) # (1, dim) -> (dim)
-                    all_noise_timesteps.append(this_noise_timesteps.squeeze(0)) # (1, num_noise_steps) -> (num_noise_steps,)
+                    all_pooled_prompt_embeds.append(this_pooled_prompt_embeds.squeeze(0)) # (1, dim) -> (dim,)
                     all_timesteps.append(this_timesteps.squeeze(0)) # (1, num_steps) -> (num_steps,)
 
             # Final `samples` is List[Dict], with length = config.sample.batch_size * config.sample.num_batches_per_epoch
@@ -1420,7 +1417,6 @@ def main(_):
                         'layout': layouts[index],
                         'prompt': prompts[index],
                         'metadata': prompt_metadata[index],
-                        'noise_timesteps': all_noise_timesteps[index].unsqueeze(0), # Keep batch dimension as 1
                         'timesteps': all_timesteps[index].unsqueeze(0), # Keep batch dimension as 1
                         'prompt_ids': prompt_ids[index].unsqueeze(0), # Keep batch dimension as 1
                         'prompt_embeds': all_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1

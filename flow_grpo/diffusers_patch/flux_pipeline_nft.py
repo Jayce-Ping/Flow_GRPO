@@ -38,10 +38,14 @@ def denoising_sde_step_with_logprob(
     process from the learned model outputs (most often the predicted velocity). Specially, when noise_level is zero, the process becomes deterministic.
 
     Args:
+        scheduler (`FlowMatchEulerDiscreteScheduler`):
+            A scheduler object that handles the scheduling of the diffusion process.
         model_output (`torch.FloatTensor`):
             The direct output from learned flow model.
-        timestep (`float` | `list[float]` | `torch.FloatTensor`):
-            The current discrete timestep(s) in the diffusion chain, with batch dimension.
+        sigma (`float` | `torch.FloatTensor`):
+            The current noise level (sigma) in the diffusion chain. This can be different for each sample in the batch.
+        sigma_prev (`float` | `torch.FloatTensor`):
+            The previous noise level (sigma) in the diffusion chain. This can be different for each sample in the batch.
         sample (`torch.FloatTensor`):
             A current instance of a sample created by the diffusion process.
         noise_level (`int` | `float` | `list[float]` | `torch.FloatTensor`, *optional*, defaults to 0.7):
@@ -50,8 +54,12 @@ def denoising_sde_step_with_logprob(
             The next insance of the sample. If given, calculate the log_prob using given `prev_sample` as predicted value.
         generator (`torch.Generator`, *optional*):
             A random number generator for SDE solving. If not given, a random generator will be used.
+        sigma_max (`float`, *optional*, defaults to 0.98):
+            The maximum noise level (sigma) used to avoid numerical issues when sigma is 1.
         cps (`bool`, *optional*, defaults to False):
             Whether to use coefficient preserving sampling (CPS) in the denoising step.
+        return_log_prob (`bool`, *optional*, defaults to True):
+            Whether to return the log probability of the transition.
     """
     # bf16 can overflow here when compute prev_sample_mean, we must convert all variable to fp32
     model_output = model_output.float()
@@ -63,9 +71,11 @@ def denoising_sde_step_with_logprob(
     noise_level = to_broadcast_tensor(noise_level, sample)
     sigma = to_broadcast_tensor(sigma, sample)
     sigma_prev = to_broadcast_tensor(sigma_prev, sample)
+
     dt = sigma_prev - sigma # dt is negative, (batch_size, 1, 1)
 
     if not cps:
+        sigma_max = to_broadcast_tensor(sigma_max, sample) # To avoid dividing by zero
         std_dev_t = torch.sqrt(sigma / (1 - torch.where(sigma == 1, sigma_max, sigma))) * noise_level # (batch_size, 1, 1)
         
         # FlowGRPO sde
@@ -145,7 +155,11 @@ def set_scheduler_timesteps(
     sigmas: Optional[List[float]] = None,
     device: Optional[Union[str, torch.device]] = None,
 ):
-    sigmas_unshifted = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
+    # 5. Prepare scheduler, shift timesteps/sigmas according to image size (image_seq_len)
+    sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
+    if hasattr(scheduler.config, "use_flow_sigmas") and scheduler.config.use_flow_sigmas:
+        sigmas = None
+
     mu = calculate_shift(
         seq_len,
         scheduler.config.get("base_image_seq_len", 256),
@@ -157,31 +171,27 @@ def set_scheduler_timesteps(
         scheduler,
         num_inference_steps,
         device,
-        sigmas=sigmas_unshifted,
+        sigmas=sigmas,
         mu=mu,
     )
-    return scheduler.timesteps
+    return timesteps
 
 
 def compute_log_prob(
         transformer : FluxTransformer2DModel,
         pipeline : FluxPipeline,
         sample : dict[str, torch.Tensor],
-        j : int,
+        timestep_index : int,
         config : Namespace
     ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
     # 1. Prepare parameters
-    latents = sample["all_latents"][:, j] # Latents at current timestep, shape (B, seq_len, C)
-    next_latents = sample["all_latents"][:, j + 1] # Latents at next timestep, shape (B, seq_len, C)
+    latents = sample["all_latents"][:, timestep_index] # Latents at current timestep, shape (B, seq_len, C)
+    next_latents = sample["all_latents"][:, timestep_index + 1] # Latents at next timestep, shape (B, seq_len, C)
     num_inference_steps = config.sample.num_steps
     scheduler = pipeline.scheduler
-    timestep = sample["timesteps"][:, j] # (B,)
-    timestep_next = sample["timesteps"][:, j + 1] if j + 1 < sample["timesteps"].shape[1] else torch.zeros_like(timestep) # (B,)
-
-    if bool((sample['noise_timesteps'] == timestep).all(dim=1).any()):
-        noise_level = config.sample.noise_level
-    else:
-        noise_level = 0.0
+    timestep = sample["timesteps"][:, timestep_index] # (B,)
+    timestep_next = sample["timesteps"][:, timestep_index + 1] if timestep_index + 1 < sample["timesteps"].shape[1] else torch.zeros_like(timestep) # (B,)
+    timestep_max =  sample["timesteps"][:, 1]
 
     batch_size = latents.shape[0]
     num_channels_latents = pipeline.transformer.config.in_channels // 4
@@ -202,7 +212,7 @@ def compute_log_prob(
         seq_len=latents.shape[1],
         device=device,
     )
-    sigma_max = pipeline.scheduler.sigmas[1]
+    noise_level = pipeline.scheduler.get_noise_levels()[timestep_index].item()
 
     # TODO: Add correct merge logic here
     # 2. Prepare prompt_embeds and latents if using dividing
@@ -278,7 +288,7 @@ def compute_log_prob(
         prev_sample=next_latents.float(),
         cps=config.sample.cps,
         return_log_prob=True,
-        sigma_max=sigma_max
+        sigma_max=timestep_max / 1000
     )
 
     # if timestep_index < config.sample.merge_step:
@@ -461,7 +471,7 @@ def flux_pipeline(
 
     # 6. Denoising loop
     all_latents = [latents]
-    all_noise_timesteps = []
+    all_noise_timestep_indices = []
     pipeline.scheduler.set_begin_index(0)
     with pipeline.progress_bar(total=num_inference_steps) as progress_bar:
         for i, t in enumerate(timesteps):
@@ -522,7 +532,7 @@ def flux_pipeline(
 
             all_latents.append(latents)
             if current_noise_level > 0:
-                all_noise_timesteps.append(timestep)
+                all_noise_timestep_indices.append(i)
     
             # call the callback, if provided
             if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % pipeline.scheduler.order == 0):
@@ -538,8 +548,4 @@ def flux_pipeline(
     pipeline.maybe_free_model_hooks()
 
     timesteps = timesteps.unsqueeze(0).expand(batch_size, -1) # (batch_size, num_inference_steps)
-    if len(all_noise_timesteps) > 0:
-        all_noise_timesteps = torch.stack(all_noise_timesteps, dim=1) # (batch_size, num_noise_steps)
-    else:
-        all_noise_timesteps = torch.zeros((batch_size, 0), device=device) # (batch_size, 0)
-    return images, all_latents, prompt_embeds, pooled_prompt_embeds, all_noise_timesteps, timesteps 
+    return images, all_latents, prompt_embeds, pooled_prompt_embeds, all_noise_timestep_indices, timesteps 
