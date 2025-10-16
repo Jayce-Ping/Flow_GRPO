@@ -396,7 +396,7 @@ def grid_consistency_clip_nft_perm():
     config.train.loss_type = 'nft'
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
-    config.train.gradient_step_per_epoch = 1 if config.train.loss_type == 'nft' else 2
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
     assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
@@ -486,7 +486,7 @@ def grid_consistency_clip_nft():
     config.train.loss_type = 'nft'
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
-    config.train.gradient_step_per_epoch = 1 if config.train.loss_type == 'nft' else 2
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
     assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
@@ -667,7 +667,7 @@ def grid_consistency_clip_ppo_sde():
     config.train.loss_type = 'ppo'
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
-    config.train.gradient_step_per_epoch = 1 if config.train.loss_type == 'nft' else 2
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
     assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
@@ -757,7 +757,7 @@ def grid_consistency_clip_ppo_sde_perm():
     config.train.loss_type = 'ppo'
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
-    config.train.gradient_step_per_epoch = 1 if config.train.loss_type == 'nft' else 2
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
     assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
@@ -847,7 +847,7 @@ def grid_consistency_clip_flux():
     config.train.loss_type = 'nft'
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
-    config.train.gradient_step_per_epoch = 1 if config.train.loss_type == 'nft' else 2
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
     assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1

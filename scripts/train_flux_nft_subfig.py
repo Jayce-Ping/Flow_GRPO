@@ -333,6 +333,7 @@ def compute_ppo_loss(
 ):
     batch_size = sample['all_latents'].shape[0]
     with autocast():
+        pipeline.transformer.train()
         transformer.module.set_adapter("default")
         prev_sample, log_prob, prev_sample_mean, std_dev_t = compute_log_prob(
             transformer=transformer,
@@ -342,6 +343,8 @@ def compute_ppo_loss(
             config=config,
         )
         with torch.no_grad():
+            # Use eval mode to avoid ratio=1 constantly
+            pipeline.transformer.eval()
             transformer.module.set_adapter("old")
             _, old_log_prob, old_prev_sample_mean, _ = compute_log_prob(
                 transformer=transformer,
@@ -359,6 +362,7 @@ def compute_ppo_loss(
                     config=config,
                 )
 
+    pipeline.transformer.train()
     transformer.module.set_adapter("default")
     # grpo logic
     advantages = torch.clamp(
