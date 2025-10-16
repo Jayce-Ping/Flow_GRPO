@@ -1290,6 +1290,9 @@ def main(_):
                             loss_terms["kl_loss"] = kl_loss.mean().detach()
                             loss_terms['loss'] = loss.detach()
                             info['ratio'].append(ratio.abs().mean())
+                            info["approx_kl"].append(
+                               0.5 * torch.mean((log_prob - old_log_prob) ** 2)
+                            )
                             info["clipfrac"].append(
                                 torch.mean(
                                     (
