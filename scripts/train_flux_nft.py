@@ -256,9 +256,6 @@ def augment_and_reward_compute(
         disable=not accelerator.is_local_main_process
     ):
         # Compute reward with train.batch_size to avoid OOM
-        # HOW?
-        # 1. encode criteria and communicate
-        # 2. modify sampler to make sure all group of one prompt is in one gpu (looks better)
         batch = augmented_samples[i : i + config.train.batch_size]
         heights = [sample.get('height', config.resolution) for sample in batch]
         widths = [sample.get('width', config.resolution) for sample in batch]
@@ -302,6 +299,23 @@ def augment_and_reward_compute(
         
         if accelerator.is_main_process and len(log_items) < max_log_num:
             log_items.extend(list(zip(images, prompts, rewards)))
+
+
+    use_original_mean = True
+    if use_original_mean:
+        # Group samples again to compute custom rewards
+        prompt_to_samples = defaultdict(list)
+        for sample in augmented_samples:
+            prompt_to_samples[sample['prompt']].append(sample)
+
+        for prompt, group_samples in prompt_to_samples.items():
+            rewards = [sample['rewards'] for sample in group_samples]
+            # The first `group_size` samples are the original ones, compute there mean as reference
+            reference_mean = {k: np.mean([r[k] for r in rewards[:group_size]]) for k in rewards[0].keys()}
+            # Compute custom reward: r_i - reference_mean
+            for sample, reward in zip(group_samples, rewards):
+                for k in reward.keys():
+                    reward[k] = reward[k] - reference_mean[k]
 
     if accelerator.is_main_process:
         # Log some augmented images
