@@ -60,6 +60,7 @@ def setup_wandb_log(accelerator : Accelerator, config : Namespace):
         if accelerator.is_main_process:
             run = wandb.init(
                 project=config.project_name,
+                name=config.run_name,
                 config=config.to_dict()
             )
         else:
@@ -103,6 +104,7 @@ def setup_swanlab_log(accelerator : Accelerator, config : Namespace):
         if accelerator.is_main_process:
             run = swanlab.init(
                 project=config.project_name,
+                name=config.run_name,
                 config=config.to_dict()
             )
         else:
