@@ -1486,7 +1486,7 @@ def main(_):
             prompt_ids = torch.cat([s["prompt_ids"] for s in samples], dim=0)
             prompt_ids = accelerator.gather(prompt_ids).cpu().numpy()
             prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
-            advantages = stat_tracker.update(prompts, gathered_rewards['avg'], type='grpo')
+            advantages = stat_tracker.update(prompts, gathered_rewards['avg'], type='grpo',first_k_mean=config.sample.first_k_mean)
             if accelerator.is_local_main_process:
                 print("len(prompts)", len(prompts))
                 print("len unique prompts", len(set(prompts)))
