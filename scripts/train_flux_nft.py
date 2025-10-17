@@ -32,13 +32,14 @@ from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftMode
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
-from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, divide_prompt, divide_latents, merge_latents, num_to_base_tuple
+from flow_grpo.logging_utils import set_online_log
+from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, divide_prompt, divide_latents, merge_latents, num_to_base_tuple, create_generator
 from flow_grpo.rewards.rewards import multi_score
-from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, flux_pipeline
+from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, flux_pipeline, compute_log_prob
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
-from flow_grpo.datasets.sampler import DistributedKRepeatSampler, DistributedGroupKRepeatSampler
+from flow_grpo.datasets.sampler import DistributedGroupKRepeatSampler, DistributedKRepeatSampler
 from flow_grpo.scheduler import FlowMatchNoiseScheduler
 from flow_grpo.memory_tracker import MemoryProfiler
 
@@ -48,17 +49,6 @@ FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", "config/base.py", "Training configuration.")
 
 logger = get_logger(__name__)
-
-def create_generator(prompts : List[str], base_seed : int) -> List[torch.Generator]:
-    generators = []
-    for batch_pos, prompt in enumerate(prompts):
-        # Use a stable hash (SHA256), then convert it to an integer seed
-        hash_digest = hashlib.sha256(prompt.encode()).digest()
-        prompt_hash_int = int.from_bytes(hash_digest[:4], 'big')  # Take the first 4 bytes as part of the seed
-        seed = (base_seed + prompt_hash_int) % (2**31) # Ensure the number is within a valid range
-        gen = torch.Generator().manual_seed(seed)
-        generators.append(gen)
-    return generators
 
 def return_decay(step, decay_type):
     if decay_type == 0:
@@ -81,6 +71,625 @@ def return_decay(step, decay_type):
     else:
         decay = (step - flat) * uprate
         return min(decay, uphold)
+
+def reward_compute(
+    logging_platform,
+    accelerator : Accelerator,
+    pipeline : FluxPipeline,
+    config : Namespace,
+    samples : List[dict],
+    reward_fn,
+    executor : futures.ThreadPoolExecutor,
+    max_log_num : int = 30,
+    step : int = 0
+):  
+    log_items = []
+    # Compute reward for each sample
+    for i in tqdm(
+        range(0, len(samples), config.train.batch_size),
+        desc="Computing rewards",
+        disable=not accelerator.is_local_main_process
+    ):
+        # Compute reward with train.batch_size to avoid OOM
+        # HOW?
+        # 1. encode criteria and communicate
+        # 2. modify sampler to make sure all group of one prompt is in one gpu (looks better)
+        batch = samples[i : i + config.train.batch_size]
+        heights = [sample.get('height', config.resolution) for sample in batch]
+        widths = [sample.get('width', config.resolution) for sample in batch]
+        if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
+            height = heights[0]
+            width = widths[0]
+            # Convert cleaned latents to images
+            latents = torch.cat([sample['all_latents'][:, -1] for sample in batch], dim=0).to(accelerator.device)
+            latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
+            latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
+            latents = latents.to(dtype=pipeline.vae.dtype)
+            images = pipeline.vae.decode(latents, return_dict=False)[0]
+            images = pipeline.image_processor.postprocess(images, output_type='pil')
+        else:
+            images = []
+            for sample in batch:
+                height = sample.get('height', config.resolution)
+                width = sample.get('width', config.resolution)
+                # Convert cleaned latents to images
+                latents = sample['all_latents'][:, -1].to(accelerator.device)
+                latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
+                latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
+                latents = latents.to(dtype=pipeline.vae.dtype)
+                image = pipeline.vae.decode(latents, return_dict=False)[0]
+                image = pipeline.image_processor.postprocess(image, output_type='pil')[0]
+                images.append(image)
+        # Compute reward
+        prompts = [sample['prompt'] for sample in batch]
+        prompt_metadatas = [sample.get('metadata', {}) for sample in batch]
+        future = executor.submit(reward_fn, images, prompts, prompt_metadatas)
+        rewards, reward_metadatas = future.result()
+
+        # Convert rewards from dict of list to list of dict
+        rewards = [
+            dict(zip(rewards.keys(), value))
+            for value in zip(*rewards.values())
+        ]
+
+        for sample, reward in zip(batch, rewards):
+            sample['rewards'] = reward
+
+        if accelerator.is_main_process and i * config.train.batch_size < max_log_num:
+            log_items.extend(list(zip(images, prompts, rewards)))
+
+    if accelerator.is_main_process:
+        # Log some images
+        logging_platform.log(
+            {
+                "train_images": [
+                    logging_platform.Image(
+                        image,
+                        caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
+                    )
+                    for idx, (image, prompt, reward) in enumerate(log_items)
+                ]
+            },
+            step=step,
+        )
+
+    return samples
+
+
+def augment_and_reward_compute(
+    logging_platform,
+    accelerator : Accelerator,
+    pipeline : FluxPipeline,
+    config : Namespace,
+    samples : List[dict],
+    reward_fn,
+    executor : futures.ThreadPoolExecutor,
+    max_log_num : int = 30,
+    step : int = 0,
+):
+    prompt_to_samples = defaultdict(list)
+    for sample in samples:
+        prompt_to_samples[sample['prompt']].append(sample)
+
+    if hasattr(config.sample, 'max_group_size') and config.sample.max_group_size is not None:
+        max_group_size = config.sample.max_group_size
+    else:
+        max_group_size = None
+
+    augmented_samples = []
+    group_size = config.sample.num_images_per_prompt
+    for prompt, group_samples in prompt_to_samples.items():
+        assert len(group_samples) == group_size, f"Expected {group_size} samples for prompt {prompt}, but got {len(group_samples)}"
+        height = group_samples[0].get('height', config.resolution)
+        width = group_samples[0].get('width', config.resolution)
+        layout = group_samples[0].get('layout', (1, 1))
+        sub_height = height // layout[0]
+        sub_width = width // layout[1]
+        subimage_cnt = layout[0] * layout[1]
+        all_sublatents = torch.stack(
+            [
+                divide_latents(sample['all_latents'].squeeze(0), height, width, sub_height, sub_width) # (num_timesteps, layout[0], layout[1], sub_seq_len, C)
+                for sample in group_samples
+        ], dim=0)# (group_size, num_timesteps, layout[0], layout[1], sub_seq_len, C)
+        all_sublatents = all_sublatents.reshape(group_size, -1, subimage_cnt, *all_sublatents.shape[4:]) # (group_size, num_timesteps, subimage_cnt, sub_seq_len, C)
+        # A 2x2 image group of size 3 can generate 3^(2x2) = 81 different images, use a max_group_size to constraint
+        total_combinations = group_size ** subimage_cnt
+        sample_num = total_combinations
+        if max_group_size is not None:
+            sample_num = min(max_group_size, sample_num)
+
+        # Strategy 1: random sampling
+        # Choose `group_size` random indices from range(0, config.sample.max_group_size)
+        # sample_indices = random.sample(range(total_combinations), sample_num)
+        # sample_indices = [num_to_base_tuple(idx, group_size, subimage_cnt) for idx in sample_indices]
+        
+        # Strategy 2: balanced
+        sample_indices = []
+        # Make sure original images are included
+        for i in range(group_size):
+            base_tuple = tuple([i] * subimage_cnt)
+            base_idx = sum(val * (group_size ** pos) for pos, val in enumerate(reversed(base_tuple)))
+            sample_indices.append(base_idx)
+
+        remaining = sample_num - len(sample_indices)
+        if remaining <= 0:
+            sample_indices = random.sample(sample_indices, sample_num)
+        else:
+            all_indices = set(range(total_combinations)) - set(sample_indices)
+            sample_indices.extend(random.sample(list(all_indices), remaining))
+
+        # Decode index to tuple
+        sample_indices = [num_to_base_tuple(idx, group_size, subimage_cnt) for idx in sample_indices]
+
+        # The i-th sub-image is from the idx[i]-th image in the group
+        sample_indices = [
+            [(idx[i], i) for i in range(len(idx))]
+            for idx in sample_indices
+        ]
+
+        for indices in sample_indices:
+            sampled_sublatents = torch.stack(
+                [all_sublatents[i, :, j] for i,j in indices], # (num_timesteps, sub_seq_len, C)
+                dim=1
+            ) # (num_timesteps, subimage_cnt, sub_seq_len, C)
+            # Reshape to (num_timesteps, layout[0], layout[1], sub_seq_len, C) for merging
+            sampled_sublatents = sampled_sublatents.reshape(-1, layout[0], layout[1], *sampled_sublatents.shape[2:])
+
+            sampled_sublatents = merge_latents(
+                sampled_sublatents,
+                height,
+                width,
+                sub_height,
+                sub_width
+            ) # (num_timesteps, seq_len, C)
+            new_sample = group_samples[0].copy()
+            new_sample['all_latents'] = sampled_sublatents.unsqueeze(0) # (1, num_timesteps, seq_len, C)
+            augmented_samples.append(new_sample)
+
+    # Compute reward for each sample
+    # TODO: group reward computation can be optimized here - DONE: by adding cache in reward model
+    # Some subfigs will be paired multiple times for reward computation
+    log_items = []
+    for i in tqdm(
+        range(0, len(augmented_samples), config.train.batch_size),
+        desc="Computing rewards",
+        disable=not accelerator.is_local_main_process
+    ):
+        # Compute reward with train.batch_size to avoid OOM
+        # HOW?
+        # 1. encode criteria and communicate
+        # 2. modify sampler to make sure all group of one prompt is in one gpu (looks better)
+        batch = augmented_samples[i : i + config.train.batch_size]
+        heights = [sample.get('height', config.resolution) for sample in batch]
+        widths = [sample.get('width', config.resolution) for sample in batch]
+        if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
+            height = heights[0]
+            width = widths[0]
+            # Convert the cleaned latents to images
+            latents = torch.cat([sample['all_latents'][:, -1] for sample in batch], dim=0).to(accelerator.device)
+            latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
+            latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
+            latents = latents.to(dtype=pipeline.vae.dtype)
+            images = pipeline.vae.decode(latents, return_dict=False)[0]
+            images = pipeline.image_processor.postprocess(images, output_type='pil')
+        else:
+            images = []
+            for sample in batch:
+                height = sample.get('height', config.resolution)
+                width = sample.get('width', config.resolution)
+                latents = sample['all_latents'][:, -1].to(accelerator.device)
+                latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
+                latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
+                latents = latents.to(dtype=pipeline.vae.dtype)
+                image = pipeline.vae.decode(latents, return_dict=False)[0]
+                image = pipeline.image_processor.postprocess(image, output_type='pil')[0]
+                images.append(image)
+        # Compute reward
+        prompts = [sample['prompt'] for sample in batch]
+        prompt_metadatas = [sample.get('metadata', {}) for sample in batch]
+        future = executor.submit(reward_fn, images, prompts, prompt_metadatas)
+        rewards, reward_metadatas = future.result()
+
+        # Convert rewards from dict of list to list of dict
+        rewards = [
+            dict(zip(rewards.keys(), value))
+            for value in zip(*rewards.values())
+        ]
+
+        for sample, reward in zip(batch, rewards):
+            sample['rewards'] = reward
+
+        
+        if accelerator.is_main_process and i * config.train.batch_size < max_log_num:
+            log_items.extend(list(zip(images, prompts, rewards)))
+
+    if accelerator.is_main_process:
+        # Log some augmented images
+        logging_platform.log(
+            {
+                "train_images": [
+                    logging_platform.Image(
+                        image,
+                        caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
+                    )
+                    for idx, (image, prompt, reward) in enumerate(log_items)
+                ]
+            },
+            step=step
+        )
+
+    return augmented_samples
+
+
+def compute_ppo_loss(
+    config : Namespace,
+    accelerator : Accelerator,
+    pipeline: FluxPipeline,
+    transformer: FluxTransformer2DModel,
+    sample : dict,
+    timestep_index : int,
+    autocast,
+):
+    info = {}
+    batch_size = sample['all_latents'].shape[0]
+    with autocast():
+        transformer.module.set_adapter("default")
+        prev_sample, log_prob, prev_sample_mean, std_dev_t = compute_log_prob(
+            transformer=transformer,
+            pipeline=pipeline,
+            sample=sample,
+            timestep_index=timestep_index,
+            config=config,
+        )
+        with torch.no_grad():
+            transformer.module.set_adapter("old")
+            _, old_log_prob, old_prev_sample_mean, _ = compute_log_prob(
+                transformer=transformer,
+                pipeline=pipeline,
+                sample=sample,
+                timestep_index=timestep_index,
+                config=config,
+            )
+            with transformer.module.disable_adapter():
+                _, ref_log_prob, ref_prev_sample_mean, _ = compute_log_prob(
+                    transformer=transformer,
+                    pipeline=pipeline,
+                    sample=sample,
+                    timestep_index=timestep_index,
+                    config=config,
+                )
+
+    transformer.module.set_adapter("default")
+    # grpo logic
+    advantages = torch.clamp(
+        sample["advantages"],
+        -config.train.adv_clip_max,
+        config.train.adv_clip_max,
+    )
+
+    ratio = torch.exp(log_prob - old_log_prob)
+    # print("ratio", ratio)
+    unclipped_loss = -advantages * ratio
+    clipped_loss = -advantages * torch.clamp(
+        ratio,
+        1.0 - config.train.clip_range,
+        1.0 + config.train.clip_range,
+    )
+    policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
+
+    kl_loss = ((prev_sample_mean - ref_prev_sample_mean) ** 2).mean(dim=tuple(range(1, prev_sample_mean.ndim)), keepdim=True) / (2 * std_dev_t ** 2 + 1e-7)
+    kl_loss = torch.mean(kl_loss)
+    
+    loss = policy_loss + config.train.beta * kl_loss
+    info["policy_loss"] = policy_loss.detach()
+    info["unclipped_loss"] = unclipped_loss.mean().detach()
+    info["clipped_loss"] = clipped_loss.mean().detach()
+    info["kl_loss"] = kl_loss.mean().detach()
+    info['loss'] = loss.detach()
+    info['ratio'] = ratio.abs().mean()
+    info["approx_kl"] = 0.5 * torch.mean((log_prob - old_log_prob) ** 2)
+    info["clipfrac"] = torch.mean(
+        (
+            torch.abs(ratio - 1.0) > config.train.clip_range
+        ).float()
+    )
+    info["clipfrac_gt_one"] = torch.mean(
+        (
+            ratio - 1.0 > config.train.clip_range
+        ).float()
+    )
+    info["clipfrac_lt_one"] = torch.mean(
+        (
+            1.0 - ratio > config.train.clip_range
+        ).float()
+    )
+    info["clipfrac_lt_one"] = torch.mean(
+        (
+            1.0 - ratio > config.train.clip_range
+        ).float()
+    )
+
+    return loss, info
+
+def compute_nft_step_loss(
+    config : Namespace,
+    accelerator : Accelerator,
+    pipeline: FluxPipeline,
+    transformer: FluxTransformer2DModel,
+    sample : dict,
+    timestep_index : int,
+    autocast
+):
+    """
+    NFT loss that directly predict x_{t-1} from x_t
+    """
+    info = {}
+    height = sample['height'][0]
+    width = sample['width'][0]
+    x0 = sample["all_latents"][:, -1].to(accelerator.device) # Clear latents
+    batch_size = x0.shape[0]
+    guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
+
+    t = sample['timesteps'][:, timestep_index].to(accelerator.device, dtype=x0.dtype) # shape (batch_size,)
+    t_next = sample['timesteps'][:, timestep_index + 1].to(accelerator.device, dtype=x0.dtype) # shape (batch_size,)
+    t = t / 1000.0 # scale to [0, 1]
+    t_next = t_next / 1000.0
+
+    t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
+    t_next_expanded = t_next.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
+    dt = t_next_expanded - t_expanded
+
+    xt = sample['all_latents'][:, timestep_index].to(accelerator.device) # Noisy latents at step t
+    xt_next = sample['all_latents'][:, timestep_index + 1].to(accelerator.device) # Noisy latents at step t_next
+
+    xt, latent_image_ids = pipeline.prepare_latents(
+        batch_size=batch_size,
+        num_channels_latents=xt.shape[2] // 4,
+        height=height,
+        width=width,
+        device=accelerator.device,
+        dtype=x0.dtype,
+        generator=None,
+        latents=xt
+    )
+    text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0.dtype)
+
+    with autocast():
+        transformer.module.set_adapter("default")
+        new_v_pred = transformer(
+            hidden_states=xt,
+            timestep=t,
+            guidance=guidance.expand(xt.shape[0]),
+            encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+            pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+            img_ids=latent_image_ids,
+            txt_ids=text_ids,
+            return_dict=False,
+        )[0]
+
+        with torch.no_grad():
+            transformer.module.set_adapter("old")
+            old_v_pred = transformer(
+                hidden_states=xt,
+                timestep=t,
+                guidance=guidance.expand(xt.shape[0]),
+                encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                img_ids=latent_image_ids,
+                txt_ids=text_ids,
+                return_dict=False,
+            )[0].detach()
+            with transformer.module.disable_adapter():
+                v_ref = transformer(
+                    hidden_states=xt,
+                    timestep=t,
+                    guidance=guidance.expand(xt.shape[0]),
+                    encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                    pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                    img_ids=latent_image_ids,
+                    txt_ids=text_ids,
+                    return_dict=False,
+                )[0]
+
+    transformer.module.set_adapter("default")
+    # NFT logic
+    advantages = torch.clamp(
+        sample["advantages"],
+        -config.train.adv_clip_max,
+        config.train.adv_clip_max,
+    )
+    normalized_advantages_clip = (advantages / config.train.adv_clip_max) / 2.0 + 0.5
+    r = torch.clamp(normalized_advantages_clip, 0, 1)
+    info["old_deviate"] = torch.mean((new_v_pred - old_v_pred) ** 2).detach()
+    info["old_deviate_max"] = torch.max((new_v_pred - old_v_pred) ** 2).detach()
+    positive_prediction = config.train.nft_beta * new_v_pred + (1 - config.train.nft_beta) * old_v_pred.detach()
+
+    implicit_negative_prediction = (1.0 + config.train.nft_beta) * old_v_pred.detach() - config.train.nft_beta * new_v_pred
+    
+    # adaptive weighting
+    xt_next_pred = xt + dt * positive_prediction
+    with torch.no_grad():
+        weight_factor = (
+            torch.abs(xt_next_pred.double() - xt_next.double())
+            .mean(dim=tuple(range(1, xt.ndim)), keepdim=True)
+            .clip(min=0.00001)
+        )
+
+    positive_loss = ((xt_next_pred - xt_next) ** 2 / weight_factor).mean(dim=tuple(range(1, xt_next.ndim)))
+
+    negative_xt_next_pred = xt + dt * implicit_negative_prediction
+    with torch.no_grad():
+        negative_weight_factor = (
+            torch.abs(negative_xt_next_pred.double() - xt_next.double())
+            .mean(dim=tuple(range(1, xt_next.ndim)), keepdim=True)
+            .clip(min=0.00001)
+        )
+    negative_loss = ((negative_xt_next_pred - xt_next) ** 2 / negative_weight_factor).mean(
+        dim=tuple(range(1, xt_next.ndim))
+    )
+
+    ori_policy_loss = (r * positive_loss  + (1.0 - r) * negative_loss) / config.train.nft_beta
+    policy_loss = (ori_policy_loss * config.train.adv_clip_max).mean()
+
+    loss = policy_loss
+
+    info["policy_loss"] = policy_loss.detach()
+    info["unweighted_policy_loss"] = ori_policy_loss.mean().detach()
+
+    kl_div_loss = ((new_v_pred - v_ref) ** 2).mean(
+        dim=tuple(range(1, x0.ndim))
+    )
+    kl_div_loss = torch.mean(kl_div_loss)
+
+    loss += config.train.beta * kl_div_loss
+
+    info["kl_div"] = kl_div_loss.detach()
+    info["old_kl_div"] = torch.mean(
+        ((old_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
+    ).detach()
+
+    info["loss"] = loss.detach()
+
+    return loss, info
+
+def compute_nft_loss(
+    config : Namespace,
+    accelerator : Accelerator,
+    pipeline: FluxPipeline,
+    transformer: FluxTransformer2DModel,
+    sample : dict,
+    timestep_index : int,
+    autocast
+):
+    """
+    NFT loss that directly predict x_0 from x_t
+    """
+    info = {}
+    height = sample['height'][0]
+    width = sample['width'][0]
+    x0 = sample["all_latents"][:, -1].to(accelerator.device) # Clear latents
+    batch_size = x0.shape[0]
+    guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
+
+    t = sample['timesteps'][:, timestep_index].to(accelerator.device, dtype=x0.dtype) # shape (batch_size,)
+    t = t / 1000.0 # scale to [0, 1]
+
+    t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
+
+    noise = torch.randn_like(x0).to(accelerator.device, dtype=x0.dtype)
+    xt = (1 - t_expanded) * x0 + t_expanded * noise
+
+    xt, latent_image_ids = pipeline.prepare_latents(
+        batch_size=batch_size,
+        num_channels_latents=xt.shape[2] // 4,
+        height=height,
+        width=width,
+        device=accelerator.device,
+        dtype=x0.dtype,
+        generator=None,
+        latents=xt
+    )
+    text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0.dtype)
+
+    with autocast():
+        transformer.module.set_adapter("default")
+        new_v_pred = transformer(
+            hidden_states=xt,
+            timestep=t,
+            guidance=guidance.expand(xt.shape[0]),
+            encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+            pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+            img_ids=latent_image_ids,
+            txt_ids=text_ids,
+            return_dict=False,
+        )[0]
+
+        with torch.no_grad():
+            transformer.module.set_adapter("old")
+            old_v_pred = transformer(
+                hidden_states=xt,
+                timestep=t,
+                guidance=guidance.expand(xt.shape[0]),
+                encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                img_ids=latent_image_ids,
+                txt_ids=text_ids,
+                return_dict=False,
+            )[0].detach()
+            with transformer.module.disable_adapter():
+                v_ref = transformer(
+                    hidden_states=xt,
+                    timestep=t,
+                    guidance=guidance.expand(xt.shape[0]),
+                    encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
+                    pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
+                    img_ids=latent_image_ids,
+                    txt_ids=text_ids,
+                    return_dict=False,
+                )[0]
+
+    transformer.module.set_adapter("default")
+    # NFT logic
+    advantages = torch.clamp(
+        sample["advantages"],
+        -config.train.adv_clip_max,
+        config.train.adv_clip_max,
+    )
+    normalized_advantages_clip = (advantages / config.train.adv_clip_max) / 2.0 + 0.5
+    r = torch.clamp(normalized_advantages_clip, 0, 1)
+    info["x0_norm"] = torch.mean(x0**2).detach()
+    info["x0_norm_max"] = torch.max(x0**2).detach()
+    info["old_deviate"] = torch.mean((new_v_pred - old_v_pred) ** 2).detach()
+    info["old_deviate_max"] = torch.max((new_v_pred - old_v_pred) ** 2).detach()
+    positive_prediction = config.train.nft_beta * new_v_pred + (1 - config.train.nft_beta) * old_v_pred.detach()
+
+    implicit_negative_prediction = (1.0 + config.train.nft_beta) * old_v_pred.detach() - config.train.nft_beta * new_v_pred
+    
+    # adaptive weighting
+    x0_prediction = xt - t_expanded * positive_prediction
+    with torch.no_grad():
+        weight_factor = (
+            torch.abs(x0_prediction.double() - x0.double())
+            .mean(dim=tuple(range(1, x0.ndim)), keepdim=True)
+            .clip(min=0.00001)
+        )
+
+    positive_loss = ((x0_prediction - x0) ** 2 / weight_factor).mean(dim=tuple(range(1, x0.ndim)))
+
+    negative_x0_prediction = xt - t_expanded * implicit_negative_prediction
+    with torch.no_grad():
+        negative_weight_factor = (
+            torch.abs(negative_x0_prediction.double() - x0.double())
+            .mean(dim=tuple(range(1, x0.ndim)), keepdim=True)
+            .clip(min=0.00001)
+        )
+    negative_loss = ((negative_x0_prediction - x0) ** 2 / negative_weight_factor).mean(
+        dim=tuple(range(1, x0.ndim))
+    )
+
+    ori_policy_loss = (r * positive_loss  + (1.0 - r) * negative_loss) / config.train.nft_beta
+    policy_loss = (ori_policy_loss * config.train.adv_clip_max).mean()
+
+    loss = policy_loss
+
+    info["policy_loss"] = policy_loss.detach()
+    info["unweighted_policy_loss"] = ori_policy_loss.mean().detach()
+
+    kl_div_loss = ((new_v_pred - v_ref) ** 2).mean(
+        dim=tuple(range(1, x0.ndim))
+    )
+    kl_div_loss = torch.mean(kl_div_loss)
+
+    loss += config.train.beta * kl_div_loss
+
+    info["kl_div"] = kl_div_loss.detach()
+    info["old_kl_div"] = torch.mean(
+        ((old_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
+    ).detach()
+
+    info["loss"] = loss.detach()
+
+    return loss, info
 
 
 @torch.no_grad()
@@ -128,6 +737,7 @@ def eval(pipeline : FluxPipeline,
             memory_profiler.snapshot(f"eval_batch_{batch_idx}_start")
 
         prompts, prompt_metadata = test_batch
+        generator = create_generator(prompts, config.seed + accelerator.process_index)
 
         heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
         widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
@@ -151,6 +761,7 @@ def eval(pipeline : FluxPipeline,
                         prompt=prompt,
                         num_inference_steps=config.test.num_steps,
                         guidance_scale=config.sample.guidance_scale,
+                        generator=generator[i],
                         output_type="pt",
                         height=heights[i],
                         width=widths[i],
@@ -168,6 +779,7 @@ def eval(pipeline : FluxPipeline,
                     prompt=prompts,
                     num_inference_steps=config.test.num_steps,
                     guidance_scale=config.sample.guidance_scale,
+                    generator=generator,
                     output_type="pt",
                     height=heights[0],
                     width=widths[0],
@@ -411,108 +1023,6 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
 
     return pipeline, text_encoders, tokenizers
 
-def setup_wandb_log(accelerator, config):
-    """
-        Initialize wandb training log
-    """
-    import wandb
-    if config.resume_from_id is not None:
-        project_name = config.project_name
-        run_id = config.resume_from_id
-        # Get history
-        api_run = wandb.Api().run(f"{project_name}/{run_id}")
-        history = api_run.history()
-        if not history.empty:
-            if config.resume_from_step is None:
-                config.resume_from_step = int(history['_step'].iloc[-1])
-            if config.resume_from_epoch is None:
-                config.resume_from_epoch = config.resume_from_step // 2
-            logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
-        else:
-            logger.info("No previous history found, starting from beginning")
-            config.resume_from_step = 0
-            config.resume_from_epoch = 0
-
-        if accelerator.is_main_process:
-            run = wandb.init(
-                project=config.project_name,
-                config=config.to_dict(),
-                id=run_id,
-                resume='must'
-            )
-        else:
-            run = None
-    else:
-        unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
-        if not config.run_name:
-            config.run_name = unique_id
-        else:
-            config.run_name += "_" + unique_id
-        if accelerator.is_main_process:
-            run = wandb.init(
-                project=config.project_name,
-                config=config.to_dict()
-            )
-        else:
-            run = None
-
-    return run, wandb
-
-def setup_swanlab_log(accelerator, config):
-    """
-        Initialize swanlab training log
-    """
-    import swanlab
-    if config.resume_from_id:
-        project_name = config.project_name
-        run_id = config.resume_from_id
-        # Get history
-        api = swanlab.OpenApi()
-        run_summary = api.get_summary(project=project_name, exp_id=run_id)
-        if config.resume_from_step is None:
-            config.resume_from_step = run_summary.data['epoch']['max']['step']
-        if config.resume_from_epoch is None:
-            config.resume_from_epoch = run_summary.data['epoch']['max']['value']
-        logger.info(f"Auto-resuming from step {config.resume_from_step}, epoch {config.resume_from_epoch}")
-
-        if accelerator.is_main_process:
-            run = swanlab.init(
-                project=project_name,
-                config=config.to_dict(),
-                resume=True,
-                id=run_id
-            )
-        else:
-            run = None
-    else:
-        unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
-        if not config.run_name:
-            config.run_name = unique_id
-        else:
-            config.run_name += "_" + unique_id
-
-        if accelerator.is_main_process:
-            run = swanlab.init(
-                project=config.project_name,
-                config=config.to_dict()
-            )
-        else:
-            run = None
-
-    return run, swanlab
-
-def set_online_log(accelerator, config):
-    """
-        Initialize logging with platform
-    """
-    if config.logging_platform == 'wandb':
-        run, logging_platform = setup_wandb_log(accelerator, config)
-    elif config.logging_platform == 'swanlab':
-        run, logging_platform = setup_swanlab_log(accelerator, config)
-    else:
-        raise ValueError(f"Unsupported logging platform: {config.logging_platform}")
-    
-    return run, logging_platform
 
 def main(_):
     # basic Accelerate and logging setup
@@ -532,7 +1042,7 @@ def main(_):
     train_timestep_indices = [int(i) for i in config.train.timesteps if i < config.sample.num_steps] # filter out invalid indices
 
     num_train_timesteps = len(train_timestep_indices)
-
+    
     accelerator_config = ProjectConfiguration(
         project_dir=os.path.join(config.logdir, config.run_name),
         automatic_checkpoint_naming=True,
@@ -659,15 +1169,28 @@ def main(_):
         raise NotImplementedError("Specify `prompt_fn` in ['general_ocr', 'geneval']")
 
     # Create an infinite-loop DataLoader
-    train_sampler = DistributedKRepeatSampler( 
-        dataset=train_dataset,
-        batch_size=config.sample.batch_size,
-        k=config.sample.num_images_per_prompt,
-        m=config.sample.unique_sample_num_per_epoch,
-        num_replicas=accelerator.num_processes,
-        rank=accelerator.process_index,
-        seed=config.seed
-    )
+    if config.sample.subfig_permutation:
+        # If using subfig permutation, we need to make sure all samples of one prompt are on the same device
+        # so use DistributedGroupKRepeatSampler here
+        train_sampler = DistributedGroupKRepeatSampler( 
+            dataset=train_dataset,
+            batch_size=config.sample.batch_size,
+            k=config.sample.num_images_per_prompt,
+            m=config.sample.unique_sample_num_per_epoch,
+            num_replicas=accelerator.num_processes,
+            rank=accelerator.process_index,
+            seed=config.seed
+        )
+    else:
+        train_sampler = DistributedKRepeatSampler(
+            dataset=train_dataset,
+            batch_size=config.sample.batch_size,
+            k=config.sample.num_images_per_prompt,
+            m=config.sample.unique_sample_num_per_epoch,
+            num_replicas=accelerator.num_processes,
+            rank=accelerator.process_index,
+            seed=config.seed
+        )
 
     # Create a DataLoader; note that shuffling is not needed here because it’s controlled by the Sampler.
     train_dataloader = DataLoader(
@@ -831,7 +1354,7 @@ def main(_):
                 # Encode each sub-prompt if layout is given
                 with autocast():
                     with torch.no_grad():
-                        images, all_latents, all_prompt_embeds, all_pooled_prompt_embeds, all_noise_timesteps, all_timesteps = flux_pipeline(
+                        images, all_latents, all_prompt_embeds, all_pooled_prompt_embeds, noise_timestep_indices, all_timesteps = flux_pipeline(
                             pipeline,
                             prompt=prompts,
                             num_inference_steps=config.sample.num_steps,
@@ -841,18 +1364,16 @@ def main(_):
                             width=widths[0],
                             generator=generators,
                             layout=layouts[0],
-                            merge_step=config.sample.merge_step
+                            merge_step=config.sample.merge_step,
+                            cps=config.sample.cps
                     )
-                    # images: (batch_size, C, H, W) -> List[Tensor(C, H, W)] with length batch_size
-                    # all_latents: List[Tensor(batch_size C, H, W)] with length windowsize+1 -> List[Tensor(num_steps + 1, C, H, W)] with length batch_size
                     images = list(images.unbind(0)) # List[Tensor(C, H, W)] with length batch_size
-                    all_latents = torch.stack(all_latents, dim=1) # (batch_size, num_steps + 1, C, H, W)
-                    all_latents = list(all_latents.unbind(0)) # List[Tensor(num_steps + 1, C, H, W)] with length batch_size
+                    all_latents = torch.stack(all_latents, dim=1) # (batch_size, num_steps + 1, seq_len, C)
+                    all_latents = list(all_latents.unbind(0)) # List[Tensor(num_steps + 1, seq_len, C)] with length batch_size
                     all_prompt_embeds = all_prompt_embeds # (batch_size, seq_len, dim)
                     all_pooled_prompt_embeds = all_pooled_prompt_embeds # (batch_size, dim)
                     all_prompt_embeds = list(all_prompt_embeds.unbind(0)) # List[Tensor(seq_len, dim)] with length batch_size
                     all_pooled_prompt_embeds = list(all_pooled_prompt_embeds.unbind(0)) # List[Tensor(dim)] with length batch_size
-                    all_noise_timesteps = list(all_noise_timesteps.unbind(0)) # List[Tensor(num_noise_steps)] with length batch_size
                     all_timesteps = list(all_timesteps.unbind(0)) # List[Tensor(num_steps)] with length batch_size
             else:
                 # Different sizes, have to do one by one
@@ -860,12 +1381,11 @@ def main(_):
                 all_latents = []
                 all_prompt_embeds = []
                 all_pooled_prompt_embeds = []
-                all_noise_timesteps = []
                 all_timesteps = []
                 for index in range(len(prompts)):
                     with autocast():
                         with torch.no_grad():
-                            this_image, this_all_latents, this_prompt_embeds, this_pooled_prompt_embeds, this_noise_timesteps, this_timesteps = flux_pipeline(
+                            this_image, this_all_latents, this_prompt_embeds, this_pooled_prompt_embeds, noise_timestep_indices, this_timesteps = flux_pipeline(
                                 pipeline,
                                 prompt=prompts[index],
                                 num_inference_steps=config.sample.num_steps,
@@ -875,31 +1395,14 @@ def main(_):
                                 width=widths[index],
                                 generator=generators[index] if generators is not None else None,
                                 layout=layouts[index],
-                                merge_step=config.sample.merge_step
+                                merge_step=config.sample.merge_step,
+                                cps=config.sample.cps
                         )
                     images.append(this_image.squeeze(0))  # add (C, H, W)
-                    all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_steps + 1, C, H, W)
+                    all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_steps + 1, seq_len, C)
                     all_prompt_embeds.append(this_prompt_embeds.squeeze(0)) # (1, seq_len, dim) -> (seq_len, dim)
-                    all_pooled_prompt_embeds.append(this_pooled_prompt_embeds.squeeze(0)) # (1, dim) -> (dim)
-                    all_noise_timesteps.append(this_noise_timesteps.squeeze(0)) # (1, num_noise_steps) -> (num_noise_steps,)
+                    all_pooled_prompt_embeds.append(this_pooled_prompt_embeds.squeeze(0)) # (1, dim) -> (dim,)
                     all_timesteps.append(this_timesteps.squeeze(0)) # (1, num_steps) -> (num_steps,)
-
-                # Now images and all_latents are lists
-                # images: List[Tensor(C, H, W)] with length batch_size
-                # all_latents: List[Tensor(num_steps + 1, C, H, W)] with length batch_size
-
-            # Compute rewards asynchronously
-            rewards = executor.submit(reward_fn, images, prompts, prompt_metadata)
-            # yield to to make sure reward computation starts
-            time.sleep(0)
-
-            # Wait for reward computation directly
-            rewards, rewards_metadata = rewards.result()
-
-            rewards = {
-                k: torch.tensor(v, device=accelerator.device)
-                for k, v in rewards.items()
-            }
 
             # Final `samples` is List[Dict], with length = config.sample.batch_size * config.sample.num_batches_per_epoch
             samples.extend(
@@ -910,13 +1413,11 @@ def main(_):
                         'layout': layouts[index],
                         'prompt': prompts[index],
                         'metadata': prompt_metadata[index],
-                        'noise_timesteps': all_noise_timesteps[index].unsqueeze(0), # Keep batch dimension as 1
                         'timesteps': all_timesteps[index].unsqueeze(0), # Keep batch dimension as 1
                         'prompt_ids': prompt_ids[index].unsqueeze(0), # Keep batch dimension as 1
                         'prompt_embeds': all_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'pooled_prompt_embeds': all_pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
-                        'latents': all_latents[index][-1].unsqueeze(0), # Keep batch dimension as 1, only keep the last clean latents
-                        'rewards': {score_name: score_value[index] for score_name, score_value in rewards.items()},
+                        'all_latents': all_latents[index].unsqueeze(0), # Keep batch dimension as 1, shape (1, num_steps + 1, seq_len, C)
                     }
                     for index in range(len(prompts))
                 ]
@@ -927,6 +1428,35 @@ def main(_):
                 memory_profiler.snapshot(f"epoch_{epoch}_after_sampling_batch_{i}")
 
         transformer.set_adapter("default")
+
+        # Augment samples by combining different groups
+        # Samples will be added 'rewards' field after this function
+        if config.sample.subfig_permutation:
+            # Use subfig permutation augmentation and optimized reward computation
+            samples = augment_and_reward_compute(
+                logging_platform,
+                accelerator,
+                pipeline,
+                config,
+                samples,
+                reward_fn,
+                executor,
+                max_log_num=30,
+                step=global_step
+            )
+        else:
+            # Directly compute reward without augmentation
+            samples = reward_compute(
+                logging_platform,
+                accelerator,
+                pipeline,
+                config,
+                samples,
+                reward_fn,
+                executor,
+                max_log_num=30,
+                step=global_step
+            )
 
         # Gather rewards across all samples
         gathered_rewards = {
@@ -1027,10 +1557,7 @@ def main(_):
             # 'width': int,
             # 'layout': (int, int),
             # 'prompt': str,
-            # 'timestep_indices': list[int],
-            # 'latents': Tensor(1, num_train_steps + 1, C, H
-            # 'next_latents': Tensor(1, num_train_steps + 1, C, H, W),
-            # 'log_probs': Tensor(1, num_train_steps),
+            # 'all_latents': Tensor(1, config.sample.num_steps + 1, seq_len, c),
             # 'advantages': Tensor(1, 1),
             # }
             keys = samples[0].keys()
@@ -1040,7 +1567,7 @@ def main(_):
                     # Catenate along batch dimension if the entry is Tensor
                     k: torch.cat([s[k] for s in batch], dim=0)
                     if isinstance(batch[0][k], torch.Tensor)
-                    else [batch[_][k] for _ in range(config.train.batch_size)] # for other type -  cat to a list
+                    else [batch[_][k] for _ in range(len(batch))] # for other type -  cat to a list
                     for k in keys
                 }
                 for batch in samples
@@ -1068,146 +1595,49 @@ def main(_):
 
                     with accelerator.accumulate(transformer):
                         # Use DiffusionNFT loss computation logic
-                        height = sample['height'][0]
-                        width = sample['width'][0]
-                        batch_size = sample['latents'].shape[0]
-                        x0 = sample["latents"] # Clear latents
-                        x0_dtype = x0.dtype
-                        guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
+                        loss_type = config.train.loss_type.lower()
 
-                        t = sample['timesteps'][:, j].to(accelerator.device, dtype=x0_dtype) # shape (batch_size,)
-                        t = t / 1000
-
-                        t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
-
-                        noise = torch.randn_like(x0, device=accelerator.device, dtype=x0_dtype) # Random noise
-                        xt = (1 - t_expanded) * x0 + t_expanded * noise
-
-                        xt, latent_image_ids = pipeline.prepare_latents(
-                            batch_size=batch_size,
-                            num_channels_latents=xt.shape[2] // 4,
-                            height=height,
-                            width=width,
-                            device=accelerator.device,
-                            dtype=x0_dtype,
-                            generator=None,
-                            latents=xt
-                        )
-                        text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0_dtype)
-
-                        with autocast():
-                            with torch.no_grad():
-                                transformer.module.set_adapter("old")
-                                old_v_pred = transformer(
-                                    hidden_states=xt,
-                                    timestep=t,
-                                    guidance=guidance.expand(xt.shape[0]),
-                                    encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-                                    pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-                                    img_ids=latent_image_ids,
-                                    txt_ids=text_ids,
-                                    return_dict=False,
-                                )[0].detach()
-
-                            transformer.module.set_adapter("default")
-                            new_v_pred = transformer(
-                                hidden_states=xt,
-                                timestep=t,
-                                guidance=guidance.expand(xt.shape[0]),
-                                encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-                                pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-                                img_ids=latent_image_ids,
-                                txt_ids=text_ids,
-                                return_dict=False,
-                            )[0]
-
-                            with torch.no_grad():
-                                with transformer.module.disable_adapter():
-                                    v_ref = transformer(
-                                        hidden_states=xt,
-                                        timestep=t,
-                                        guidance=guidance.expand(xt.shape[0]),
-                                        encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-                                        pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-                                        img_ids=latent_image_ids,
-                                        txt_ids=text_ids,
-                                        return_dict=False,
-                                    )[0]
-
-                        loss_terms = {}
-                        
-                        # NFT logic
-                        advantages = torch.clamp(
-                            sample["advantages"],
-                            -config.train.adv_clip_max,
-                            config.train.adv_clip_max,
-                        )
-                        normalized_advantages_clip = (advantages / config.train.adv_clip_max) / 2.0 + 0.5
-                        r = torch.clamp(normalized_advantages_clip, 0, 1)
-                        loss_terms['r'] = torch.mean(r).detach()
-                        loss_terms["x0_norm"] = torch.mean(x0**2).detach()
-                        loss_terms["x0_norm_max"] = torch.max(x0**2).detach()
-                        loss_terms["old_deviate"] = torch.mean((new_v_pred - old_v_pred) ** 2).detach()
-                        loss_terms["old_deviate_max"] = torch.max((new_v_pred - old_v_pred) ** 2).detach()
-                        positive_prediction = config.train.nft_beta * new_v_pred + (1 - config.train.nft_beta) * old_v_pred.detach()
-
-                        implicit_negative_prediction = (1.0 + config.train.nft_beta) * old_v_pred.detach() - config.train.nft_beta * new_v_pred
-                        
-                        # adaptive weighting
-                        x0_prediction = xt - t_expanded * positive_prediction
-                        with torch.no_grad():
-                            weight_factor = (
-                                torch.abs(x0_prediction.double() - x0.double())
-                                .mean(dim=tuple(range(1, x0.ndim)), keepdim=True)
-                                .clip(min=0.00001)
+                        if loss_type == 'ppo':
+                            loss, loss_info = compute_ppo_loss(
+                                config=config,
+                                accelerator=accelerator,
+                                pipeline=pipeline,
+                                transformer=transformer,
+                                sample=sample,
+                                timestep_index=j,
+                                autocast=autocast,
                             )
-
-                        positive_loss = ((x0_prediction - x0) ** 2 / weight_factor).mean(dim=tuple(range(1, x0.ndim)))
-        
-                        negative_x0_prediction = xt - t_expanded * implicit_negative_prediction
-                        with torch.no_grad():
-                            negative_weight_factor = (
-                                torch.abs(negative_x0_prediction.double() - x0.double())
-                                .mean(dim=tuple(range(1, x0.ndim)), keepdim=True)
-                                .clip(min=0.00001)
+                        elif loss_type == 'nft':
+                            loss, loss_info = compute_nft_loss(
+                                config=config,
+                                accelerator=accelerator,
+                                pipeline=pipeline,
+                                transformer=transformer,
+                                sample=sample,
+                                timestep_index=j,
+                                autocast=autocast,
                             )
-                        negative_loss = ((negative_x0_prediction - x0) ** 2 / negative_weight_factor).mean(
-                            dim=tuple(range(1, x0.ndim))
-                        )
-                        loss_terms['positive_loss'] = torch.mean(positive_loss).detach()
-                        loss_terms['negative_loss'] = torch.mean(negative_loss).detach()
+                        elif loss_type == 'nft_step':
+                            loss, loss_info = compute_nft_step_loss(
+                                config=config,
+                                accelerator=accelerator,
+                                pipeline=pipeline,
+                                transformer=transformer,
+                                sample=sample,
+                                timestep_index=j,
+                                autocast=autocast,
+                            )
+                        else:
+                            raise ValueError(f"Unknown loss type: {config.train.loss_type}. Supported types are ['ppo', 'nft', 'nft_step']")
 
-                        ori_policy_loss = (r * positive_loss  + (1.0 - r) * negative_loss) / config.train.nft_beta
-                        policy_loss = (ori_policy_loss * config.train.adv_clip_max).mean()
-
-                        loss = policy_loss
-
-                        loss_terms["policy_loss"] = policy_loss.detach()
-                        loss_terms["unweighted_policy_loss"] = ori_policy_loss.mean().detach()
-
-                        kl_div_loss = ((new_v_pred - v_ref) ** 2).mean(
-                            dim=tuple(range(1, x0.ndim))
-                        )
-                        kl_div_loss = torch.mean(kl_div_loss)
-
-                        loss += config.train.beta * kl_div_loss
-
-                        loss_terms["kl_div_loss"] = kl_div_loss.detach()
-
-                        loss_terms["old_kl_div"] = torch.mean(
-                            ((old_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
-                        ).detach()
-
-                        loss_terms["total_loss"] = loss.detach()
+                        for k, v in loss_info.items():
+                            info[k].append(v.detach())
 
                         # Track loss tensors
                         if config.enable_mem_log:
-                            memory_profiler.track_tensors(loss_terms, "loss_terms")
+                            memory_profiler.track_tensors(info, "loss_info")
                             if i % 10 == 0:
                                 memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_before_backward")
-
-                        for k, v in loss_terms.items():
-                            info[k].append(v)
 
                         # backward pass
                         accelerator.backward(loss)

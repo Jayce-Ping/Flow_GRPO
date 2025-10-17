@@ -1,6 +1,7 @@
 # export CUDA_VISIBLE_DEVICES=0,1
 export WANDB_API_KEY="66795f41320baafdbf8b4a19b62dce232ded0c2e"
 # export WANDB_MODE=disabled
+CONFIG=$1
 
 if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
     # Audo-set number of GPUs if not set
@@ -15,4 +16,4 @@ accelerate launch \
     --num_processes=$NUM_GPUS \
     --main_process_port 29501 \
     scripts/train_flux_nft.py \
-    --config config/nft.py:grid_consistency_clip_flux
+    --config config/nft.py:$CONFIG
