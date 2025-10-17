@@ -135,7 +135,7 @@ def reward_compute(
         for sample, reward in zip(batch, rewards):
             sample['rewards'] = reward
 
-        if accelerator.is_main_process and i * config.train.batch_size < max_log_num:
+        if accelerator.is_main_process and len(log_items) < max_log_num:
             log_items.extend(list(zip(images, prompts, rewards)))
 
     if accelerator.is_main_process:
@@ -300,7 +300,7 @@ def augment_and_reward_compute(
             sample['rewards'] = reward
 
         
-        if accelerator.is_main_process and i * config.train.batch_size < max_log_num:
+        if accelerator.is_main_process and len(log_items) < max_log_num:
             log_items.extend(list(zip(images, prompts, rewards)))
 
     if accelerator.is_main_process:
