@@ -300,23 +300,6 @@ def augment_and_reward_compute(
         if accelerator.is_main_process and len(log_items) < max_log_num:
             log_items.extend(list(zip(images, prompts, rewards)))
 
-
-    use_original_mean = True
-    if use_original_mean:
-        # Group samples again to compute custom rewards
-        prompt_to_samples = defaultdict(list)
-        for sample in augmented_samples:
-            prompt_to_samples[sample['prompt']].append(sample)
-
-        for prompt, group_samples in prompt_to_samples.items():
-            rewards = [sample['rewards'] for sample in group_samples]
-            # The first `group_size` samples are the original ones, compute there mean as reference
-            reference_mean = {k: np.mean([r[k] for r in rewards[:group_size]]) for k in rewards[0].keys()}
-            # Compute custom reward: r_i - reference_mean
-            for sample, reward in zip(group_samples, rewards):
-                for k in reward.keys():
-                    reward[k] = reward[k] - reference_mean[k]
-
     if accelerator.is_main_process:
         # Log some augmented images
         logging_platform.log(
@@ -1503,7 +1486,7 @@ def main(_):
             prompt_ids = torch.cat([s["prompt_ids"] for s in samples], dim=0)
             prompt_ids = accelerator.gather(prompt_ids).cpu().numpy()
             prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
-            advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
+            advantages = stat_tracker.update(prompts, gathered_rewards['avg'], type='grpo')
             if accelerator.is_local_main_process:
                 print("len(prompts)", len(prompts))
                 print("len unique prompts", len(set(prompts)))

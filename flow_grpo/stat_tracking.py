@@ -9,7 +9,7 @@ class PerPromptStatTracker:
         self.stats = {}
         self.history_prompts = set()
 
-    def update(self, prompts : List[str], rewards : np.ndarray | torch.Tensor, type : str = 'grpo') -> np.ndarray:
+    def update(self, prompts : List[str], rewards : np.ndarray | torch.Tensor, type : str = 'grpo', first_k_mean:int=-1) -> np.ndarray:
         """
             Add `prompts` and corresponding `rewards` to the tracker and return advantages.
 
@@ -45,22 +45,28 @@ class PerPromptStatTracker:
             # Compute mean and std
             if self.use_history:
                 # 1. Use all its history when `use_history=True`
-                mean = np.mean(self.stats[prompt], axis=0, keepdims=True)
+                mean_data = self.stats[prompt]
                 if self.global_std:
                     # Global std across all history
-                    std = np.std(np.concatenate(list(self.stats.values())), axis=0, keepdims=True)
+                    std_data = np.concatenate(list(self.stats.values()))
                 else:
                     # Local std across all history, for this prompt only
-                    std = np.std(self.stats[prompt], axis=0, keepdims=True)
+                    std_data = self.stats[prompt]
             else:
                 # 2. Use only info in this update.
-                mean = np.mean(prompt_rewards, axis=0, keepdims=True)
+                mean_data = prompt_rewards
                 if self.global_std:
                     # Global std across this update info
-                    std = np.std(rewards, axis=0, keepdims=True)
+                    std_data = rewards
                 else:
                     # Local std for this prompt only
-                    std = np.std(prompt_rewards, axis=0, keepdims=True)
+                    std_data = prompt_rewards
+
+            if first_k_mean > 0:
+                mean_data = mean_data[:first_k_mean]
+    
+            mean = np.mean(mean_data, axis=0, keepdims=True)
+            std = np.std(std_data, axis=0, keepdims=True)
 
             # Avoid division by zero
             std = max(std, 1e-4)
