@@ -309,8 +309,8 @@ def augment_and_reward_compute(
         for prompt, group_samples in prompt_to_samples.items():
             group_rewards = [sample['rewards']['avg'] for sample in group_samples]
             first_k_rewards = group_rewards[:config.sample.first_k_mean]
-            first_k_mean = np.mean(first_k_rewards, axis=0, keepdims=True)
-            group_mean = np.mean(group_rewards, axis=0, keepdims=True)
+            first_k_mean = np.mean(first_k_rewards, axis=0)
+            group_mean = np.mean(group_rewards, axis=0)
             offset = (first_k_mean - group_mean) * len(group_rewards)
             for sample in group_samples[:config.sample.first_k_mean]:
                 sample['rewards']['avg'] += offset
