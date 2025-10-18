@@ -9,7 +9,7 @@ class PerPromptStatTracker:
         self.stats = {}
         self.history_prompts = set()
 
-    def update(self, prompts : List[str], rewards : np.ndarray | torch.Tensor, type : str = 'grpo', first_k_mean:int=-1) -> np.ndarray:
+    def update(self, prompts : List[str], rewards : np.ndarray | torch.Tensor, type : str = 'grpo') -> np.ndarray:
         """
             Add `prompts` and corresponding `rewards` to the tracker and return advantages.
 
@@ -61,9 +61,6 @@ class PerPromptStatTracker:
                 else:
                     # Local std for this prompt only
                     std_data = prompt_rewards
-
-            if first_k_mean > 0:
-                mean_data = mean_data[:first_k_mean]
     
             mean = np.mean(mean_data, axis=0, keepdims=True)
             std = np.std(std_data, axis=0, keepdims=True)
