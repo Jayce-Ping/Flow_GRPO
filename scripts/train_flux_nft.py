@@ -20,7 +20,7 @@ from absl import app, flags
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed, ProjectConfiguration
-from collections import defaultdict
+from collections import defaultdict, Counter
 from concurrent import futures
 from diffusers import FluxPipeline, FluxTransformer2DModel
 from diffusers.utils.torch_utils import is_compiled_module, randn_tensor
@@ -194,6 +194,10 @@ def augment_and_reward_compute(
         all_sublatents = all_sublatents.reshape(group_size, -1, subimage_cnt, *all_sublatents.shape[4:]) # (group_size, num_timesteps, subimage_cnt, sub_seq_len, C)
         # A 2x2 image group of size 3 can generate 3^(2x2) = 81 different images, use a max_group_size to constraint
         total_combinations = group_size ** subimage_cnt
+        max_from_same_source = config.sample.max_from_same_source if hasattr(config.sample, 'max_from_same_source') else None
+        if max_from_same_source is None:
+            max_from_same_source = subimage_cnt
+
         sample_num = total_combinations
         if max_group_size is not None:
             sample_num = min(max_group_size, sample_num)
@@ -204,22 +208,26 @@ def augment_and_reward_compute(
         # sample_indices = [num_to_base_tuple(idx, group_size, subimage_cnt) for idx in sample_indices]
         
         # Strategy 2: balanced
-        sample_indices = []
         # Make sure original images are included
-        for i in range(group_size):
-            base_tuple = tuple([i] * subimage_cnt)
-            base_idx = sum(val * (group_size ** pos) for pos, val in enumerate(reversed(base_tuple)))
-            sample_indices.append(base_idx)
-
+        sample_indices = [
+            tuple([i] * subimage_cnt)
+            for i in range(group_size)
+        ]
+        
         remaining = sample_num - len(sample_indices)
         if remaining <= 0:
             sample_indices = random.sample(sample_indices, sample_num)
         else:
-            all_indices = set(range(total_combinations)) - set(sample_indices)
-            sample_indices.extend(random.sample(list(all_indices), remaining))
-
-        # Decode index to tuple
-        sample_indices = [num_to_base_tuple(idx, group_size, subimage_cnt) for idx in sample_indices]
+            all_tuples = product(range(group_size), repeat=subimage_cnt)
+            # Filter tuples that have more than `max_from_same_source` from the same source
+            # and not already in sample_indices
+            valid_tuples = [
+                t for t in all_tuples
+                if all(count <= max_from_same_source for count in Counter(t).values()) and t not in sample_indices
+            ]
+            # Update remaining based on valid tuples
+            remaining = min(remaining, len(valid_tuples))
+            sample_indices.extend(random.sample(valid_tuples, remaining))
 
         # The i-th sub-image is from the idx[i]-th image in the group
         sample_indices = [
@@ -295,25 +303,9 @@ def augment_and_reward_compute(
 
         for sample, reward in zip(batch, rewards):
             sample['rewards'] = reward
-
         
         if accelerator.is_main_process and len(log_items) < max_log_num:
             log_items.extend(list(zip(images, prompts, rewards)))
-
-    
-    if config.sample.first_k_mean > 0:
-        prompt_to_samples = defaultdict(list)
-        for sample in augmented_samples:
-            prompt_to_samples[sample['prompt']].append(sample)
-
-        for prompt, group_samples in prompt_to_samples.items():
-            group_rewards = [sample['rewards']['avg'] for sample in group_samples]
-            first_k_rewards = group_rewards[:config.sample.first_k_mean]
-            first_k_mean = np.mean(first_k_rewards, axis=0)
-            group_mean = np.mean(group_rewards, axis=0)
-            offset = (first_k_mean - group_mean) * len(group_rewards)
-            for sample in group_samples[:config.sample.first_k_mean]:
-                sample['rewards']['avg'] += offset
 
     if accelerator.is_main_process:
         # Log some augmented images

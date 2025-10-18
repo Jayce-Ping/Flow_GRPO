@@ -43,7 +43,6 @@ def compressibility():
     config.sample.noise_level = 0.7
     config.sample.global_std = True
     config.sample.subfig_permutation = False
-    config.sample.first_k_mean = -1
 
     # Training
     config.train.loss_type = 'nft'
@@ -114,6 +113,7 @@ def subclipI_flux():
     config.sample.same_latent = False
     config.sample.guidance_scale = 3.5
     config.sample.subfig_permutation = True
+    config.sample.max_from_same_source = 1 # Default is 1
 
     ## batches
     config.enable_gradient_checkpointing = False
