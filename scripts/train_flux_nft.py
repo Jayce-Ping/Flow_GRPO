@@ -300,6 +300,21 @@ def augment_and_reward_compute(
         if accelerator.is_main_process and len(log_items) < max_log_num:
             log_items.extend(list(zip(images, prompts, rewards)))
 
+    
+    if config.sample.first_k_mean > 0:
+        prompt_to_samples = defaultdict(list)
+        for sample in augmented_samples:
+            prompt_to_samples[sample['prompt']].append(sample)
+
+        for prompt, group_samples in prompt_to_samples.items():
+            group_rewards = [sample['rewards']['avg'] for sample in group_samples]
+            first_k_rewards = group_rewards[:config.sample.first_k_mean]
+            first_k_mean = np.mean(first_k_rewards, axis=0, keepdims=True)
+            group_mean = np.mean(group_rewards, axis=0, keepdims=True)
+            offset = (first_k_mean - group_mean) * len(group_rewards)
+            for sample in group_samples[:config.sample.first_k_mean]:
+                sample['rewards']['avg'] += offset
+
     if accelerator.is_main_process:
         # Log some augmented images
         logging_platform.log(
