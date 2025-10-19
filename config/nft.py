@@ -15,7 +15,7 @@ FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 # FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21"
 # SAVE_DIR = 'logs'
 SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_NFT/logs'
-SAVE_DIR = '/root/siton-tmp/Flow_NFT/logs'
+# SAVE_DIR = '/root/siton-tmp/Flow_NFT/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -138,7 +138,7 @@ def subclipI_flux():
     config.train.loss_type = 'nft'
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
-    config.train.gradient_step_per_epoch = 1
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
     assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
@@ -147,7 +147,7 @@ def subclipI_flux():
     config.train.timesteps = [1]
     config.train.beta = 0
     config.train.nft_beta = 1
-    config.train.decay_type = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
@@ -225,7 +225,7 @@ def pickscore_flux():
     config.train.loss_type = 'nft'
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
-    config.train.gradient_step_per_epoch = 1
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
     assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
@@ -234,7 +234,7 @@ def pickscore_flux():
     config.train.timesteps = [1]
     config.train.beta = 0
     config.train.nft_beta = 1
-    config.train.decay_type = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
@@ -309,7 +309,7 @@ def consistencyReward_clip_flux():
     config.train.loss_type = 'nft'
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
-    config.train.gradient_step_per_epoch = 1
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
     assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
@@ -318,7 +318,7 @@ def consistencyReward_clip_flux():
     config.train.timesteps = [1]
     config.train.beta = 0
     config.train.nft_beta = 1
-    config.train.decay_type = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
@@ -406,7 +406,7 @@ def grid_consistency_clip_nft_perm():
     config.train.timesteps = [1]
     config.train.beta = 0
     config.train.nft_beta = 1
-    config.train.decay_type = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
@@ -496,7 +496,7 @@ def grid_consistency_clip_nft():
     config.train.timesteps = [1]
     config.train.beta = 0
     config.train.nft_beta = 1
-    config.train.decay_type = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
@@ -586,7 +586,7 @@ def grid_consistency_clip_nft_step():
     config.train.timesteps = [1]
     config.train.beta = 0
     config.train.nft_beta = 1
-    config.train.decay_type = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
@@ -677,7 +677,7 @@ def grid_consistency_clip_ppo_sde():
     config.train.timesteps = [1, 2]
     config.train.beta = 0
     config.train.nft_beta = 1
-    config.train.decay_type = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
@@ -767,7 +767,7 @@ def grid_consistency_clip_ppo_sde_perm():
     config.train.timesteps = [1]
     config.train.beta = 0
     config.train.nft_beta = 1
-    config.train.decay_type = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
@@ -859,7 +859,7 @@ def grid_consistency_clip_flux():
     config.train.timesteps = [1]
     config.train.beta = 0
     config.train.nft_beta = 1
-    config.train.decay_type = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
@@ -949,7 +949,7 @@ def grid_consistency_clip_flux_cps():
     config.train.timesteps = [1]
     config.train.beta = 0
     config.train.nft_beta = 1
-    config.train.decay_type = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
 
     config.train.ema = True
     config.per_prompt_stat_tracking = True
