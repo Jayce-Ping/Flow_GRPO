@@ -250,8 +250,23 @@ def augment_and_reward_compute(
                 sub_height,
                 sub_width
             ) # (num_timesteps, seq_len, C)
+            approach = 1
             new_sample = group_samples[0].copy()
-            new_sample['all_latents'] = sampled_sublatents.unsqueeze(0) # (1, num_timesteps, seq_len, C)
+            # 1. Use original intermediate noisy latents for the new sample
+            if approach == 1:
+                new_sample['all_latents'] = sampled_sublatents.unsqueeze(0) # (1, num_timesteps, seq_len, C)
+            else:
+                # 2. Linear interpolation for intermediate noisy latents
+                # init_latents = sampled_sublatents[0] # (seq_len, C)
+                init_latents = torch.randn_like(sampled_sublatents[0]) # (seq_len, C)
+                clean_latents = sampled_sublatents[-1] # (seq_len, C)
+                timesteps = new_sample['timesteps'].squeeze(0) # (num_timesteps,)
+                interpolated_sublatents = torch.stack([
+                    init_latents * (t / 1000.0) + clean_latents * (1 - t / 1000.0)
+                    for t in timesteps
+                ], dim=0) # (num_timesteps, seq_len, C)
+                new_sample['all_latents'] = interpolated_sublatents.unsqueeze(0) # (1, num_timesteps, seq_len, C)
+
             augmented_samples.append(new_sample)
 
     # Compute reward for each sample
