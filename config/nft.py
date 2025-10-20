@@ -43,6 +43,7 @@ def compressibility():
     config.sample.noise_level = 0.7
     config.sample.global_std = True
     config.sample.subfig_permutation = False
+    config.sample.max_from_same_source = None
 
     # Training
     config.train.loss_type = 'nft'
