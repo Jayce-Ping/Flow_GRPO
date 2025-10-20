@@ -353,6 +353,11 @@ def compute_ppo_loss(
     batch_size = sample['all_latents'].shape[0]
     with autocast():
         transformer.module.set_adapter("default")
+        default_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
+        # Add some noise to default parameters for better exploration
+        if hasattr(config.train, 'param_noise_std') and config.train.param_noise_std > 0:
+            for p in default_trainable_parameters:
+                p.data += torch.randn_like(p.data) * config.train.param_noise_std
         prev_sample, log_prob, prev_sample_mean, std_dev_t = compute_log_prob(
             transformer=transformer,
             pipeline=pipeline,
@@ -362,6 +367,7 @@ def compute_ppo_loss(
         )
         with torch.no_grad():
             transformer.module.set_adapter("old")
+            old_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
             _, old_log_prob, old_prev_sample_mean, _ = compute_log_prob(
                 transformer=transformer,
                 pipeline=pipeline,
