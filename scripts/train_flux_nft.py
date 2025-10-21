@@ -1108,6 +1108,7 @@ def main(_):
         sys.exit(0)
 
     signal.signal(signal.SIGINT, safe_exit)
+    signal.signal(signal.SIGTERM, safe_exit)
     
     logger.info(f"\n{config}")
 
