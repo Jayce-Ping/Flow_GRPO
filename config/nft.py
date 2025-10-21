@@ -96,7 +96,7 @@ def harmonic_mean(**kwargs):
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
 def consistencyReward_clip():
-    gpu_number = 2
+    gpu_number = 7
     config = compressibility()
 
     config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/half_2by2_mini_train")
@@ -105,16 +105,20 @@ def consistencyReward_clip():
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
-    config.logging_platform = "swanlab"
-    config.run_name = 'consistencyReward-clip-test-mini'
-    config.save_dir = os.path.join(SAVE_DIR, f'test', f'test')
+    # config.logging_platform = "swanlab"
+
+    config.run_name = 'H100-7, PPO, 0.8s+log(1+0.2cr), 10sde, noise=0.7 at [1], groupstd,'
+    config.save_dir = os.path.join(SAVE_DIR, f'consistencyReward-subclip', f'8s-log-2cr_ppo_10sde_train1_groupstd_train-mini')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
     config.reward_fn = {
         "consistency_score": 0.2,
         "subfig_clipT" : 0.8
     }
-    agg_fn = geometric_mean
+
+    def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
+        return np.log(1 + consistency_score) + subfig_clipT
+
     config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
     config.aggregate_fn = agg_fn
 
@@ -142,10 +146,10 @@ def consistencyReward_clip():
 
     ## batches
     config.enable_gradient_checkpointing = False
-    config.sample.batch_size = 1
+    config.sample.batch_size = 3
     config.sample.num_images_per_prompt = 16
     config.sample.max_group_size = 16
-    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.max_group_size * config.sample.unique_sample_num_per_epoch,
@@ -169,7 +173,7 @@ def consistencyReward_clip():
     assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
-    config.train.timestep_fraction = 0.99
+    config.train.timestep_fraction = 1
     config.train.guidance_scale = 3.5
     config.train.timesteps = config.sample.noise_steps # Train on all noise steps
     config.train.beta = 0
