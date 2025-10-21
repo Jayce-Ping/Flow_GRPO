@@ -99,7 +99,7 @@ def consistencyReward_clip():
     gpu_number = 2
     config = compressibility()
 
-    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/half_2by2_mini_all")
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/half_2by2_mini_train")
     config.resolution = 512
     config.enable_flexible_size = False
     config.prompt_fn = "geneval"
@@ -111,8 +111,8 @@ def consistencyReward_clip():
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
     config.reward_fn = {
-        "consistency_score": 0.1,
-        "subfig_clipT" : 1
+        "consistency_score": 0.2,
+        "subfig_clipT" : 0.8
     }
     agg_fn = geometric_mean
     config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
