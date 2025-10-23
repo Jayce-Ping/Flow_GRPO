@@ -143,7 +143,7 @@ def reward_compute(
         # Log some images
         logging_platform.log(
             {
-                "train_images": [
+                "train/images": [
                     logging_platform.Image(
                         image,
                         caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
@@ -1247,8 +1247,9 @@ def main(_):
         stat_tracker = PerPromptStatTracker(config.sample.global_std, config.sample.use_history)
 
     # For some reason, autocast is necessary for non-lora training but for lora training it isn't necessary and it uses more memory
-    # autocast = contextlib.nullcontext if config.use_lora else accelerator.autocast
+    # autocast = contextlib.nullcontext
     autocast = accelerator.autocast
+    # autocast = partial(torch.autocast, device_type=accelerator.device.type, dtype=torch.float16 if accelerator.mixed_precision == "fp16" else torch.bfloat16)
 
     # for deepspeed zero
     if accelerator.state.deepspeed_plugin:
