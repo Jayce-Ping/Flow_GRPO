@@ -1,4 +1,4 @@
-# flowgrpo.diffusers_patch.flux_pipeline_nft.py
+# flowgrpo.diffusers_patch.flux_pipeline_kontext.py
 from argparse import Namespace
 from typing import Any, Dict, List, Optional, Union, Callable, Tuple
 import torch
@@ -6,16 +6,16 @@ import numpy as np
 import math
 from typing import Optional, Union
 
-from diffusers import FluxPipeline, FluxTransformer2DModel
+from diffusers import FluxKontextPipeline
 from diffusers.utils import logging
 from diffusers.pipelines.flux.pipeline_flux import logger
+from diffusers.image_processor import PipelineImageInput
 
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
 
-from flow_grpo.scheduler import FlowMatchSlidingWindowScheduler, FlowMatchNoiseScheduler
-from flow_grpo.utils import divide_prompt, divide_latents, merge_latents, to_broadcast_tensor
+from flow_grpo.utils import to_broadcast_tensor
 
 def gaussian_log_prob(x, mean, var):
     return -((x - mean) ** 2) / (2 * var) - torch.log(torch.sqrt(var)) - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
@@ -178,8 +178,8 @@ def set_scheduler_timesteps(
 
 
 def compute_log_prob(
-        transformer : FluxTransformer2DModel,
-        pipeline : FluxPipeline,
+        transformer,
+        pipeline : FluxKontextPipeline,
         sample : dict[str, torch.Tensor],
         timestep_index : int,
         config : Namespace
@@ -187,6 +187,7 @@ def compute_log_prob(
     # 1. Prepare parameters
     latents = sample["all_latents"][:, timestep_index] # Latents at current timestep, shape (B, seq_len, C)
     next_latents = sample["all_latents"][:, timestep_index + 1] # Latents at next timestep, shape (B, seq_len, C)
+    image_latents = sample["image_latents"] # Image latents, shape (B, image_seq_len, C)
     num_inference_steps = config.sample.num_steps
     scheduler = pipeline.scheduler
     timestep = sample["timesteps"][:, timestep_index] # (B,)
@@ -197,13 +198,9 @@ def compute_log_prob(
     num_channels_latents = pipeline.transformer.config.in_channels // 4
     height = config.resolution if 'height' not in sample else sample['height'][0] # All height/width in the batch should be the same
     width = config.resolution if 'width' not in sample else sample['width'][0] # All height/width in the batch should be the same
-    layout = (1, 1) if 'layout' not in sample else sample['layout'][0] # All layout in the batch should be the same
     prompt = sample['prompt']
     device = latents.device
     dtype = latents.dtype
-
-    sub_height = height // layout[0]
-    sub_width = width // layout[1]
 
     # 1. Set the scheduler, shift timesteps/sigmas according to full image size (image_seq_len)
     _ = set_scheduler_timesteps(
@@ -214,28 +211,8 @@ def compute_log_prob(
     )
     noise_level = pipeline.scheduler.get_noise_levels()[timestep_index].item()
 
-    # TODO: Add correct merge logic here
-    # 2. Prepare prompt_embeds and latents if using dividing
+    # 2. Prepare prompt_embeds
     logger.setLevel(logging.ERROR) # To silent CLIP overflow warning
-    # if timestep_index < config.sample.merge_step:
-    #     sub_prompts = sum([divide_prompt(p)[1:] for p in prompt], []) # List of str, length = batch_size*rows*cols
-    #     prompt_embeds, pooled_prompt_embeds, text_ids = pipeline.encode_prompt(
-    #         prompt=sub_prompts,
-    #         prompt_2=sub_prompts,
-    #         device=device,
-    #         max_sequence_length=config.max_sequence_length,
-    #     )
-    #     latents = divide_latents(latents, height, width, sub_height, sub_width) # (B, rows, cols, sub_seq_len, C)
-    #     latents = latents.view(-1, latents.shape[3], latents.shape[4]) # (B*rows*cols, sub_seq_len, C)
-    #     next_latents = divide_latents(next_latents, height, width, sub_height, sub_width) # (B, rows, cols, sub_seq_len, C)
-    #     next_latents = next_latents.view(-1, next_latents.shape[3], next_latents.shape[4]) # (B*rows*cols, sub_seq_len, C)
-    # else:
-    #     prompt_embeds, pooled_prompt_embeds, text_ids = pipeline.encode_prompt(
-    #         prompt=prompt,
-    #         prompt_2=prompt,
-    #         device=device,
-    #         max_sequence_length=config.max_sequence_length,
-    #     )
     prompt_embeds, pooled_prompt_embeds, text_ids = pipeline.encode_prompt(
         prompt=prompt,
         prompt_2=prompt,
@@ -246,11 +223,9 @@ def compute_log_prob(
     
 
     # 3. Prepare image_ids according to the latents
-    latents, image_ids = pipeline.prepare_latents(
+    latents, latent_image_ids = pipeline.prepare_latents(
         batch_size = batch_size,
         num_channels_latents = num_channels_latents,
-        # height = height if timestep_index >= config.sample.merge_step else sub_height,
-        # width = width if timestep_index >= config.sample.merge_step else sub_width,
         height = height,
         width = width,
         dtype=dtype,
@@ -259,23 +234,28 @@ def compute_log_prob(
         latents=latents
     )
 
-    # 4. Prepare guidance and predict the noise residual
+    # 4. Concatenate image_latents to latents for Kontext
+    latent_model_input = torch.cat([latents, image_latents], dim=1)
+
+    # 5. Prepare guidance and predict the noise residual
     guidance = torch.tensor([config.sample.guidance_scale], device=device)
 
      # Predict the noise residual
     model_pred = transformer(
-        hidden_states=latents,
+        hidden_states=latent_model_input,
         timestep=timestep / 1000, # which is scheduler.sigmas[timestep_index] exactly
         guidance=guidance.expand(latents.shape[0]),
         pooled_projections=pooled_prompt_embeds,
         encoder_hidden_states=prompt_embeds,
         txt_ids=torch.zeros(prompt_embeds.shape[1], 3).to(device=device, dtype=dtype),
-        img_ids=image_ids,
+        img_ids=latent_image_ids,
         return_dict=False,
     )[0]
     
+    # 6. Extract only the latents part from the prediction (not the image_latents part)
+    model_pred = model_pred[:, :latents.shape[1]]
     
-    # 5. Compute log prob
+    # 7. Compute log prob
     # Compute the log prob of next_latents given latents under the current model
     # Here, use determistic denoising for normal diffusion process.
     prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
@@ -291,25 +271,12 @@ def compute_log_prob(
         sigma_max=timestep_max / 1000
     )
 
-    # if timestep_index < config.sample.merge_step:
-    #     # # Reconstruct full latents and compute the mean log_prob if use dividing
-    #     prev_sample = prev_sample.view(batch_size, layout[0], layout[1], -1, prev_sample.shape[2]) # (B, rows, cols, sub_seq_len, C)
-    #     prev_sample = merge_latents(prev_sample, height, width, sub_height, sub_width) # (B, seq_len, C)
-    #     prev_sample_mean = prev_sample_mean.view(batch_size, layout[0], layout[1], -1, prev_sample_mean.shape[2]) # (B, rows, cols, sub_seq_len, C)
-    #     prev_sample_mean = merge_latents(prev_sample_mean, height, width, sub_height, sub_width) # (B, seq_len, C)
-    #     # scale the log_prob to get the `equivalent`` full image log_prob
-    #     # Reshape log_prob to (B, rows * cols)
-    #     log_prob = log_prob.view(batch_size, layout[0] * layout[1])
-    #     # Sum and scale
-    #     # log_prob = log_prob.mean(dim=1) # (B,) to make mean unchanged
-    #     log_prob = log_prob.sum(dim=1) / math.sqrt(layout[0] * layout[1]) # (B,) to make variance unchanged
-
-
     return prev_sample, log_prob, prev_sample_mean, std_dev_t
 
 @torch.no_grad()
-def flux_pipeline(
-    pipeline : FluxPipeline,
+def flux_kontext_pipeline(
+    pipeline : FluxKontextPipeline,
+    image: Optional[PipelineImageInput] = None,
     prompt: Union[str, List[str]] = None,
     prompt_2: Optional[Union[str, List[str]]] = None,
     negative_prompt: Union[str, List[str]] = None,
@@ -329,9 +296,8 @@ def flux_pipeline(
     joint_attention_kwargs: Optional[Dict[str, Any]] = None,
     callback_on_step_end_tensor_inputs: List[str] = ["latents"],
     max_sequence_length: int = 512,
+    max_area: int = 1024**2,
     noise_level: Optional[float] = None,
-    layout: Optional[Tuple[int, int]] = None,
-    merge_step: int = 0,
     cps : bool = False,
 ) -> Tuple[
         torch.FloatTensor,
@@ -340,9 +306,24 @@ def flux_pipeline(
         torch.FloatTensor,
         torch.FloatTensor,
         torch.FloatTensor,
+        torch.FloatTensor,
     ]:
     height = height or pipeline.default_sample_size * pipeline.vae_scale_factor
     width = width or pipeline.default_sample_size * pipeline.vae_scale_factor
+
+    original_height, original_width = height, width
+    aspect_ratio = width / height
+    width = round((max_area * aspect_ratio) ** 0.5)
+    height = round((max_area / aspect_ratio) ** 0.5)
+
+    multiple_of = pipeline.vae_scale_factor * 2
+    width = width // multiple_of * multiple_of
+    height = height // multiple_of * multiple_of
+
+    if height != original_height or width != original_width:
+        logger.warning(
+            f"Generation `height` and `width` have been adjusted to {height} and {width} to fit the model requirements."
+        )
 
     # 1. Check inputs. Raise error if not correct
     pipeline.check_inputs(
@@ -399,26 +380,17 @@ def flux_pipeline(
         max_sequence_length=max_sequence_length,
         lora_scale=lora_scale,
     )
-
-    if layout is not None and merge_step > 0:
-        # Encode each sub-prompt if layout is given
-        sub_height = height // layout[0]
-        sub_width = width // layout[1]
-        divided_prompts = [divide_prompt(p) for p in prompt] # List (`length=batch_size`) of List[str] (`length=rows*cols + 1`)
-        sub_prompts = sum([p[1:] for p in divided_prompts], []) # List of str, length = batch_size*rows*cols
-        # Encode sub-prompts
-        sub_prompt_embeds, sub_pooled_prompt_embeds, sub_text_ids = pipeline.encode_prompt(
-            prompt=sub_prompts,
-            prompt_2=sub_prompts,
-            device=device,
-            max_sequence_length=max_sequence_length,
-            lora_scale=lora_scale,
-        )
     logger.setLevel(logging.WARNING) # Restore logger level
 
-    # 4. Prepare latent variables
+    # 4. Preprocess image and prepare image latents
+    if image is not None and not (isinstance(image, torch.Tensor) and image.size(1) == pipeline.latent_channels):
+        image = pipeline.image_processor.resize(image, height, width)
+        image = pipeline.image_processor.preprocess(image, height, width)
+    
+    # 5. Prepare latent variables
     num_channels_latents = pipeline.transformer.config.in_channels // 4
-    latents, latent_image_ids = pipeline.prepare_latents(
+    latents, image_latents, latent_ids, image_ids = pipeline.prepare_latents(
+        image.float(),
         batch_size,
         num_channels_latents,
         height,
@@ -428,21 +400,10 @@ def flux_pipeline(
         generator,
         latents,
     )
+    if image_ids is not None:
+        latent_ids = torch.cat([latent_ids, image_ids], dim=0)  # dim 0 is sequence dimension
 
-    if layout is not None and merge_step > 0:
-        # Prepare latents for subfig
-        _, sub_latent_image_ids = pipeline.prepare_latents(
-            batch_size=batch_size * layout[0] * layout[1],
-            num_channels_latents=num_channels_latents,
-            height=sub_height,
-            width=sub_width,
-            dtype=prompt_embeds.dtype,
-            device=device,
-            generator=generator,
-            latents=None,
-        )
-
-    # 5. Prepare scheduler, shift timesteps/sigmas according to image size (image_seq_len)
+    # 6. Prepare scheduler, shift timesteps/sigmas according to image size (image_seq_len)
     sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
     if hasattr(pipeline.scheduler.config, "use_flow_sigmas") and pipeline.scheduler.config.use_flow_sigmas:
         sigmas = None
@@ -469,7 +430,7 @@ def flux_pipeline(
     # handle guidance
     guidance = torch.full([1], guidance_scale, device=device, dtype=torch.float32)
 
-    # 6. Denoising loop
+    # 7. Denoising loop
     all_latents = [latents]
     all_noise_timestep_indices = []
     pipeline.scheduler.set_begin_index(0)
@@ -479,34 +440,27 @@ def flux_pipeline(
             # Get noise_level. If not given in the arguments, use the sliding window scheduler's method to retrieve it.
             current_noise_level = noise_level if noise_level is not None else pipeline.scheduler.get_noise_level_for_timestep(t)
 
-            if layout is not None and i < merge_step:
-                # use sub-prompts and sub-latents if layout is given and not yet merged
-                current_prompt_embeds = sub_prompt_embeds
-                current_pooled_prompt_embeds = sub_pooled_prompt_embeds
-                latents = divide_latents(latents, height, width, sub_height, sub_width) # (B, rows, cols, sub_seq_len, C)
-                latents = latents.view(-1, latents.shape[3], latents.shape[4]) # (B*rows*cols, sub_seq_len, C)
-                img_ids = sub_latent_image_ids
-            else:
-                current_prompt_embeds = prompt_embeds
-                current_pooled_prompt_embeds = pooled_prompt_embeds
-                img_ids = latent_image_ids
+            # Concatenate image_latents to latents for Kontext
+            latent_model_input = torch.cat([latents, image_latents], dim=1)
 
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
             timestep = t.expand(latents.shape[0]).to(latents.dtype)
             timestep_next = timesteps[i + 1].expand(latents.shape[0]).to(latents.dtype) if i + 1 < len(timesteps) else torch.zeros_like(timestep)
 
             noise_pred = pipeline.transformer(
-                hidden_states=latents,
+                hidden_states=latent_model_input,
                 timestep=timestep / 1000,
                 guidance=guidance.expand(latents.shape[0]),
-                pooled_projections=current_pooled_prompt_embeds,
-                encoder_hidden_states=current_prompt_embeds,
+                pooled_projections=pooled_prompt_embeds,
+                encoder_hidden_states=prompt_embeds,
                 txt_ids=text_ids,
-                img_ids=img_ids,
+                img_ids=latent_ids,
                 joint_attention_kwargs=pipeline.joint_attention_kwargs,
                 return_dict=False,
             )[0]
 
+            # Extract only the latents part from the prediction (not the image_latents part)
+            noise_pred = noise_pred[:, :latents.shape[1]]
             noise_pred = noise_pred.to(prompt_embeds.dtype)
             latents_dtype = latents.dtype
 
@@ -524,11 +478,6 @@ def flux_pipeline(
             )
             if latents.dtype != latents_dtype:
                 latents = latents.to(latents_dtype)
-
-            if layout is not None and i < merge_step:
-                # Reconstruct full latents and compute the mean log_prob if use dividing
-                latents = latents.view(batch_size, layout[0], layout[1], -1, latents.shape[-1]) # (B, rows, cols, sub_seq_len, C)
-                latents = merge_latents(latents, height, width, sub_height, sub_width) # (B, seq_len, C)
 
             all_latents.append(latents)
             if current_noise_level > 0:
@@ -548,4 +497,4 @@ def flux_pipeline(
     pipeline.maybe_free_model_hooks()
 
     timesteps = timesteps.unsqueeze(0).expand(batch_size, -1) # (batch_size, num_inference_steps)
-    return images, all_latents, prompt_embeds, pooled_prompt_embeds, all_noise_timestep_indices, timesteps 
+    return images, all_latents, prompt_embeds, pooled_prompt_embeds, all_noise_timestep_indices, timesteps, image_latents
