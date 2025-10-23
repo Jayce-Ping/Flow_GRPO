@@ -75,6 +75,43 @@ def image_similarity_score(device):
 
     return _fn
 
+def edit_score():
+    from flow_grpo.rewards.EditScore import EditScorer
+
+    client = AsyncOpenAI(
+        api_key='dummy-key',
+        base_url='http://127.0.0.1:8000/v1'
+    )
+
+    def _fn(images: List[Image.Image], prompts: List[str], metadatas: List[dict]) -> Tuple[np.ndarray, dict]:
+        scorer = EditScorer(
+            client=client,
+            model='EditScore-7B',
+            score_range=25
+        )
+        scores = scorer(images, prompts, metadatas)
+        return scores, {}
+    
+    return _fn
+
+def consistency_score_for_editing():
+    from flow_grpo.rewards.ConsistencyReward_for_editing import ConsistencyScorerForEditing
+
+    client = AsyncOpenAI(
+        api_key='dummy-key',
+        base_url='http://127.0.0.1:8000/v1'
+    )
+
+    def _fn(images: List[Image.Image], prompts: List[str], metadatas: List[dict]) -> Tuple[np.ndarray, dict]:
+        scorer = ConsistencyScorerForEditing(
+            client=client,
+            model='ConsistencyReward-7B',
+        )
+        scores = scorer(images, prompts, metadatas)
+        return scores, {}
+
+    return _fn
+
 def pickscore_score(device):
     from flow_grpo.rewards.pickscore_scorer import PickScoreScorer
 
@@ -186,10 +223,10 @@ def ocr_score(device):
 
     return _fn
 
-def edit_score(device):
-    from flow_grpo.rewards.edit_scorer import EditScorer
+def subfig_edit_score(device):
+    from flow_grpo.rewards.subfig_edit_scorer import SubfigEditScorer
 
-    scorer = EditScorer(
+    scorer = SubfigEditScorer(
         client=AsyncOpenAI(
             api_key='dummy-key',
             base_url='http://127.0.0.1:8000/v1'
@@ -265,7 +302,9 @@ def multi_score(
         'subfig_clipI': subfig_clipI_score,
         'subfig_dreamsim': subfig_dreamsim_score,
         "grid_layout": grid_layout_score,
+        'subfig_edit_score': subfig_edit_score,
         'edit_score': edit_score,
+        'consistency_score_for_editing': consistency_score_for_editing,
     }
 
     score_fns = {}
@@ -283,7 +322,8 @@ def multi_score(
     def _fn(
         images : Union[List[Image.Image], torch.Tensor, np.ndarray, List[torch.Tensor], List[np.ndarray]],
         prompts : List[str],
-        metadata: List[dict]
+        metadata: List[dict],
+        ref_images: Optional[Union[List[Image.Image], torch.Tensor, np.ndarray]] = None
     ) -> Tuple[dict[str, np.ndarray], dict]:
         aggregated_scores = {}
         score_details = {}
@@ -299,6 +339,23 @@ def multi_score(
             images = numpy_list_to_pil_image(images)
 
         assert all(isinstance(img, Image.Image) for img in images), "All images must be a list of PIL Image, or a numpy array / torch Tensor, or a list of them."
+
+        if ref_images is not None:
+            # Convert ref_images to PIL format if they are tensors or numpy arrays
+            if isinstance(ref_images, torch.Tensor):
+                ref_images = tensor_to_pil_image(ref_images)
+            elif isinstance(ref_images, np.ndarray):
+                ref_images = numpy_to_pil_image(ref_images)
+            elif isinstance(ref_images, list) and all(isinstance(img, torch.Tensor) for img in ref_images):
+                ref_images = tensor_list_to_pil_image(ref_images)
+            elif isinstance(ref_images, list) and all(isinstance(img, np.ndarray) for img in ref_images):
+                ref_images = numpy_list_to_pil_image(ref_images)
+
+            assert all(isinstance(img, Image.Image) for img in ref_images), "All ref_images must be a list of PIL Image, or a numpy array / torch Tensor, or a list of them."
+
+            # Add ref_images to metadata for similarity-based/editing-based rewards
+            for i in range(len(metadata)):
+                metadata[i]['ref_image'] = ref_images[i]
 
         for score_name, weight in score_dict.items():
             scores, rewards = score_fns[score_name](images, prompts, metadata)
@@ -324,105 +381,6 @@ def multi_score(
 
 
 # ------------------------------------------------Rewards for grid-layout consistency-subfig------------------------------------------------
-
-def single_image_score(
-    device: str,
-    score_names: list[str]
-):
-    """
-    Convert a list of score names into a dictionary that maps each score to its scoreing function.
-    Args:
-        device: The device (e.g., "cuda" or "cpu") on which to run the reward functions.
-        
-        score_names (List[str]): A list of reward function names to include.
-    Returns:
-        Dict[str, Callable]: A dictionary mapping each score name to its corresponding scoring function.
-    Note:
-        A `single_image_score` function takes as input:
-            - images (List[Image.Image] or np.ndarray or torch.Tensor): The batch of images to evaluate.
-            - prompts (List[str]): The corresponding text prompts for the images.
-            - metadata (List[dict]): Additional metadata for each image/prompt pair.
-        The returned function outputs:
-            - A numpy array of scores for each image in the batch.
-            - A dictionary containing detailed reward information (mostly empty).
-    """
-    score_functions = {
-        "ocr": ocr_score,
-        "imagereward": imagereward_score,
-        "pickscore": pickscore_score,
-        "aesthetic": aesthetic_score,
-        "jpeg_compressibility": jpeg_compressibility,
-        "clipscore": clip_score,
-        "consistency_score": consistency_score,
-        "subfig_clipT": subfig_clipT_score,
-        'subfig_clipI': subfig_clipI_score,
-        'subfig_dreamsim': subfig_dreamsim_score,
-        "grid_layout": grid_layout_score,
-        'edit_score': edit_score,
-    }
-
-    score_fns = {}
-
-    for score_name in score_names:
-        factory = score_functions.get(score_name)
-        if factory is None:
-            raise ValueError(f"Unknown score: {score_name}")
-        params = inspect.signature(factory).parameters
-        if "device" in params:
-            score_fns[score_name] = factory(device)
-        else:
-            score_fns[score_name] = factory()
-    
-    return score_fns
-
-def pairwise_consistency_score(device):
-    # TODO
-    pass
-
-def pairwise_clipI_score(device):
-    # TODO
-    pass
-
-def pairwise_dreamsim_score(device):
-    # TODO
-    pass
-
-def pairwise_image_score(
-    device,
-    score_names: list[str]
-):
-    """
-    Convert a list of pairwise score names into a dictionary that maps each score to its scoring function.
-    Args:
-        device: The device (e.g., "cuda" or "cpu") on which to run the reward functions.
-        score_names (List[str]): A list of pairwise reward function names to include.
-    Returns:
-        Dict[str, Callable]: A dictionary mapping each pairwise score name to its corresponding scoring function
-    Note:
-        A `pairwise_image_score` function takes as input:
-            - images (List[Tuple[Image.Image, Image.Image]] or np.ndarray or torch.Tensor): The batch of image-pairs to evaluate. For example, 3 image-pairs: [(img1, img2), (img3, img4), (img5, img6)]
-            - prompts (List[Tuple[str, str]]): The corresponding text prompts for the image-pairs. For example, 3 prompt-pairs: [(prompt1, prompt2), (prompt3, prompt4), (prompt5, prompt6)]
-            - metadata (List[dict]): Additional metadata for each image/prompt pair.
-        The returned function outputs:
-            - A numpy array of scores for each image-pair in the batch.
-            - A dictionary containing detailed reward information (mostly empty).
-    """
-    score_functions = {
-        # TODO: add pairwise score functions here
-    }
-    score_fns = {}
-
-    for score_name in score_names:
-        factory = score_functions.get(score_name)
-        if factory is None:
-            raise ValueError(f"Unknown score: {score_name}")
-        params = inspect.signature(factory).parameters
-        if "device" in params:
-            score_fns[score_name] = factory(device)
-        else:
-            score_fns[score_name] = factory()
-
-    return score_fns
 
 
 def main():

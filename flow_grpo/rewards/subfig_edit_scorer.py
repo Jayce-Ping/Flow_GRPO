@@ -292,7 +292,7 @@ Put the score in a list such that output score = [naturalness, artifacts]
 
 # -----------------------------------------------------scorer------------------------------------------------
 
-class EditScorer:
+class SubfigEditScorer:
     def __init__(
             self,
             client : AsyncOpenAI,
