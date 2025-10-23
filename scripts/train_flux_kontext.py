@@ -240,6 +240,7 @@ def eval(pipeline : FluxKontextPipeline,
         ema.copy_ema_to(transformer_trainable_parameters, store_temp=True)
     
     log_data = {
+        'ref_images': [],
         'images': [],
         'prompts': [],
         'rewards': defaultdict(list)
