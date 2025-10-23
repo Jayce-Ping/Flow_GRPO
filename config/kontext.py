@@ -98,7 +98,6 @@ def editscore():
     gpu_number = 2
     config = compressibility()
 
-    # config.dataset = os.path.join(os.getcwd(), "dataset/counting_edit")
     config.dataset = "/root/siton-tmp/EditScore-RL-Data"
     config.resolution = 512
     config.enable_flexible_size = False
@@ -106,10 +105,10 @@ def editscore():
     config.enable_mem_log = False
     config.logging_platform = "swanlab"
 
-    config.run_name = 'Flux Kontext'
+    config.run_name = 'Flux Kontext - EditScore RL'
     config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
-    config.save_freq = 0 # epoch
-    config.eval_freq = 0 # 0 for no eval applied
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10 # 0 for no eval applied
     config.reward_fn = {
         "edit_score": 1.0,
     }
@@ -179,7 +178,6 @@ def consistencyreward_for_editing():
     gpu_number = 2
     config = compressibility()
 
-    # config.dataset = os.path.join(os.getcwd(), "dataset/counting_edit")
     config.dataset = "/root/siton-tmp/EditScore-RL-Data"
     config.resolution = 512
     config.enable_flexible_size = False
@@ -187,7 +185,7 @@ def consistencyreward_for_editing():
     config.enable_mem_log = False
     config.logging_platform = "swanlab"
 
-    config.run_name = 'Flux Kontext'
+    config.run_name = 'Flux Kontext - Consistency Reward'
     config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
