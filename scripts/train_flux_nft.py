@@ -1,3 +1,4 @@
+# scripts/train_flux_nft.py
 from argparse import Namespace
 import contextlib
 import datetime
@@ -956,17 +957,26 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
         low_cpu_mem_usage=False
     )
 
-    if config.sample.use_sliding_window:
-        scheduler = FlowMatchNoiseScheduler(
-            noise_level=config.sample.noise_level,
-            noise_steps=config.sample.noise_steps,
-            merge_step=config.sample.merge_step,
-            **pipeline.scheduler.config.__dict__,
-        )
+    if hasattr(config.sample, 'noise_steps') and config.sample.noise_steps is not None:
+        noise_steps = config.sample.noise_steps
     else:
-        scheduler = FlowMatchNoiseScheduler(
-            noise_level=config.sample.noise_level,
-        )
+        noise_steps = list(range(config.sample.num_steps)) # Default to all steps
+    
+    if hasattr(config.sample, 'noise_level') and config.sample.noise_level is not None:
+        noise_level = config.sample.noise_level
+    else:
+        noise_level = 0.3 # Default to 0.3
+    if hasattr(config.sample, 'merge_step') and config.sample.merge_step is not None:
+        merge_step = config.sample.merge_step
+    else:
+        merge_step = 0 # Default to 0
+
+    scheduler = FlowMatchNoiseScheduler(
+        noise_level=noise_level,
+        noise_steps=noise_steps,
+        merge_step=merge_step,
+        **pipeline.scheduler.config.__dict__,
+    )
 
     # Overwrite the original scheduler
     pipeline.scheduler = scheduler
