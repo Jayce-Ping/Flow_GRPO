@@ -133,6 +133,6 @@ class ConsistencyScorerForEditing:
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                 else:
-                    score = 0.0  # Default score on failure
+                    score = 0.0  # Default score on failure        
         return score    
 

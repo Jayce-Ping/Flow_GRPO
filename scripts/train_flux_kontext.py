@@ -51,42 +51,6 @@ config_flags.DEFINE_config_file("config", "config/base.py", "Training configurat
 
 logger = get_logger(__name__)
 
-def calculate_zero_std_ratio(prompts, gathered_rewards):
-    """
-    Calculate the proportion of unique prompts whose reward standard deviation is zero.
-    
-    Args:
-        prompts: List of prompts.
-        gathered_rewards: Dictionary containing rewards, must include the key 'ori_avg'.
-        
-    Returns:
-        zero_std_ratio: Proportion of prompts with zero standard deviation.
-        prompt_std_devs: Mean standard deviation across all unique prompts.
-    """
-    # Convert prompt list to NumPy array
-    prompt_array = np.array(prompts)
-    
-    # Get unique prompts and their group information
-    unique_prompts, inverse_indices, counts = np.unique(
-        prompt_array, 
-        return_inverse=True,
-        return_counts=True
-    )
-    
-    # Group rewards for each prompt
-    grouped_rewards = gathered_rewards['ori_avg'][np.argsort(inverse_indices)]
-    split_indices = np.cumsum(counts)[:-1]
-    reward_groups = np.split(grouped_rewards, split_indices)
-    
-    # Calculate standard deviation for each group
-    prompt_std_devs = np.array([np.std(group) for group in reward_groups])
-    
-    # Calculate the ratio of zero standard deviation
-    zero_std_count = np.count_nonzero(prompt_std_devs == 0)
-    zero_std_ratio = zero_std_count / len(prompt_std_devs)
-    
-    return zero_std_ratio, prompt_std_devs.mean()
-
 def reward_compute(
     logging_platform,
     accelerator : Accelerator,
@@ -150,18 +114,28 @@ def reward_compute(
             sample['rewards'] = reward
         
         if accelerator.is_main_process and len(log_items) < max_log_num:
-            log_items.extend(list(zip(images, prompts, rewards)))
+            log_items.extend(list(zip(ref_images, images, prompts, rewards)))
 
     if accelerator.is_main_process:
-        # Log some training images
+        # Catenate ref_image and edited image
+        data = []
+        for ref_img, edited_img, prompt, reward in log_items:
+            # Create a new image with width = sum of both widths, height = max of both heights
+            total_width = ref_img.width + edited_img.width
+            max_height = max(ref_img.height, edited_img.height)
+            new_img = Image.new('RGB', (total_width, max_height))
+            new_img.paste(ref_img, (0, 0))
+            new_img.paste(edited_img, (ref_img.width, 0))
+            data.append((new_img, prompt, reward))
+        
         logging_platform.log(
             {
-                "train_images": [
+                "train_samples": [
                     logging_platform.Image(
                         image,
                         caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
                     )
-                    for idx, (image, prompt, reward) in enumerate(log_items)
+                    for image, prompt, reward in data
                 ]
             },
             step=step
@@ -352,6 +326,7 @@ def eval(pipeline : FluxKontextPipeline,
         for i, prompt in enumerate(prompts):
             sample_index = batch_idx * config.test.batch_size + i
             if sample_index in sample_indices:
+                log_data['ref_images'].append(ref_images[i])
                 log_data['images'].append(images[i].cpu())
                 log_data['prompts'].append(prompt)
                 for key, value in rewards.items():
@@ -423,6 +398,9 @@ def eval(pipeline : FluxKontextPipeline,
         # Save image to temp dir
         pil_img = tensor_to_pil_image(img)[0]
         pil_img.save(os.path.join(temp_dir, f"{accelerator.process_index}-{idx}.jpg"))
+    for idx, img in enumerate(log_data['ref_images']):
+        # Save ref image to temp dir
+        pil_img.save(os.path.join(temp_dir, f"ref-{accelerator.process_index}-{idx}.jpg"))
     accelerator.wait_for_everyone()
     # The order of images here should be guaranteed by the name of images
     # NOTE: it provides gathered_images as a list of file paths
@@ -430,6 +408,12 @@ def eval(pipeline : FluxKontextPipeline,
     gathered_images = [
         os.path.join(temp_dir, filename)
         for filename in sorted(os.listdir(temp_dir), key=sort_key)
+        if not filename.startswith('ref-')
+    ]
+    gathered_ref_images = [
+        os.path.join(temp_dir, filename)
+        for filename in sorted(os.listdir(temp_dir), key=sort_key)
+        if filename.startswith('ref-')
     ]
 
     if memory_profiler is not None:
@@ -437,14 +421,27 @@ def eval(pipeline : FluxKontextPipeline,
 
     # 4. Log images
     if accelerator.is_main_process:
+        # Catenate image and ref image
+        images = []
+        for ref_img, img in zip(gathered_ref_images, gathered_images):
+            ref_img = Image.open(ref_img).convert("RGB")
+            edited_img = Image.open(img).convert("RGB")
+            # Create a new image with width = sum of both widths, height = max of both heights
+            total_width = ref_img.width + edited_img.width
+            max_height = max(ref_img.height, edited_img.height)
+            new_img = Image.new('RGB', (total_width, max_height))
+            new_img.paste(ref_img, (0, 0))
+            new_img.paste(edited_img, (ref_img.width, 0))
+            images.append(new_img)
+            
         logging_platform.log(
             {
                 "eval_images": [
                     logging_platform.Image(
-                        image_path,
-                        caption=f"{prompt} | " + " | ".join(f"{k}: {v:.2f}" for k, v in reward.items()),
+                        image,
+                        caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
                     )
-                    for image_path, prompt, reward in zip(gathered_images, gathered_prompts, gathered_rewards)
+                    for image, prompt, reward in zip(images, gathered_prompts, gathered_rewards)
                 ]
             },
             step=global_step
@@ -763,6 +760,7 @@ def main(_):
     if config.per_prompt_stat_tracking:
         stat_tracker = PerPromptStatTracker(config.sample.global_std, config.sample.use_history)
 
+    # autocast = accelerator.autocast
     autocast = partial(torch.autocast, device_type=accelerator.device.type, dtype=torch.float16 if accelerator.mixed_precision == "fp16" else torch.bfloat16)
     # autocast = contextlib.nullcontext
 
@@ -1014,7 +1012,7 @@ def main(_):
         # per-prompt mean/std tracking
         if config.per_prompt_stat_tracking:
             # gather the prompts across processes
-            prompt_ids = accelerator.gather(torch.stack([sample["prompt_ids"].squeeze(0) for sample in samples])).float().cpu().numpy()
+            prompt_ids = accelerator.gather(torch.stack([sample["prompt_ids"].squeeze(0) for sample in samples])).cpu().numpy()
             prompts = tokenizers[1].batch_decode(
                 prompt_ids, skip_special_tokens=True
             )
@@ -1023,20 +1021,25 @@ def main(_):
                 print("len(prompts)", len(prompts))
                 print("len unique prompts", len(set(prompts)))
 
-            group_size, trained_prompt_num = stat_tracker.get_stats()
+                (
+                    avg_group_size,
+                    trained_prompt_num,
+                    avg_group_std,
+                    global_std,
+                    zero_std_ratio
+                ) = stat_tracker.get_stats()
 
-            zero_std_ratio, reward_std_mean = calculate_zero_std_ratio(prompts, gathered_rewards)
-
-            if accelerator.is_main_process:
-                logging_platform.log(
-                    {
-                        "group_size": group_size,
-                        "trained_prompt_num": trained_prompt_num,
-                        "zero_std_ratio": zero_std_ratio,
-                        "reward_std_mean": reward_std_mean,
-                    },
-                    step=global_step,
-                )
+                if accelerator.is_main_process:
+                    logging_platform.log(
+                        {
+                            "avg_group_size": avg_group_size,
+                            "trained_prompt_num": trained_prompt_num,
+                            "avg_group_std": avg_group_std,
+                            "global_std": global_std,
+                            "zero_std_ratio": zero_std_ratio,
+                        },
+                        step=global_step,
+                    )
             stat_tracker.clear()
         else:
             advantages = (gathered_rewards['avg'] - gathered_rewards['avg'].mean()) / (gathered_rewards['avg'].std() + 1e-4)

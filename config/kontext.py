@@ -140,7 +140,7 @@ def editscore():
     config.enable_gradient_checkpointing = False
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 2 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,

@@ -10,9 +10,24 @@ setup(
         "torchvision==0.23.0",
         "torchaudio",
         "transformers==4.40.0",
-        "accelerate==1.4.0",
-        "diffusers==0.33.1", 
+        # "accelerate==1.4.0",
+        # "diffusers==0.33.1",
+        "accelerate==1.11.0",
+        "diffusers==0.35.2", 
         
+        # "flash-attn==2.7.4.post1",
+        # "deepspeed==0.17.5",
+        "deepspeed==0.15.4",
+        # "peft==0.10.0",
+        "peft==0.17.1",
+        "bitsandbytes==0.45.3",        
+        # "huggingface-hub==0.29.1",  
+        # "tokenizers==0.19.1",
+        "huggingface-hub==0.35.3",
+        "tokenizers==0.22.1",
+
+        "datasets==3.3.2",
+
         "numpy==1.26.4",
         "pandas==2.2.3",
         "scipy==1.15.2",
@@ -24,27 +39,19 @@ setup(
         "opencv-python==4.11.0.86",
         "pillow==10.4.0",
         
-        "tqdm==4.67.1",
-        "wandb==0.18.7",
-        "swanlab==0.6.8",
+        "tqdm",
+        "wandb",
+        "swanlab",
         "pydantic==2.10.6",  
         "requests==2.32.3",
         "matplotlib==3.10.0",
         
-        # "flash-attn==2.7.4.post1",
-        # "deepspeed==0.17.5",
-        "deepspeed==0.15.4",
-        "peft==0.10.0",       
-        "bitsandbytes==0.45.3",
+
         
         "aiohttp==3.11.13",
         "fastapi==0.115.11", 
         "uvicorn==0.34.0",
-        
-        "huggingface-hub==0.29.1",  
-        "datasets==3.3.2",
-        "tokenizers==0.19.1",
-        
+
         "einops==0.8.1",
         "nvidia-ml-py==12.570.86",
         "xformers",

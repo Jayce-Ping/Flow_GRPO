@@ -223,16 +223,23 @@ def compute_log_prob(
     
 
     # 3. Prepare image_ids according to the latents
-    latents, latent_image_ids = pipeline.prepare_latents(
-        batch_size = batch_size,
-        num_channels_latents = num_channels_latents,
-        height = height,
-        width = width,
-        dtype=dtype,
+    latent_ids = pipeline._prepare_latent_image_ids(
+        batch_size=batch_size,
+        height=height // (pipeline.vae_scale_factor * 2),
+        width=width // (pipeline.vae_scale_factor * 2),
         device=device,
-        generator=None,
-        latents=latents
+        dtype=dtype,
     )
+    image_ids = pipeline._prepare_latent_image_ids(
+        batch_size=batch_size,
+        height=height // (pipeline.vae_scale_factor * 2),
+        width=width // (pipeline.vae_scale_factor * 2),
+        device=device,
+        dtype=dtype,
+    )
+    image_ids[..., 0] = 1
+
+    latent_ids = torch.cat([latent_ids, image_ids], dim=0)  # dim 0 is sequence dimension
 
     # 4. Concatenate image_latents to latents for Kontext
     latent_model_input = torch.cat([latents, image_latents], dim=1)
@@ -248,7 +255,7 @@ def compute_log_prob(
         pooled_projections=pooled_prompt_embeds,
         encoder_hidden_states=prompt_embeds,
         txt_ids=torch.zeros(prompt_embeds.shape[1], 3).to(device=device, dtype=dtype),
-        img_ids=latent_image_ids,
+        img_ids=latent_ids,
         return_dict=False,
     )[0]
     
