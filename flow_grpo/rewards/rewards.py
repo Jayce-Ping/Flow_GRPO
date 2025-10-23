@@ -94,7 +94,7 @@ def edit_score():
     
     return _fn
 
-def consistency_score_for_editing():
+def consistencyreward_for_editing():
     from flow_grpo.rewards.ConsistencyReward_for_editing import ConsistencyScorerForEditing
 
     client = AsyncOpenAI(
@@ -304,7 +304,7 @@ def multi_score(
         "grid_layout": grid_layout_score,
         'subfig_edit_score': subfig_edit_score,
         'edit_score': edit_score,
-        'consistency_score_for_editing': consistency_score_for_editing,
+        'consistencyreward_for_editing': consistencyreward_for_editing,
     }
 
     score_fns = {}

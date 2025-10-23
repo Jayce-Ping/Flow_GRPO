@@ -58,15 +58,13 @@ class GenevalPromptImageDataset(Dataset):
         }
         # Assuming 'image' in metadata contains a path to the image file
         image_path = self.metadatas[idx]['image']
-        item["prompt_with_image_path"] = f"{self.prompts[idx]}_{image_path}"
         image = Image.open(os.path.join(self.dataset, image_path)).convert('RGB')
-        item["image"] = image
+        item["ref_image"] = image
         return item
 
     @staticmethod
     def collate_fn(examples):
         prompts = [example["prompt"] for example in examples]
         metadatas = [example["metadata"] for example in examples]
-        images = [example["image"] for example in examples]
-        prompt_with_image_paths = [example["prompt_with_image_path"] for example in examples]
-        return prompts, metadatas, images, prompt_with_image_paths
+        ref_images = [example["ref_image"] for example in examples]
+        return prompts, metadatas, ref_images

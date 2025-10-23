@@ -866,14 +866,14 @@ def main(_):
             disable=not accelerator.is_local_main_process,
             position=0,
         ):
-            prompts, prompt_metadata, ref_images, prompt_with_image_paths = next(train_iter)
+            prompts, prompt_metadata, ref_images = next(train_iter)
             ref_images = [ref_image.resize((config.resolution, config.resolution)) for ref_image in ref_images]
 
             # the input of edit task is determined by both the image and the edit prompt
-            prompt_ids = tokenizers[0](
-                prompt_with_image_paths,
+            prompt_ids = tokenizers[1](
+                prompts,
                 padding="max_length",
-                max_length=256,
+                max_length=config.max_sequence_length,
                 truncation=True,
                 return_tensors="pt",
             ).input_ids.to(accelerator.device)
@@ -1017,7 +1017,7 @@ def main(_):
         if config.per_prompt_stat_tracking:
             # gather the prompts across processes
             prompt_ids = accelerator.gather(torch.stack([sample["prompt_ids"].squeeze(0) for sample in samples])).float().cpu().numpy()
-            prompts = tokenizers[0].batch_decode(
+            prompts = tokenizers[1].batch_decode(
                 prompt_ids, skip_special_tokens=True
             )
             advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
