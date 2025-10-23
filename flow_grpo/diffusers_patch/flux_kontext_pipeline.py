@@ -390,7 +390,7 @@ def flux_kontext_pipeline(
     # 5. Prepare latent variables
     num_channels_latents = pipeline.transformer.config.in_channels // 4
     latents, image_latents, latent_ids, image_ids = pipeline.prepare_latents(
-        image.float(),
+        image,
         batch_size,
         num_channels_latents,
         height,
@@ -451,8 +451,8 @@ def flux_kontext_pipeline(
                 hidden_states=latent_model_input,
                 timestep=timestep / 1000,
                 guidance=guidance.expand(latents.shape[0]),
-                pooled_projections=pooled_prompt_embeds,
-                encoder_hidden_states=prompt_embeds,
+                pooled_projections=pooled_prompt_embeds.to(latents.dtype),
+                encoder_hidden_states=prompt_embeds.to(latents.dtype),
                 txt_ids=text_ids,
                 img_ids=latent_ids,
                 joint_attention_kwargs=pipeline.joint_attention_kwargs,

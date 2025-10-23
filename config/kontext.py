@@ -108,8 +108,8 @@ def editscore():
 
     config.run_name = 'Flux Kontext'
     config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
-    config.save_freq = 10 # epoch
-    config.eval_freq = 10 # 0 for no eval applied
+    config.save_freq = 0 # epoch
+    config.eval_freq = 0 # 0 for no eval applied
     config.reward_fn = {
         "edit_score": 1.0,
     }
@@ -140,7 +140,7 @@ def editscore():
     config.enable_gradient_checkpointing = False
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
@@ -221,7 +221,7 @@ def consistencyreward_for_editing():
     config.enable_gradient_checkpointing = False
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,

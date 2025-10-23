@@ -289,7 +289,7 @@ def eval(pipeline : FluxKontextPipeline,
         if memory_profiler is not None:
             memory_profiler.snapshot(f"eval_batch_{batch_idx}_start")
 
-        prompts, prompt_metadata, ref_images, _ = test_batch
+        prompts, prompt_metadata, ref_images = test_batch
         generator = create_generator(prompts, config.seed + accelerator.process_index)
 
         heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
@@ -552,8 +552,7 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
     pipeline.vae.to(accelerator.device, dtype=torch.float32)
     pipeline.text_encoder.to(accelerator.device, dtype=inference_dtype)
     pipeline.text_encoder_2.to(accelerator.device, dtype=inference_dtype)
-    
-    pipeline.transformer.to(accelerator.device)
+    pipeline.transformer.to(accelerator.device, dtype=torch.float32)
 
     if config.use_lora:
         # Set correct lora layers for Flux Kontext
@@ -764,9 +763,8 @@ def main(_):
     if config.per_prompt_stat_tracking:
         stat_tracker = PerPromptStatTracker(config.sample.global_std, config.sample.use_history)
 
-    # for some reason, autocast is necessary for non-lora training but for lora training it isn't necessary and it uses
-    # more memory
-    autocast = accelerator.autocast
+    autocast = partial(torch.autocast, device_type=accelerator.device.type, dtype=torch.float16 if accelerator.mixed_precision == "fp16" else torch.bfloat16)
+    # autocast = contextlib.nullcontext
 
     # for deepspeed zero
     if accelerator.state.deepspeed_plugin:
