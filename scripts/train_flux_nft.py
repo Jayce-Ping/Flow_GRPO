@@ -1248,8 +1248,8 @@ def main(_):
 
     # For some reason, autocast is necessary for non-lora training but for lora training it isn't necessary and it uses more memory
     # autocast = contextlib.nullcontext
-    # autocast = accelerator.autocast
-    autocast = partial(torch.autocast, device_type=accelerator.device.type, dtype=torch.float16 if accelerator.mixed_precision == "fp16" else torch.bfloat16)
+    autocast = accelerator.autocast
+    # autocast = partial(torch.autocast, device_type=accelerator.device.type, dtype=torch.float16 if accelerator.mixed_precision == "fp16" else torch.bfloat16)
 
     # for deepspeed zero
     if accelerator.state.deepspeed_plugin:

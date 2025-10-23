@@ -760,8 +760,8 @@ def main(_):
     if config.per_prompt_stat_tracking:
         stat_tracker = PerPromptStatTracker(config.sample.global_std, config.sample.use_history)
 
-    autocast = accelerator.autocast
-    # autocast = partial(torch.autocast, device_type=accelerator.device.type, dtype=torch.float16 if accelerator.mixed_precision == "fp16" else torch.bfloat16)
+    # autocast = accelerator.autocast
+    autocast = partial(torch.autocast, device_type=accelerator.device.type, dtype=torch.float16 if accelerator.mixed_precision == "fp16" else torch.bfloat16)
     # autocast = contextlib.nullcontext
 
     # for deepspeed zero
