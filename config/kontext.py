@@ -16,6 +16,7 @@ FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-Kontext-dev"
 # SAVE_DIR = 'logs'
 # SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_NFT/logs'
 SAVE_DIR = '/root/siton-tmp/Flow_Kontext/logs'
+SAVE_DIR = '/home/hangwei/storage/jcy/Flow_Kontext/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -97,7 +98,7 @@ def harmonic_mean(**kwargs):
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
 def editscore():
-    gpu_number = 2
+    gpu_number = 1
     config = compressibility()
 
     # config.dataset = "/root/siton-tmp/EditScore-RL-Data"
@@ -127,7 +128,7 @@ def editscore():
     config.test.aggregate_fn = agg_fn
 
     # Testing
-    config.test.batch_size = 4
+    config.test.batch_size = 1
     config.test.num_steps = 20
     config.test.merge_step = 0
 
