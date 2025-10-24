@@ -405,7 +405,14 @@ def eval(pipeline : FluxKontextPipeline,
     accelerator.wait_for_everyone()
     # The order of images here should be guaranteed by the name of images
     # NOTE: it provides gathered_images as a list of file paths
-    sort_key = lambda filename: tuple([int(i) for i in filename.split('.')[0].split('-')])
+    def sort_key(filename):
+        key = []
+        if filename.startswith('ref-'):
+            key.append(0) # Add a prefix to make ref images come first
+            filename = filename[4:]  # remove 'ref-' prefix
+        key.extend([int(i) for i in filename.split('.')[0].split('-')])
+        return tuple(key)
+    
     gathered_images = [
         os.path.join(temp_dir, filename)
         for filename in sorted(os.listdir(temp_dir), key=sort_key)
