@@ -68,8 +68,10 @@ def compressibility():
     config.max_sequence_length = 512
 
     # rewards
-    config.reward_fn = {"jpeg_compressibility": 1}
-    config.aggregate_fn = None
+    config.train.reward_fn = {"jpeg_compressibility": 1}
+    config.train.aggregate_fn = None
+    config.test.reward_fn = {"jpeg_compressibility": 1}
+    config.test.aggregate_fn = None
     config.per_prompt_stat_tracking = True
 
     # resume training
@@ -111,7 +113,7 @@ def consistencyReward_clip():
     config.save_dir = os.path.join(SAVE_DIR, f'consistencyReward-subclip', f'8s-log-2cr_ppo_10sde_train1_groupstd_train-mini')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
-    config.reward_fn = {
+    config.train.reward_fn = {
         "consistency_score": 0.2,
         "subfig_clipT" : 0.8
     }
@@ -119,8 +121,12 @@ def consistencyReward_clip():
     def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
         return np.log(1 + consistency_score) + subfig_clipT
 
-    config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
-    config.aggregate_fn = agg_fn
+    config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.train.aggregate_fn = agg_fn
+
+    config.test.reward_fn = config.train.reward_fn
+    config.train.aggregate_fn_code = config.train.aggregate_fn_code
+    config.test.aggregate_fn = agg_fn
 
     # Testing
     config.test.batch_size = 5
