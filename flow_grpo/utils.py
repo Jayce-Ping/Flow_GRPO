@@ -64,6 +64,30 @@ def pil_image_to_base64(image : Image.Image, format="JPEG") -> str:
     base64_image = f"data:image/{format.lower()};base64,{encoded_image_text}"
     return base64_image
 
+def pil_image_to_tensor(image: Union[Image.Image, List[Image.Image]]) -> torch.Tensor:
+    """
+        Convert a PIL Image or a list of PIL Images to a torch Tensor.
+        Args:
+            image (Union[Image.Image, List[Image.Image]]): PIL Image object or list of PIL Image objects
+        Returns:
+            torch.Tensor: Image tensor of shape (C, H, W) or (N, C, H, W)
+    """
+    if isinstance(image, Image.Image):
+        image = [image]
+    
+    tensors = []
+    for img in image:
+        img_array = np.array(img).astype(np.float32) / 255.0  # Normalize to [0, 1]
+        if img_array.ndim == 2:  # Grayscale image
+            img_array = np.stack([img_array] * 3, axis=-1)  # Convert to RGB by duplicating channels
+        elif img_array.shape[2] == 4:  # RGBA image
+            img_array = img_array[:, :, :3]  # Discard alpha channel
+        img_tensor = torch.from_numpy(img_array).permute(2, 0, 1)  # HWC to CHW
+        tensors.append(img_tensor)
+    
+    return torch.stack(tensors, dim=0) if len(tensors) > 1 else tensors[0]
+
+
 def tensor_to_pil_image(tensor: torch.Tensor) -> List[Image.Image]:
     """
         Convert a torch Tensor to a list of PIL Images.
