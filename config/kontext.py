@@ -67,8 +67,10 @@ def compressibility():
     config.max_sequence_length = 512
 
     # rewards
-    config.reward_fn = {"jpeg_compressibility": 1}
-    config.aggregate_fn = None
+    config.train.reward_fn = {"jpeg_compressibility": 1}
+    config.test.reward_fn = {"jpeg_compressibility": 1}
+    config.train.aggregate_fn = None
+    config.test.aggregate_fn = None
     config.per_prompt_stat_tracking = True
 
     # resume training
@@ -109,12 +111,17 @@ def editscore():
     config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
-    config.reward_fn = {
+    config.train.reward_fn = {
         "edit_score": 1.0,
     }
     agg_fn = None
-    config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
-    config.aggregate_fn = agg_fn
+    config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.train.aggregate_fn = agg_fn
+    config.test.reward_fn = {
+        "edit_score": 1.0,
+    }
+    config.test.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.test.aggregate_fn = agg_fn
 
     # Testing
     config.test.batch_size = 5
@@ -189,12 +196,17 @@ def consistencyreward_for_editing():
     config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
-    config.reward_fn = {
+    config.train.reward_fn = {
         "consistencyreward_for_editing": 1.0,
     }
     agg_fn = None
-    config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
-    config.aggregate_fn = agg_fn
+    config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.train.aggregate_fn = agg_fn
+    config.test.reward_fn = {
+        "consistencyreward_for_editing": 1.0,
+    }
+    config.test.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.test.aggregate_fn = agg_fn
 
     # Testing
     config.test.batch_size = 5
