@@ -16,6 +16,7 @@ FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-Kontext-dev"
 # SAVE_DIR = 'logs'
 # SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_NFT/logs'
 SAVE_DIR = '/root/siton-tmp/Flow_Kontext/logs'
+SAVE_DIR = '/home/hangwei/storage/jcy/Flow_Kontext/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -63,12 +64,14 @@ def compressibility():
     config.test.merge_step = 1
 
     # prompting
-    config.prompt_fn = "general_ocr"
+    config.prompt_fn = "general_editing"
     config.max_sequence_length = 512
 
     # rewards
-    config.reward_fn = {"jpeg_compressibility": 1}
-    config.aggregate_fn = None
+    config.train.reward_fn = {"jpeg_compressibility": 1}
+    config.test.reward_fn = {"jpeg_compressibility": 1}
+    config.train.aggregate_fn = None
+    config.test.aggregate_fn = None
     config.per_prompt_stat_tracking = True
 
     # resume training
@@ -95,29 +98,37 @@ def harmonic_mean(**kwargs):
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
 def editscore():
-    gpu_number = 2
+    gpu_number = 1
     config = compressibility()
 
-    config.dataset = "/root/siton-tmp/EditScore-RL-Data"
+    # config.dataset = "/root/siton-tmp/EditScore-RL-Data"
+    config.dataset = '/home/hangwei/storage/jcy/datasets/GEdit-Bench/train_split'
+    # config.prompt_fn = 'general_editing'
+    config.prompt_fn = 'arrow_editing'
     config.resolution = 512
     config.enable_flexible_size = False
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
     config.logging_platform = "swanlab"
 
-    config.run_name = 'Flux Kontext - EditScore RL'
+    config.run_name = 'Flux Kontext - GEdit-Bench'
     config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
-    config.save_freq = 10 # epoch
-    config.eval_freq = 10 # 0 for no eval applied
-    config.reward_fn = {
+    config.save_freq = 5 # epoch
+    config.eval_freq = 5 # 0 for no eval applied
+    config.train.reward_fn = {
         "edit_score": 1.0,
     }
     agg_fn = None
-    config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
-    config.aggregate_fn = agg_fn
+    config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.train.aggregate_fn = agg_fn
+    config.test.reward_fn = {
+        "edit_score": 1.0,
+    }
+    config.test.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.test.aggregate_fn = agg_fn
 
     # Testing
-    config.test.batch_size = 5
+    config.test.batch_size = 1
     config.test.num_steps = 20
     config.test.merge_step = 0
 
@@ -136,10 +147,10 @@ def editscore():
     config.sample.merge_step = 0
 
     ## batches
-    config.enable_gradient_checkpointing = False
+    config.enable_gradient_checkpointing = True
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 2 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 4 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
@@ -189,12 +200,17 @@ def consistencyreward_for_editing():
     config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
-    config.reward_fn = {
+    config.train.reward_fn = {
         "consistencyreward_for_editing": 1.0,
     }
     agg_fn = None
-    config.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
-    config.aggregate_fn = agg_fn
+    config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.train.aggregate_fn = agg_fn
+    config.test.reward_fn = {
+        "consistencyreward_for_editing": 1.0,
+    }
+    config.test.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.test.aggregate_fn = agg_fn
 
     # Testing
     config.test.batch_size = 5

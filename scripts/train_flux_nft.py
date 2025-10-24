@@ -1266,8 +1266,10 @@ def main(_):
     # -----------------------------------------Reward fn-----------------------------------------
     # prepare prompt and reward fn
     if accelerator.is_main_process:
-        print(f"Reward dict: {config.reward_fn}")
-    reward_fn = multi_score(accelerator.device, config.reward_fn, config.aggregate_fn)
+        print(f"Train reward dict: {config.train.reward_fn}")
+        print(f"Eval reward dict: {config.test.reward_fn}")
+    train_reward_fn = multi_score(accelerator.device, config.train.reward_fn, config.train.aggregate_fn)
+    test_reward_fn = multi_score(accelerator.device, config.test.reward_fn, config.test.aggregate_fn)
     if config.enable_mem_log:
         memory_profiler.snapshot("after_loading_reward_fn")
     # ------------------------------------------- Train!------------------------------------------
@@ -1324,7 +1326,7 @@ def main(_):
                 accelerator,
                 logging_platform,
                 global_step,
-                reward_fn, executor,
+                test_reward_fn, executor,
                 autocast,
                 ema,
                 transformer_trainable_parameters,
@@ -1471,7 +1473,7 @@ def main(_):
                 pipeline,
                 config,
                 samples,
-                reward_fn,
+                train_reward_fn,
                 executor,
                 max_log_num=30,
                 step=global_step
@@ -1484,7 +1486,7 @@ def main(_):
                 pipeline,
                 config,
                 samples,
-                reward_fn,
+                train_reward_fn,
                 executor,
                 max_log_num=30,
                 step=global_step
