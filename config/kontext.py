@@ -14,9 +14,9 @@ spec.loader.exec_module(base)
 
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-Kontext-dev"
 # SAVE_DIR = 'logs'
-# SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_NFT/logs'
-SAVE_DIR = '/root/siton-tmp/Flow_Kontext/logs'
-SAVE_DIR = '/home/hangwei/storage/jcy/Flow_Kontext/logs'
+SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_Kontext/logs'
+# SAVE_DIR = '/root/siton-tmp/Flow_Kontext/logs'
+# SAVE_DIR = '/home/hangwei/storage/jcy/Flow_Kontext/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -98,11 +98,11 @@ def harmonic_mean(**kwargs):
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
 def editscore():
-    gpu_number = 1
+    gpu_number = 4
     config = compressibility()
 
     # config.dataset = "/root/siton-tmp/EditScore-RL-Data"
-    config.dataset = '/home/hangwei/storage/jcy/datasets/GEdit-Bench/train_split'
+    config.dataset = '/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split'
     # config.prompt_fn = 'general_editing'
     config.prompt_fn = 'arrow_editing'
     config.resolution = 512
@@ -112,9 +112,9 @@ def editscore():
     config.logging_platform = "swanlab"
 
     config.run_name = 'Flux Kontext - GEdit-Bench'
-    config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
-    config.save_freq = 5 # epoch
-    config.eval_freq = 5 # 0 for no eval applied
+    config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'GEdit-split')
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10 # 0 for no eval applied
     config.train.reward_fn = {
         "edit_score": 1.0,
     }
@@ -150,7 +150,7 @@ def editscore():
     config.enable_gradient_checkpointing = True
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 4 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 40 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
@@ -186,18 +186,21 @@ def editscore():
     return config
 
 def consistencyreward_for_editing():
-    gpu_number = 2
+    gpu_number = 4
     config = compressibility()
 
-    config.dataset = "/root/siton-tmp/EditScore-RL-Data"
+    # config.dataset = "/root/siton-tmp/EditScore-RL-Data"
+    config.dataset = '/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split'
+    # config.prompt_fn = 'general_editing'
+    config.prompt_fn = 'arrow_editing'
     config.resolution = 512
     config.enable_flexible_size = False
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
-    config.logging_platform = "swanlab"
+    # config.logging_platform = "swanlab"
 
     config.run_name = 'Flux Kontext - Consistency Reward'
-    config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
+    config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'GEdit-Split')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
     config.train.reward_fn = {
@@ -235,7 +238,7 @@ def consistencyreward_for_editing():
     config.enable_gradient_checkpointing = False
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 40 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
