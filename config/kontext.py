@@ -102,6 +102,8 @@ def editscore():
 
     # config.dataset = "/root/siton-tmp/EditScore-RL-Data"
     config.dataset = '/home/hangwei/storage/jcy/datasets/GEdit-Bench/train_split'
+    # config.prompt_fn = 'general_editing'
+    config.prompt_fn = 'arrow_editing'
     config.resolution = 512
     config.enable_flexible_size = False
     config.pretrained.model = FLUX_MODEL_PATH

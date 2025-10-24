@@ -40,7 +40,7 @@ from flow_grpo.diffusers_patch.flux_kontext_pipeline import flux_kontext_pipelin
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.sampler import DistributedKRepeatSampler
-from flow_grpo.datasets.prompt_dataset import GenevalPromptImageDataset
+from flow_grpo.datasets.prompt_dataset import GenevalPromptImageDataset, ArrowPromptImageDataset
 from flow_grpo.scheduler import FlowMatchNoiseScheduler
 from flow_grpo.memory_tracker import MemoryProfiler
 
@@ -728,8 +728,13 @@ def main(_):
         memory_profiler.track_optimizer(optimizer)
         memory_profiler.snapshot("after_optimizer_init")
 
-    train_dataset = GenevalPromptImageDataset(config.dataset, 'train')
-    test_dataset = GenevalPromptImageDataset(config.dataset, 'test')
+    if config.prompt_fn == 'general_editing':
+        dataset_cls = GenevalPromptImageDataset
+    elif config.prompt_fn == 'arrow_editing':
+        dataset_cls = ArrowPromptImageDataset
+
+    train_dataset = dataset_cls(config.dataset, 'train')
+    test_dataset = dataset_cls(config.dataset, 'test')
 
     train_sampler = DistributedKRepeatSampler( 
         dataset=train_dataset,
@@ -745,12 +750,12 @@ def main(_):
         train_dataset,
         batch_sampler=train_sampler,
         num_workers=1,
-        collate_fn=GenevalPromptImageDataset.collate_fn,
+        collate_fn=dataset_cls.collate_fn,
     )
     test_dataloader = DataLoader(
         test_dataset,
         batch_size=config.test.batch_size,
-        collate_fn=GenevalPromptImageDataset.collate_fn,
+        collate_fn=dataset_cls.collate_fn,
         shuffle=False,
         num_workers=8,
     )
