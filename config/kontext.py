@@ -100,17 +100,18 @@ def editscore():
     gpu_number = 2
     config = compressibility()
 
-    config.dataset = "/root/siton-tmp/EditScore-RL-Data"
+    # config.dataset = "/root/siton-tmp/EditScore-RL-Data"
+    config.dataset = '/home/hangwei/storage/jcy/datasets/GEdit-Bench/train_split'
     config.resolution = 512
     config.enable_flexible_size = False
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
     config.logging_platform = "swanlab"
 
-    config.run_name = 'Flux Kontext - EditScore RL'
+    config.run_name = 'Flux Kontext - GEdit-Bench'
     config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
-    config.save_freq = 10 # epoch
-    config.eval_freq = 10 # 0 for no eval applied
+    config.save_freq = 5 # epoch
+    config.eval_freq = 5 # 0 for no eval applied
     config.train.reward_fn = {
         "edit_score": 1.0,
     }
@@ -124,7 +125,7 @@ def editscore():
     config.test.aggregate_fn = agg_fn
 
     # Testing
-    config.test.batch_size = 5
+    config.test.batch_size = 4
     config.test.num_steps = 20
     config.test.merge_step = 0
 
@@ -143,10 +144,10 @@ def editscore():
     config.sample.merge_step = 0
 
     ## batches
-    config.enable_gradient_checkpointing = False
+    config.enable_gradient_checkpointing = True
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 2 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 4 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
