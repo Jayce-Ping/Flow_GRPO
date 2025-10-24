@@ -63,7 +63,7 @@ def compressibility():
     config.test.merge_step = 1
 
     # prompting
-    config.prompt_fn = "general_ocr"
+    config.prompt_fn = "general_editing"
     config.max_sequence_length = 512
 
     # rewards
