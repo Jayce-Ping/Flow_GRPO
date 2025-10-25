@@ -16,7 +16,7 @@ FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-Kontext-dev"
 # SAVE_DIR = 'logs'
 # SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_NFT/logs'
 SAVE_DIR = '/root/siton-tmp/Flow_Kontext/logs'
-SAVE_DIR = '/home/hangwei/storage/jcy/Flow_Kontext/logs'
+# SAVE_DIR = '/home/hangwei/storage/jcy/Flow_Kontext/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -30,10 +30,6 @@ def compressibility():
 
     # Sampling
     config.sample.noise_steps = [1]
-    config.sample.merge_step = 0
-    config.sample.use_sliding_window = False
-    config.sample.left_boundary = 0
-    config.sample.window_size = 20
     config.sample.batch_size = 1
     config.sample.num_steps = 20
     config.sample.num_images_per_prompt = 3
@@ -61,7 +57,6 @@ def compressibility():
     # Testing
     config.test.batch_size = 4
     config.test.num_steps = 20
-    config.test.merge_step = 1
 
     # prompting
     config.prompt_fn = "general_editing"
@@ -98,11 +93,11 @@ def harmonic_mean(**kwargs):
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
 def editscore():
-    gpu_number = 1
+    gpu_number = 2
     config = compressibility()
 
-    # config.dataset = "/root/siton-tmp/EditScore-RL-Data"
-    config.dataset = '/home/hangwei/storage/jcy/datasets/GEdit-Bench/train_split'
+    config.dataset = "/root/siton-tmp/GEdit-Bench/train_split"
+    # config.dataset = '/home/hangwei/storage/jcy/datasets/GEdit-Bench/train_split'
     # config.prompt_fn = 'general_editing'
     config.prompt_fn = 'arrow_editing'
     config.resolution = 512
@@ -130,7 +125,6 @@ def editscore():
     # Testing
     config.test.batch_size = 1
     config.test.num_steps = 20
-    config.test.merge_step = 0
 
     # Sampling
     ## sliding window scheduler
@@ -138,19 +132,17 @@ def editscore():
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.guidance_scale = 3.5
-    config.sample.subfig_permutation = False
 
     config.sample.cps = False
     config.sample.num_steps = 10
     config.sample.noise_steps = [1]
-    config.sample.noise_level = 0.7
-    config.sample.merge_step = 0
+    config.sample.noise_level = 0.9
 
     ## batches
     config.enable_gradient_checkpointing = True
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 4 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
@@ -215,7 +207,6 @@ def consistencyreward_for_editing():
     # Testing
     config.test.batch_size = 5
     config.test.num_steps = 20
-    config.test.merge_step = 0
 
     # Sampling
     ## sliding window scheduler
@@ -223,13 +214,11 @@ def consistencyreward_for_editing():
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.guidance_scale = 3.5
-    config.sample.subfig_permutation = False
 
     config.sample.cps = False
     config.sample.num_steps = 10
     config.sample.noise_steps = [1]
     config.sample.noise_level = 0.7
-    config.sample.merge_step = 0
 
     ## batches
     config.enable_gradient_checkpointing = False

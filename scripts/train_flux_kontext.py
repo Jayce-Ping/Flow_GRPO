@@ -422,7 +422,7 @@ def eval(pipeline : FluxKontextPipeline,
         # Save image to temp dir
         pil_img = tensor_to_pil_image(img)[0]
         pil_img.save(os.path.join(temp_dir, f"{accelerator.process_index}-{idx}.jpg"))
-    for idx, img in enumerate(log_data['ref_images']):
+    for idx, pil_img in enumerate(log_data['ref_images']):
         # Save ref image to temp dir
         pil_img.save(os.path.join(temp_dir, f"ref-{accelerator.process_index}-{idx}.jpg"))
     accelerator.wait_for_everyone()
@@ -691,6 +691,7 @@ def main(_):
     logger.info(f"\n{config}")
 
     # -----------------------------------------------Set up memory profiler-----------------------------------
+    memory_profiler = None
     if config.enable_mem_log:
         # Initialize memory profiler
         time_stamp = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
