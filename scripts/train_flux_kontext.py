@@ -1051,7 +1051,7 @@ def main(_):
             prompt_ids = accelerator.gather(prompt_ids).cpu().numpy()
             # Convert ref_image to tensor and gather
             local_ref_image_tensor = pil_image_to_tensor([s["ref_image"] for s in samples]).to(accelerator.device)
-            gathered_ref_image_tensor = accelerator.gather(local_ref_image_tensor).cpu().numpy()
+            gathered_ref_image_tensor = accelerator.gather(local_ref_image_tensor).cpu()
             # Reconstruct prompts with ref images in metadata to ensure uniqueness
             prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
             gathered_ref_images = tensor_to_pil_image(gathered_ref_image_tensor)

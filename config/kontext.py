@@ -181,7 +181,8 @@ def consistencyreward_for_editing():
     gpu_number = 2
     config = compressibility()
 
-    config.dataset = "/root/siton-tmp/EditScore-RL-Data"
+    config.dataset = "/root/siton-tmp/GEdit-Bench/train_split"
+    config.prompt_fn = 'arrow_editing'
     config.resolution = 512
     config.enable_flexible_size = False
     config.pretrained.model = FLUX_MODEL_PATH
@@ -190,8 +191,8 @@ def consistencyreward_for_editing():
 
     config.run_name = 'Flux Kontext - Consistency Reward'
     config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
-    config.save_freq = 10 # epoch
-    config.eval_freq = 10 # 0 for no eval applied
+    config.save_freq = 0 # epoch
+    config.eval_freq = 0 # 0 for no eval applied
     config.train.reward_fn = {
         "consistencyreward_for_editing": 1.0,
     }
@@ -205,7 +206,7 @@ def consistencyreward_for_editing():
     config.test.aggregate_fn = agg_fn
 
     # Testing
-    config.test.batch_size = 5
+    config.test.batch_size = 1
     config.test.num_steps = 20
 
     # Sampling
@@ -218,10 +219,10 @@ def consistencyreward_for_editing():
     config.sample.cps = False
     config.sample.num_steps = 10
     config.sample.noise_steps = [1]
-    config.sample.noise_level = 0.7
+    config.sample.noise_level = 0.9
 
     ## batches
-    config.enable_gradient_checkpointing = False
+    config.enable_gradient_checkpointing = True
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
     config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch all gathered
