@@ -35,7 +35,7 @@ def compressibility():
     config.sample.num_images_per_prompt = 3
     config.sample.max_group_size = 16
     config.sample.num_batches_per_epoch = 4
-    config.sample.guidance_scale = 3.5
+    config.sample.guidance_scale = 2.5
     config.sample.cps = False
     config.sample.noise_level = 0.7
     config.sample.global_std = True
@@ -52,7 +52,7 @@ def compressibility():
     config.train.nft_beta = 1
     config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
     config.train.timesteps = None
-    config.train.guidance_scale = 3.5
+    config.train.guidance_scale = 2.5
 
     # Testing
     config.test.batch_size = 4
@@ -131,7 +131,7 @@ def editscore():
     config.sample.global_std = False
     config.sample.use_history = False
     config.sample.same_latent = False
-    config.sample.guidance_scale = 3.5
+    config.sample.guidance_scale = 2.5
 
     config.sample.cps = False
     config.sample.num_steps = 10
@@ -167,7 +167,7 @@ def editscore():
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 1
-    config.train.guidance_scale = 3.5
+    config.train.guidance_scale = 2.5
     config.train.timesteps = config.sample.noise_steps # Train on all noise steps
     config.train.beta = 0
     config.train.nft_beta = 1
@@ -214,7 +214,7 @@ def consistencyreward_for_editing():
     config.sample.global_std = False
     config.sample.use_history = False
     config.sample.same_latent = False
-    config.sample.guidance_scale = 3.5
+    config.sample.guidance_scale = 2.5
 
     config.sample.cps = False
     config.sample.num_steps = 10
@@ -250,7 +250,7 @@ def consistencyreward_for_editing():
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 1
-    config.train.guidance_scale = 3.5
+    config.train.guidance_scale = 2.5
     config.train.timesteps = config.sample.noise_steps # Train on all noise steps
     config.train.beta = 0
     config.train.nft_beta = 1
