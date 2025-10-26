@@ -34,7 +34,7 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader, Sampler
 
 from flow_grpo.logging_utils import set_online_log
-from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, create_generator
+from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, create_generator, pil_image_to_tensor, hash_pil_image
 from flow_grpo.rewards.rewards import multi_score
 from flow_grpo.diffusers_patch.flux_kontext_pipeline import flux_kontext_pipeline, compute_log_prob
 from flow_grpo.ema import EMAModuleWrapper
@@ -50,6 +50,29 @@ FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", "config/base.py", "Training configuration.")
 
 logger = get_logger(__name__)
+
+def return_decay(step, decay_type):
+    if decay_type == 0:
+        flat = 0
+        uprate = 0.0
+        uphold = 0.0
+    elif decay_type == 1:
+        flat = 0
+        uprate = 0.001
+        uphold = 0.5
+    elif decay_type == 2:
+        flat = 75
+        uprate = 0.0075
+        uphold = 0.999
+    else:
+        assert False
+
+    if step < flat:
+        return 0.0
+    else:
+        decay = (step - flat) * uprate
+        return min(decay, uphold)
+
 
 def reward_compute(
     logging_platform,
@@ -399,13 +422,20 @@ def eval(pipeline : FluxKontextPipeline,
         # Save image to temp dir
         pil_img = tensor_to_pil_image(img)[0]
         pil_img.save(os.path.join(temp_dir, f"{accelerator.process_index}-{idx}.jpg"))
-    for idx, img in enumerate(log_data['ref_images']):
+    for idx, pil_img in enumerate(log_data['ref_images']):
         # Save ref image to temp dir
         pil_img.save(os.path.join(temp_dir, f"ref-{accelerator.process_index}-{idx}.jpg"))
     accelerator.wait_for_everyone()
     # The order of images here should be guaranteed by the name of images
     # NOTE: it provides gathered_images as a list of file paths
-    sort_key = lambda filename: tuple([int(i) for i in filename.split('.')[0].split('-')])
+    def sort_key(filename):
+        key = []
+        if filename.startswith('ref-'):
+            key.append(0) # Add a prefix to make ref images come first
+            filename = filename[4:]  # remove 'ref-' prefix
+        key.extend([int(i) for i in filename.split('.')[0].split('-')])
+        return tuple(key)
+    
     gathered_images = [
         os.path.join(temp_dir, filename)
         for filename in sorted(os.listdir(temp_dir), key=sort_key)
@@ -1008,24 +1038,30 @@ def main(_):
             logging_platform.log(
                 {
                     "epoch": epoch,
-                    **{f"reward/{key}": value.mean() for key, value in gathered_rewards.items() if '_strict_accuracy' not in key and '_accuracy' not in key},
+                    **{f"reward_{key}": value.mean() for key, value in gathered_rewards.items()},
+                    **{f"reward_{key}_std": value.std() for key, value in gathered_rewards.items()},
                 },
                 step=global_step,
             )
 
-        # Assign ori_avg for per-prompt tracking
-        gathered_rewards["ori_avg"] = gathered_rewards["avg"]
-        # The purpose of repeating `adv` along the timestep dimension here is to make it easier to introduce timestep-dependent advantages later, such as adding a KL reward.
-        gathered_rewards["avg"] = np.repeat(gathered_rewards["avg"][:, np.newaxis], num_train_timesteps, axis=1)
-        
         # per-prompt mean/std tracking
         if config.per_prompt_stat_tracking:
             # gather the prompts across processes
-            prompt_ids = accelerator.gather(torch.stack([sample["prompt_ids"].squeeze(0) for sample in samples])).cpu().numpy()
-            prompts = tokenizers[1].batch_decode(
-                prompt_ids, skip_special_tokens=True
-            )
-            advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
+            prompt_ids = torch.cat([s["prompt_ids"] for s in samples], dim=0)
+            prompt_ids = accelerator.gather(prompt_ids).cpu().numpy()
+            # Convert ref_image to tensor and gather
+            local_ref_image_tensor = pil_image_to_tensor([s["ref_image"] for s in samples]).to(accelerator.device)
+            gathered_ref_image_tensor = accelerator.gather(local_ref_image_tensor).cpu()
+            # Reconstruct prompts with ref images in metadata to ensure uniqueness
+            prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
+            gathered_ref_images = tensor_to_pil_image(gathered_ref_image_tensor)
+            gathered_ref_images = [hash_pil_image(img) for img in gathered_ref_images] # Hash ref images
+            # Construct unique prompt keys
+            prompts = [
+                f"{prompt}_{img_hash}"
+                for prompt, img_hash in zip(prompts, gathered_ref_images)
+            ]
+            advantages = stat_tracker.update(prompts, gathered_rewards['avg'], type='grpo')
             if accelerator.is_local_main_process:
                 print("len(prompts)", len(prompts))
                 print("len unique prompts", len(set(prompts)))
@@ -1049,6 +1085,8 @@ def main(_):
                         },
                         step=global_step,
                     )
+            # !!! Notice here, after every advantage calculation, the tracker is cleared so that no history is saved.
+            # So comment the following clear code if `config.sample.use_history=True` is set
             stat_tracker.clear()
         else:
             advantages = (gathered_rewards['avg'] - gathered_rewards['avg'].mean()) / (gathered_rewards['avg'].std() + 1e-4)
@@ -1056,110 +1094,102 @@ def main(_):
         # ungather advantages; we only need to keep the entries corresponding to the samples on this process
         advantages = torch.as_tensor(advantages)
         advantages = (
-            advantages.reshape(accelerator.num_processes, -1, advantages.shape[-1])[accelerator.process_index]
+            advantages.reshape(accelerator.num_processes, -1, *advantages.shape[1:])[accelerator.process_index]
             .to(accelerator.device)
         )
+        # Distribute advantages to samples
+        for i, sample in enumerate(samples):
+            sample['advantages'] = advantages[i].unsqueeze(0) # keep batch dimension
+
         if accelerator.is_local_main_process:
+            print("len samples", len(samples))
+            print("advantages has shape", advantages.shape)
             print("advantages: ", advantages.abs().mean())
 
-        # Assign advantages to samples
-        for idx, sample in enumerate(samples):
-            sample["advantages"] = advantages[idx]
+        # clean up to save memory
+        del gathered_rewards
+        for sample in samples:
+            del sample["rewards"]
+            del sample["prompt_ids"]
+            del sample['metadata']
 
-        # Get the mask for samples where all advantages are zero across the time dimension
-        mask = torch.tensor([sample["advantages"].abs().sum() != 0 for sample in samples], device=accelerator.device)
-        
-        # If the number of True values in mask is not divisible by train_sampler.num_batches_per_epoch,
-        # randomly change some False values to True to make it divisible
-        num_batches = train_sampler.num_batches_per_epoch
-        true_count = mask.sum()
-        if true_count % num_batches != 0:
-            false_indices = torch.where(~mask)[0]
-            num_to_change = num_batches - (true_count % num_batches)
-            if len(false_indices) >= num_to_change:
-                random_indices = torch.randperm(len(false_indices))[:num_to_change]
-                mask[false_indices[random_indices]] = True
-        if accelerator.is_main_process:
-            logging_platform.log(
-                {
-                    "actual_batch_size": mask.sum().item() // num_batches,
-                },
-                step=global_step,
-            )
-        # Filter out samples where the entire time dimension of advantages is zero
-        samples = [sample for idx, sample in enumerate(samples) if mask[idx]]
-
-        total_batch_size = len(samples)
-        assert len(samples) % num_batches == 0
 
         #################### TRAINING ####################
-        for inner_epoch in range(config.train.num_inner_epochs):
-            # shuffle samples along batch dimension
-            perm = torch.randperm(total_batch_size, device=accelerator.device)
-            samples_shuffled = [samples[i] for i in perm]
+        if config.enable_mem_log:
+            memory_profiler.snapshot(f"epoch_{epoch}_before_training")
 
-            # rebatch for training
-            batch_size_per_batch = total_batch_size // num_batches
-            samples_batched = [
-                samples_shuffled[i * batch_size_per_batch : (i + 1) * batch_size_per_batch]
-                for i in range(num_batches)
+        total_batch_size = len(samples) # = config.train.batch_size * config.train.num_batches_per_epoch
+
+        pipeline.transformer.train()
+        
+        # Add some noise to default parameters for better exploration
+        if hasattr(config.train, 'param_noise_std') and config.train.param_noise_std > 0:
+            for p in transformer_trainable_parameters:
+                p.data += torch.randn_like(p.data) * config.train.param_noise_std
+
+        for inner_epoch in range(config.train.num_inner_epochs):
+            # shuffle samples
+            perm = torch.randperm(total_batch_size)
+            samples = [samples[i] for i in perm]
+
+            # sample:{
+            # 'height': int,
+            # 'width': int,
+            # 'layout': (int, int),
+            # 'prompt': str,
+            # 'all_latents': Tensor(1, config.sample.num_steps + 1, seq_len, c),
+            # 'advantages': Tensor(1, 1),
+            # }
+            keys = samples[0].keys()
+            samples = [samples[i:i+config.train.batch_size] for i in range(0, total_batch_size, config.train.batch_size)]
+            samples = [
+                {
+                    # Catenate along batch dimension if the entry is Tensor
+                    k: torch.cat([s[k] for s in batch], dim=0)
+                    if isinstance(batch[0][k], torch.Tensor)
+                    else [batch[_][k] for _ in range(len(batch))] # for other type -  cat to a list
+                    for k in keys
+                }
+                for batch in samples
             ]
 
-            # train
-            pipeline.transformer.train()
             info = defaultdict(list)
-            for i, sample_batch in tqdm(
-                list(enumerate(samples_batched)),
+
+            for i, sample in tqdm(
+                list(enumerate(samples)),
                 desc=f"Epoch {epoch}.{inner_epoch}: training",
                 position=0,
                 disable=not accelerator.is_local_main_process,
             ):
-                # Split each sample in the batch across timesteps
-                # Only train on the specified timesteps
-                train_timestep_batch = []
-                for sample in sample_batch:
-                    for j in train_timestep_indices:
-                        train_timestep_batch.append({
-                            'all_latents': sample['all_latents'],
-                            'image_latents': sample['image_latents'],
-                            'timesteps': sample['timesteps'],
-                            'prompt': sample['prompt'],
-                            'prompt_embeds': sample['prompt_embeds'].to(accelerator.device),
-                            'pooled_prompt_embeds': sample['pooled_prompt_embeds'].to(accelerator.device),
-                            'height': sample.get('height', config.resolution),
-                            'width': sample.get('width', config.resolution),
-                            'advantages': sample['advantages'][train_timestep_indices.index(j)],  # Map to advantage index
-                            'timestep_index': j,
-                        })
-                
-                # Process in sub-batches according to config.train.batch_size
-                for sub_batch_start in range(0, len(train_timestep_batch), config.train.batch_size):
-                    sub_batch = train_timestep_batch[sub_batch_start : sub_batch_start + config.train.batch_size]
-                    
-                    # Stack the batch
-                    batched_sample = {
-                        'all_latents': torch.cat([s['all_latents'] for s in sub_batch], dim=0),
-                        'image_latents': torch.cat([s['image_latents'] for s in sub_batch], dim=0),
-                        'timesteps': torch.cat([s['timesteps'] for s in sub_batch], dim=0),
-                        'prompt': [s['prompt'] for s in sub_batch],
-                        'prompt_embeds': torch.cat([s['prompt_embeds'] for s in sub_batch], dim=0),
-                        'pooled_prompt_embeds': torch.cat([s['pooled_prompt_embeds'] for s in sub_batch], dim=0),
-                        'height': [s['height'] for s in sub_batch],
-                        'width': [s['width'] for s in sub_batch],
-                        'advantages': torch.stack([s['advantages'] for s in sub_batch], dim=0),
-                    }
-                    timestep_index = sub_batch[0]['timestep_index']  # All should have the same timestep_index
+                for j in tqdm(
+                    train_timestep_indices,
+                    desc="Timestep",
+                    position=1,
+                    leave=False,
+                    disable=not accelerator.is_local_main_process,
+                ):
+                    if config.enable_mem_log and i % 10 == 0:
+                        memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_before_forward")
 
                     with accelerator.accumulate(transformer):
-                        loss, batch_info = compute_ppo_loss(
+                        loss, loss_info = compute_ppo_loss(
                             config=config,
                             accelerator=accelerator,
                             pipeline=pipeline,
                             transformer=transformer,
-                            sample=batched_sample,
-                            timestep_index=timestep_index,
+                            sample=sample,
+                            timestep_index=j,
                             autocast=autocast,
                         )
+
+                        for k, v in loss_info.items():
+                            info[k].append(v.detach())
+
+                        # Track loss tensors
+                        if config.enable_mem_log:
+                            memory_profiler.track_tensors(info, "loss_info")
+                            if i % 10 == 0:
+                                memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_before_backward")
 
                         # backward pass
                         accelerator.backward(loss)
@@ -1170,33 +1200,44 @@ def main(_):
                         optimizer.step()
                         optimizer.zero_grad()
 
-                        # Collect info
-                        for key, value in batch_info.items():
-                            info[key].append(value)
+                        if config.enable_mem_log and i % 10 == 0:
+                            memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_timestep_{j}_after_backward")
 
                     # Checks if the accelerator has performed an optimization step behind the scenes
                     if accelerator.sync_gradients:
                         # log training-related stuff
-                        batch_info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
-                        batch_info = accelerator.reduce(batch_info, reduction="mean")
-                        batch_info.update({"epoch": epoch, "inner_epoch": inner_epoch})
+                        info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
+                        info = accelerator.reduce(info, reduction="mean")
+                        info.update({"epoch": epoch, "inner_epoch": inner_epoch})
                         if accelerator.is_main_process:
-                            logging_platform.log(batch_info, step=global_step)
+                            logging_platform.log(info, step=global_step)
+
+                        if config.enable_mem_log:
+                            memory_profiler.snapshot(f"epoch_{epoch}_step_{i}_after_optimization")
+                            memory_profiler.print_full_report(f"epoch_{epoch}_step_{i}")
+
                         global_step += 1
                         info = defaultdict(list)
-                
+
                 if config.train.ema:
                     ema.step(transformer_trainable_parameters, global_step)
-            
-            # Copy current policy to old policy after each inner epoch
-            transformer.set_adapter("old")
-            old_transformer_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
-            transformer.set_adapter("default")
+            # make sure we did an optimization step at the end of the inner epoch
+            # assert accelerator.sync_gradients
+
+        with torch.no_grad():
+            decay = return_decay(global_step, config.train.decay_type)
             for src_param, tgt_param in zip(
                 transformer_trainable_parameters, old_transformer_trainable_parameters, strict=True
             ):
-                tgt_param.data.copy_(src_param.detach().data)
-        
+                # In-place update
+                tgt_param.data.mul_(decay).add_(src_param.detach().data, alpha=1 - decay)
+                assert src_param is not tgt_param
+
+        if config.enable_mem_log:
+            memory_profiler.cleanup_and_snapshot(f"epoch_{epoch}_end")
+            # Clear tensor accumulation info in profiler to save memory
+            memory_profiler.tensor_tracker.clear_stats()
+
         epoch += 1
         
 if __name__ == "__main__":

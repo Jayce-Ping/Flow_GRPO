@@ -14,9 +14,9 @@ spec.loader.exec_module(base)
 
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-Kontext-dev"
 # SAVE_DIR = 'logs'
-# SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_NFT/logs'
-SAVE_DIR = '/root/siton-tmp/Flow_Kontext/logs'
-SAVE_DIR = '/home/hangwei/storage/jcy/Flow_Kontext/logs'
+SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_Kontext/logs'
+# SAVE_DIR = '/root/siton-tmp/Flow_Kontext/logs'
+# SAVE_DIR = '/home/hangwei/storage/jcy/Flow_Kontext/logs'
 
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
@@ -30,13 +30,12 @@ def compressibility():
 
     # Sampling
     config.sample.noise_steps = [1]
-    config.sample.merge_step = 0
     config.sample.batch_size = 1
     config.sample.num_steps = 20
     config.sample.num_images_per_prompt = 3
     config.sample.max_group_size = 16
     config.sample.num_batches_per_epoch = 4
-    config.sample.guidance_scale = 3.5
+    config.sample.guidance_scale = 2.5
     config.sample.cps = False
     config.sample.noise_level = 0.7
     config.sample.global_std = True
@@ -53,12 +52,11 @@ def compressibility():
     config.train.nft_beta = 1
     config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
     config.train.timesteps = None
-    config.train.guidance_scale = 3.5
+    config.train.guidance_scale = 2.5
 
     # Testing
     config.test.batch_size = 4
     config.test.num_steps = 20
-    config.test.merge_step = 1
 
     # prompting
     config.prompt_fn = "general_editing"
@@ -95,11 +93,11 @@ def harmonic_mean(**kwargs):
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
 def editscore():
-    gpu_number = 1
+    gpu_number = 2
     config = compressibility()
 
-    # config.dataset = "/root/siton-tmp/EditScore-RL-Data"
-    config.dataset = '/home/hangwei/storage/jcy/datasets/GEdit-Bench/train_split'
+    config.dataset = "/root/siton-tmp/GEdit-Bench/train_split"
+    # config.dataset = '/home/hangwei/storage/jcy/datasets/GEdit-Bench/train_split'
     # config.prompt_fn = 'general_editing'
     config.prompt_fn = 'arrow_editing'
     config.resolution = 512
@@ -109,9 +107,9 @@ def editscore():
     config.logging_platform = "swanlab"
 
     config.run_name = 'Flux Kontext - GEdit-Bench'
-    config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
-    config.save_freq = 5 # epoch
-    config.eval_freq = 5 # 0 for no eval applied
+    config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'GEdit-split')
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10 # 0 for no eval applied
     config.train.reward_fn = {
         "edit_score": 1.0,
     }
@@ -127,27 +125,24 @@ def editscore():
     # Testing
     config.test.batch_size = 1
     config.test.num_steps = 20
-    config.test.merge_step = 0
 
     # Sampling
     ## sliding window scheduler
     config.sample.global_std = False
     config.sample.use_history = False
     config.sample.same_latent = False
-    config.sample.guidance_scale = 3.5
-    config.sample.subfig_permutation = False
+    config.sample.guidance_scale = 2.5
 
     config.sample.cps = False
     config.sample.num_steps = 10
     config.sample.noise_steps = [1]
-    config.sample.noise_level = 0.7
-    config.sample.merge_step = 0
+    config.sample.noise_level = 0.9
 
     ## batches
     config.enable_gradient_checkpointing = True
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 4 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 40 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
@@ -172,7 +167,7 @@ def editscore():
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 1
-    config.train.guidance_scale = 3.5
+    config.train.guidance_scale = 2.5
     config.train.timesteps = config.sample.noise_steps # Train on all noise steps
     config.train.beta = 0
     config.train.nft_beta = 1
@@ -183,18 +178,19 @@ def editscore():
     return config
 
 def consistencyreward_for_editing():
-    gpu_number = 2
+    gpu_number = 4
     config = compressibility()
 
-    config.dataset = "/root/siton-tmp/EditScore-RL-Data"
+    config.dataset = "/root/siton-tmp/GEdit-Bench/train_split"
+    config.prompt_fn = 'arrow_editing'
     config.resolution = 512
     config.enable_flexible_size = False
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
-    config.logging_platform = "swanlab"
+    # config.logging_platform = "swanlab"
 
     config.run_name = 'Flux Kontext - Consistency Reward'
-    config.save_dir = os.path.join(SAVE_DIR, f'editscore', 'flux_kontext')
+    config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'GEdit-Split')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
     config.train.reward_fn = {
@@ -210,29 +206,26 @@ def consistencyreward_for_editing():
     config.test.aggregate_fn = agg_fn
 
     # Testing
-    config.test.batch_size = 5
+    config.test.batch_size = 1
     config.test.num_steps = 20
-    config.test.merge_step = 0
 
     # Sampling
     ## sliding window scheduler
     config.sample.global_std = False
     config.sample.use_history = False
     config.sample.same_latent = False
-    config.sample.guidance_scale = 3.5
-    config.sample.subfig_permutation = False
+    config.sample.guidance_scale = 2.5
 
     config.sample.cps = False
     config.sample.num_steps = 10
     config.sample.noise_steps = [1]
-    config.sample.noise_level = 0.7
-    config.sample.merge_step = 0
+    config.sample.noise_level = 0.9
 
     ## batches
-    config.enable_gradient_checkpointing = False
+    config.enable_gradient_checkpointing = True
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 16 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = 40 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
@@ -257,7 +250,7 @@ def consistencyreward_for_editing():
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 1
-    config.train.guidance_scale = 3.5
+    config.train.guidance_scale = 2.5
     config.train.timesteps = config.sample.noise_steps # Train on all noise steps
     config.train.beta = 0
     config.train.nft_beta = 1
