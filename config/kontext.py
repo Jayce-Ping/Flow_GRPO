@@ -31,9 +31,6 @@ def compressibility():
     # Sampling
     config.sample.noise_steps = [1]
     config.sample.merge_step = 0
-    config.sample.use_sliding_window = False
-    config.sample.left_boundary = 0
-    config.sample.window_size = 20
     config.sample.batch_size = 1
     config.sample.num_steps = 20
     config.sample.num_images_per_prompt = 3

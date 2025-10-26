@@ -9,7 +9,7 @@ setup(
         "torch==2.8.0",
         "torchvision==0.23.0",
         "torchaudio",
-        "transformers==4.40.0",
+        "transformers==4.57.1",
         # "accelerate==1.4.0",
         # "diffusers==0.33.1",
         "accelerate==1.11.0",
