@@ -1,12 +1,14 @@
 #!/bin/bash
 # filepath: vllm/run_vllm_server.sh
 
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=0,1
 
 # MODEL_PATH="Qwen/Qwen2.5-VL-7B-Instruct"
 # MODEL_NAME="Qwen2.5-VL-7B-Instruct"
-MODEL_PATH="/root/siton-tmp/models/EditScore-7B"
-MODEL_NAME="EditScore-7B"
+MODEL_PATH="/root/siton-tmp/models/ConsistencyReward-7B-LLM-CoT"
+MODEL_NAME="ConsistencyReward-7B"
+# MODEL_PATH="/root/siton-tmp/models/EditScore-7B"
+# MODEL_NAME="EditScore-7B"
 # MODEL_PATH="/root/siton-tmp/models/ConsistencyReward-7B"
 # MODEL_NAME="ConsistencyReward-7B"
 # MODEL_PATH="zai-org/GLM-4.1V-9B-Thinking"
@@ -23,7 +25,7 @@ echo "Launching vLLM on GPU: $CUDA_VISIBLE_DEVICES (num=$NUM_GPUS)"
 
 vllm serve $MODEL_PATH \
     --served-model-name "$MODEL_NAME" \
-    --gpu-memory-utilization 0.25 \
+    --gpu-memory-utilization 0.2 \
     --max-model-len 4096  \
     --host 0.0.0.0 \
     --port $VLLM_PORT \

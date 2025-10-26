@@ -41,9 +41,9 @@ def delete_checkpoint_dir(path_in_repo, repo_id, commit_message="Delete folder",
     print(f"Folder '{path_in_repo}' successfully deleted from '{repo_id}'.")
 
 if __name__ == "__main__":
-    label = "flux, 4gpu, sampling 20steps, qwen consistency"
+    label = "H100-7, PPO, 0.8s+log(1+0.2cr), 10sde, noise=0.7 at [1], groupstd,_2025.10.22_19.31.35"
     SAVE_DIR = '/home/users/astar/ares/cp3jia/scratch/Flow_NFT/logs'
-    folder_name = 'grid-consistency-subclip/flux-4gpu-2by2-half_grid-times-consistency-plus-clipT_20steps'
+    folder_name = 'consistencyReward-subclip/8s-log-2cr_ppo_10sde_train1_groupstd_train-mini'
     folder_path = os.path.join(SAVE_DIR, folder_name)
     path_in_repo = folder_name
     repo_id = "Jayce-Ping/Flux-NFT"

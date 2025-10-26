@@ -97,9 +97,9 @@ class ConsistencyScorerForEditing:
         """
         Async version of compute_image_consistency with concurrency control.
         """
-        cache_key = (hash_pil_image(image), hash_pil_image(ref_image), criteria_text)
-        if cache_key in self.cache:
-            return self.cache[cache_key]
+        # cache_key = (hash_pil_image(image), hash_pil_image(ref_image), criteria_text)
+        # if cache_key in self.cache:
+        #     return self.cache[cache_key]
         messages = [
             {
                 "role": "user",
@@ -125,7 +125,7 @@ class ConsistencyScorerForEditing:
                     )
 
                 score = get_yes_cond_prob_from_completion(completion, canonicalize=canonicalize)
-                self.add_to_cache(cache_key, score)
+                # self.add_to_cache(cache_key, score)
                 break
 
             except Exception as e:
