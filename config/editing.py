@@ -262,5 +262,88 @@ def consistencyreward_for_editing_flux():
     return config
 
 
+def consistencyreward_for_editing_qwenimage():
+    gpu_number = 1
+    config = compressibility()
+
+    config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split"
+    config.prompt_fn = 'arrow_editing'
+    config.resolution = 512
+    config.pretrained.model = FLUX_MODEL_PATH
+    config.enable_flexible_size = False
+    config.enable_mem_log = False
+    config.logging_platform = "swanlab"
+
+    config.run_name = 'Qwen-Image-Edit, ConsistencyReward-7B-Mix-epoch1, new prompt'
+    config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'Qwen-GEdit-Split-mix-new-prompt')
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10 # 0 for no eval applied
+    config.train.reward_fn = {
+        "consistencyreward_for_editing": 1.0,
+    }
+    agg_fn = None
+    config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.train.aggregate_fn = agg_fn
+    config.test.reward_fn = {
+        "consistencyreward_for_editing": 1.0,
+    }
+    config.test.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.test.aggregate_fn = agg_fn
+
+    # Testing
+    config.test.batch_size = 1
+    config.test.num_steps = 50
+
+    # Sampling
+    ## sliding window scheduler
+    config.sample.global_std = False
+    config.sample.use_history = False
+    config.sample.same_latent = False
+    config.sample.guidance_scale = 4.0
+
+    config.sample.cps = False
+    config.sample.num_steps = 10
+    config.sample.noise_steps = [1,2,3,4]
+    config.sample.noise_level = 1.5
+
+    ## batches
+    config.enable_gradient_checkpointing = True
+    config.sample.batch_size = 1
+    config.sample.num_images_per_prompt = 16
+    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch all gathered
+
+    config.sample.sample_num_per_epoch = math.lcm(
+        config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
+        gpu_number * config.sample.batch_size
+    ) # Total number of samples on all processes
+
+    # Update number of unique prompt per epoch and check balance
+    unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.num_images_per_prompt
+    assert unique_sample_num_per_epoch % gpu_number == 0, f"""Assure all samples of one prompt are on the same GPU."""
+    config.sample.unique_sample_num_per_epoch = unique_sample_num_per_epoch
+
+    # number of batches per epoch per GPU
+    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
+
+    # Training
+    config.train.param_noise_std = 0
+    config.train.loss_type = 'ppo'
+    config.train.batch_size = config.sample.batch_size
+    config.train.learning_rate = 3e-4
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
+    assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
+    config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
+    config.train.num_inner_epochs = 1
+    config.train.timestep_fraction = 1
+    config.train.guidance_scale = config.sample.guidance_scale
+    config.train.timesteps = config.sample.noise_steps # Train on all noise steps
+    config.train.beta = 0
+    config.train.nft_beta = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
+    config.train.ema = True
+    config.per_prompt_stat_tracking = True
+
+    return config
+
 def get_config(name):
     return globals()[name]()

@@ -245,8 +245,6 @@ def compute_ppo_loss(
 @torch.no_grad()
 def eval(pipeline : QwenImageEditPipeline,
          test_dataloader : DataLoader,
-         text_encoders,
-         tokenizers,
          config : Namespace,
          accelerator,
          logging_platform,
@@ -397,7 +395,7 @@ def eval(pipeline : QwenImageEditPipeline,
         memory_profiler.snapshot("after_gather_rewards")
 
     # 2. Encode prompt to tensors for gpu communication
-    prompt_ids = tokenizers[1](
+    prompt_ids = pipeline.tokenizer(
         log_data['prompts'],
         padding="max_length",
         max_length=config.max_sequence_length,
@@ -405,7 +403,7 @@ def eval(pipeline : QwenImageEditPipeline,
         return_tensors="pt",
     ).input_ids.to(accelerator.device)
     gathered_prompt_ids = accelerator.gather(prompt_ids).cpu().numpy()
-    gathered_prompts = tokenizers[1].batch_decode(
+    gathered_prompts = pipeline.tokenizer.batch_decode(
         gathered_prompt_ids, skip_special_tokens=True
     )
 
@@ -514,13 +512,13 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
         accelerator: Accelerate accelerator for distributed training
         
     Returns:
-        Tuple of (pipeline, text_encoders, tokenizers)
+        pipeline
     """
     # -------------------------------Load models-----------------------------------
     # load scheduler, tokenizer and models.
     pipeline = QwenImageEditPipeline.from_pretrained(
         config.pretrained.model,
-        low_cpu_mem_usage=False
+        low_cpu_mem_usage=True
     )
 
     if hasattr(config.sample, 'noise_steps') and config.sample.noise_steps is not None:
@@ -550,11 +548,7 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
     # freeze parameters of models to save more memory
     pipeline.vae.requires_grad_(False)
     pipeline.text_encoder.requires_grad_(False)
-    pipeline.text_encoder_2.requires_grad_(False)
     pipeline.transformer.requires_grad_(not config.use_lora)
-
-    text_encoders = [pipeline.text_encoder, pipeline.text_encoder_2]
-    tokenizers = [pipeline.tokenizer, pipeline.tokenizer_2]
 
     # disable safety checker
     pipeline.safety_checker = None
@@ -577,10 +571,9 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
 
     # Move vae and text_encoder to device and cast to inference_dtype
     # Note: VAE is kept in float32 for numerical stability
-    pipeline.vae.to(accelerator.device, dtype=torch.float32)
+    pipeline.vae.to(accelerator.device, dtype=inference_dtype if config.use_lora else torch.float32)
     pipeline.text_encoder.to(accelerator.device, dtype=inference_dtype)
-    pipeline.text_encoder_2.to(accelerator.device, dtype=inference_dtype)
-    pipeline.transformer.to(accelerator.device, dtype=torch.float32)
+    pipeline.transformer.to(accelerator.device, dtype=inference_dtype if config.use_lora else torch.float32)
 
     if config.use_lora:
         # Set correct lora layers for Flux Kontext
@@ -619,7 +612,7 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
     if config.enable_gradient_checkpointing:
         pipeline.transformer.enable_gradient_checkpointing() # save memory
 
-    return pipeline, text_encoders, tokenizers
+    return pipeline
 
 
 def main(_):
@@ -702,7 +695,7 @@ def main(_):
         memory_profiler = MemoryProfiler(accelerator, enable_tensor_accumulation=True, log_file=meme_log_file)
 
     # --------------------------------------Load pipeline----------------------------------
-    pipeline, text_encoders, tokenizers = load_pipeline(config, accelerator)
+    pipeline = load_pipeline(config, accelerator)
     transformer = pipeline.transformer
 
     if memory_profiler is not None:
@@ -868,8 +861,6 @@ def main(_):
             eval(
                 pipeline,
                 test_dataloader,
-                text_encoders,
-                tokenizers,
                 config,
                 accelerator,
                 logging_platform,
@@ -905,7 +896,7 @@ def main(_):
             ref_images = [ref_image.resize((config.resolution, config.resolution)) for ref_image in ref_images]
 
             # the input of edit task is determined by both the image and the edit prompt
-            prompt_ids = tokenizers[1](
+            prompt_ids = pipeline.tokenizer(
                 prompts,
                 padding="max_length",
                 max_length=config.max_sequence_length,
@@ -1043,7 +1034,7 @@ def main(_):
             local_ref_image_tensor = pil_image_to_tensor([s["ref_image"] for s in samples]).to(accelerator.device)
             gathered_ref_image_tensor = accelerator.gather(local_ref_image_tensor).cpu()
             # Reconstruct prompts with ref images in metadata to ensure uniqueness
-            prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
+            prompts = pipeline.tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
             gathered_ref_images = tensor_to_pil_image(gathered_ref_image_tensor)
             gathered_ref_images = [hash_pil_image(img) for img in gathered_ref_images] # Hash ref images
             # Construct unique prompt keys

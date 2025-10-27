@@ -1,11 +1,11 @@
 #!/bin/bash
 # filepath: vllm/run_vllm_server.sh
 
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=1
 
 # MODEL_PATH="Qwen/Qwen2.5-VL-7B-Instruct"
 # MODEL_NAME="Qwen2.5-VL-7B-Instruct"
-MODEL_PATH="/root/siton-tmp/models/ConsistencyReward-7B-LLM-CoT"
+MODEL_PATH="/root/siton-tmp/models/ConsistencyReward-7B-Mix-epoch1"
 MODEL_NAME="ConsistencyReward-7B"
 # MODEL_PATH="/root/siton-tmp/models/EditScore-7B"
 # MODEL_NAME="EditScore-7B"
