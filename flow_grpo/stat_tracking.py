@@ -66,7 +66,7 @@ class PerPromptStatTracker:
             std = np.std(std_data, axis=0, keepdims=True)
 
             # Avoid division by zero
-            std = max(std, 1e-4)
+            std = max(std, 1e-6)
 
             # Compute advantages with different algorithm
             if type == 'grpo' or type == 'rank-grpo':
@@ -109,7 +109,7 @@ class PerPromptStatTracker:
         history_prompts = len(self.history_prompts)
         avg_group_std = np.mean([np.std(v) for v in self.stats.values()]) if self.stats else 0
         global_std = np.std(np.concatenate(list(self.stats.values()))) if self.stats else 0
-        zero_std_ratio = sum(1 for v in self.stats.values() if np.std(v) < 1e-6) / len(self.stats) if self.stats else 0
+        zero_std_ratio = sum(1 for v in self.stats.values() if np.std(v) < 1e-5) / len(self.stats) if self.stats else 0
         return avg_group_size, history_prompts, avg_group_std, global_std, zero_std_ratio
 
     def clear(self):
