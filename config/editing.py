@@ -181,16 +181,16 @@ def editscore_flux():
     return config
 
 def consistencyreward_for_editing_flux():
-    gpu_number = 2
+    gpu_number = 4
     config = compressibility()
 
-    config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split"
+    config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split_en"
     config.prompt_fn = 'arrow_editing'
     config.resolution = 512
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_flexible_size = False
     config.enable_mem_log = False
-    config.logging_platform = "swanlab"
+    # config.logging_platform = "swanlab"
 
     config.run_name = 'Flux-Kontext, ConsistencyReward-7B-Mix-epoch1, new prompt'
     config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'Flux-GEdit-Split-mix-new-prompt')
@@ -227,7 +227,7 @@ def consistencyreward_for_editing_flux():
 
     ## batches
     config.enable_gradient_checkpointing = False
-    config.sample.batch_size = 3
+    config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
     config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch all gathered
 

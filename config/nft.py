@@ -192,6 +192,381 @@ def consistencyReward_clip():
 
     return config
 
+def consistencyReward_clip_ori():
+    gpu_number = 7
+    config = compressibility()
+
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/half_2by2")
+    config.resolution = 1024
+    config.enable_flexible_size = False
+    config.prompt_fn = "geneval"
+    config.pretrained.model = FLUX_MODEL_PATH
+    config.enable_mem_log = False
+    # config.logging_platform = "swanlab"
+
+    config.run_name = 'H100-7, PPO, 1s+log(1+0.2crm), 10sde, noise=0.7 at [1], ori_size, groupstd,'
+    config.save_dir = os.path.join(SAVE_DIR, f'consistencyReward-subclip', f'10s-log-2crm_ppo_10sde_train1_groupstd_train-mini')
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10 # 0 for no eval applied
+    config.train.reward_fn = {
+        "consistency_score": 0.2,
+        "subfig_clipT" : 1
+    }
+
+    def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
+        return np.log(1 + consistency_score) + subfig_clipT
+
+    config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.train.aggregate_fn = agg_fn
+
+    config.test.reward_fn = config.train.reward_fn
+    config.train.aggregate_fn_code = config.train.aggregate_fn_code
+    config.test.aggregate_fn = agg_fn
+
+    # Testing
+    config.test.save_eval_images = True
+    config.test.batch_size = 5
+    config.test.num_steps = 20
+    config.test.merge_step = 0
+
+    # Sampling
+    ## sliding window scheduler
+    config.sample.use_sliding_window = True
+    config.sample.window_size = 1
+    config.sample.left_boundary = 1
+    config.sample.global_std = False
+    config.sample.use_history = False
+    config.sample.same_latent = False
+    config.sample.guidance_scale = 3.5
+    config.sample.subfig_permutation = False
+
+    config.sample.cps = False
+    config.sample.num_steps = 10
+    config.sample.noise_steps = [1]
+    config.sample.noise_level = 0.7
+    config.sample.merge_step = 0
+
+    ## batches
+    config.enable_gradient_checkpointing = False
+    config.sample.batch_size = 1
+    config.sample.num_images_per_prompt = 16
+    config.sample.max_group_size = 16
+    config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch all gathered
+
+    config.sample.sample_num_per_epoch = math.lcm(
+        config.sample.max_group_size * config.sample.unique_sample_num_per_epoch,
+        gpu_number * config.sample.batch_size
+    ) # Total number of samples on all processes
+
+    # Update number of unique prompt per epoch and check balance
+    unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.max_group_size
+    assert unique_sample_num_per_epoch % gpu_number == 0, f"""Assure all samples of one prompt are on the same GPU."""
+    config.sample.unique_sample_num_per_epoch = unique_sample_num_per_epoch
+
+    # number of batches per epoch per GPU
+    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
+
+    # Training
+    config.train.param_noise_std = 0
+    config.train.loss_type = 'ppo'
+    config.train.batch_size = config.sample.batch_size
+    config.train.learning_rate = 3e-4
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
+    assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
+    config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
+    config.train.num_inner_epochs = 1
+    config.train.timestep_fraction = 1
+    config.train.guidance_scale = 3.5
+    config.train.timesteps = config.sample.noise_steps # Train on all noise steps
+    config.train.beta = 0
+    config.train.nft_beta = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
+    config.train.ema = True
+    config.per_prompt_stat_tracking = True
+
+    return config
+    
+def consistencyReward_clip_small():
+    gpu_number = 7
+    config = compressibility()
+
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/half_2by2_small_train")
+    config.resolution = 512
+    config.enable_flexible_size = False
+    config.prompt_fn = "geneval"
+    config.pretrained.model = FLUX_MODEL_PATH
+    config.enable_mem_log = False
+    # config.logging_platform = "swanlab"
+
+    config.run_name = 'H100-7, PPO, 1s+log(1+0.2crm), 10sde, noise=0.7 at [1], small, groupstd,'
+    config.save_dir = os.path.join(SAVE_DIR, f'consistencyReward-subclip', f'10s-log-2crm_ppo_10sde_train1_groupstd_train-small')
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10 # 0 for no eval applied
+    config.train.reward_fn = {
+        "consistency_score": 0.2,
+        "subfig_clipT" : 1
+    }
+
+    def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
+        return np.log(1 + consistency_score) + subfig_clipT
+
+    config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.train.aggregate_fn = agg_fn
+
+    config.test.reward_fn = config.train.reward_fn
+    config.train.aggregate_fn_code = config.train.aggregate_fn_code
+    config.test.aggregate_fn = agg_fn
+
+    # Testing
+    config.test.save_eval_images = True
+    config.test.batch_size = 5
+    config.test.num_steps = 20
+    config.test.merge_step = 0
+
+    # Sampling
+    ## sliding window scheduler
+    config.sample.use_sliding_window = True
+    config.sample.window_size = 1
+    config.sample.left_boundary = 1
+    config.sample.global_std = False
+    config.sample.use_history = False
+    config.sample.same_latent = False
+    config.sample.guidance_scale = 3.5
+    config.sample.subfig_permutation = False
+
+    config.sample.cps = False
+    config.sample.num_steps = 10
+    config.sample.noise_steps = [1]
+    config.sample.noise_level = 0.7
+    config.sample.merge_step = 0
+
+    ## batches
+    config.enable_gradient_checkpointing = False
+    config.sample.batch_size = 3
+    config.sample.num_images_per_prompt = 16
+    config.sample.max_group_size = 16
+    config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch all gathered
+
+    config.sample.sample_num_per_epoch = math.lcm(
+        config.sample.max_group_size * config.sample.unique_sample_num_per_epoch,
+        gpu_number * config.sample.batch_size
+    ) # Total number of samples on all processes
+
+    # Update number of unique prompt per epoch and check balance
+    unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.max_group_size
+    assert unique_sample_num_per_epoch % gpu_number == 0, f"""Assure all samples of one prompt are on the same GPU."""
+    config.sample.unique_sample_num_per_epoch = unique_sample_num_per_epoch
+
+    # number of batches per epoch per GPU
+    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
+
+    # Training
+    config.train.param_noise_std = 0
+    config.train.loss_type = 'ppo'
+    config.train.batch_size = config.sample.batch_size
+    config.train.learning_rate = 3e-4
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
+    assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
+    config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
+    config.train.num_inner_epochs = 1
+    config.train.timestep_fraction = 1
+    config.train.guidance_scale = 3.5
+    config.train.timesteps = config.sample.noise_steps # Train on all noise steps
+    config.train.beta = 0
+    config.train.nft_beta = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
+    config.train.ema = True
+    config.per_prompt_stat_tracking = True
+
+    return config
+
+def consistencyReward_clip_mini():
+    gpu_number = 7
+    config = compressibility()
+
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/half_2by2_mini_train")
+    config.resolution = 360
+    config.enable_flexible_size = False
+    config.prompt_fn = "geneval"
+    config.pretrained.model = FLUX_MODEL_PATH
+    config.enable_mem_log = False
+    # config.logging_platform = "swanlab"
+
+    config.run_name = 'H100-7, PPO, 1s+log(1+0.2crm), 10sde, noise=0.7 at [1], mini, groupstd,'
+    config.save_dir = os.path.join(SAVE_DIR, f'consistencyReward-subclip', f'10s-log-2crm_ppo_10sde_train1_groupstd_train-mini')
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10 # 0 for no eval applied
+    config.train.reward_fn = {
+        "consistency_score": 0.2,
+        "subfig_clipT" : 1
+    }
+
+    def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
+        return np.log(1 + consistency_score) + subfig_clipT
+
+    config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.train.aggregate_fn = agg_fn
+
+    config.test.reward_fn = config.train.reward_fn
+    config.train.aggregate_fn_code = config.train.aggregate_fn_code
+    config.test.aggregate_fn = agg_fn
+
+    # Testing
+    config.test.save_eval_images = True
+    config.test.batch_size = 5
+    config.test.num_steps = 20
+    config.test.merge_step = 0
+
+    # Sampling
+    ## sliding window scheduler
+    config.sample.use_sliding_window = True
+    config.sample.window_size = 1
+    config.sample.left_boundary = 1
+    config.sample.global_std = False
+    config.sample.use_history = False
+    config.sample.same_latent = False
+    config.sample.guidance_scale = 3.5
+    config.sample.subfig_permutation = False
+
+    config.sample.cps = False
+    config.sample.num_steps = 10
+    config.sample.noise_steps = [1]
+    config.sample.noise_level = 0.7
+    config.sample.merge_step = 0
+
+    ## batches
+    config.enable_gradient_checkpointing = False
+    config.sample.batch_size = 3
+    config.sample.num_images_per_prompt = 16
+    config.sample.max_group_size = 16
+    config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch all gathered
+
+    config.sample.sample_num_per_epoch = math.lcm(
+        config.sample.max_group_size * config.sample.unique_sample_num_per_epoch,
+        gpu_number * config.sample.batch_size
+    ) # Total number of samples on all processes
+
+    # Update number of unique prompt per epoch and check balance
+    unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.max_group_size
+    assert unique_sample_num_per_epoch % gpu_number == 0, f"""Assure all samples of one prompt are on the same GPU."""
+    config.sample.unique_sample_num_per_epoch = unique_sample_num_per_epoch
+
+    # number of batches per epoch per GPU
+    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
+
+    # Training
+    config.train.param_noise_std = 0
+    config.train.loss_type = 'ppo'
+    config.train.batch_size = config.sample.batch_size
+    config.train.learning_rate = 3e-4
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
+    assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
+    config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
+    config.train.num_inner_epochs = 1
+    config.train.timestep_fraction = 1
+    config.train.guidance_scale = 3.5
+    config.train.timesteps = config.sample.noise_steps # Train on all noise steps
+    config.train.beta = 0
+    config.train.nft_beta = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
+    config.train.ema = True
+    config.per_prompt_stat_tracking = True
+
+    return config
+
+def consistencyReward_clip_micro():
+    gpu_number = 7
+    config = compressibility()
+
+    config.dataset = os.path.join(os.getcwd(), "dataset/T2IS/half_2by2_micro_train")
+    config.resolution = 256
+    config.enable_flexible_size = False
+    config.prompt_fn = "geneval"
+    config.pretrained.model = FLUX_MODEL_PATH
+    config.enable_mem_log = False
+    # config.logging_platform = "swanlab"
+
+    config.run_name = 'H100-7, PPO, 1s+log(1+0.2crm), 10sde, noise=0.7 at [1], micro, groupstd,'
+    config.save_dir = os.path.join(SAVE_DIR, f'consistencyReward-subclip', f'10s-log-2crm_ppo_10sde_train1_groupstd_train-micro')
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10 # 0 for no eval applied
+    config.train.reward_fn = {
+        "consistency_score": 0.2,
+        "subfig_clipT" : 1
+    }
+
+    def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
+        return np.log(1 + consistency_score) + subfig_clipT
+
+    config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
+    config.train.aggregate_fn = agg_fn
+
+    config.test.reward_fn = config.train.reward_fn
+    config.train.aggregate_fn_code = config.train.aggregate_fn_code
+    config.test.aggregate_fn = agg_fn
+
+    # Testing
+    config.test.save_eval_images = True
+    config.test.batch_size = 5
+    config.test.num_steps = 20
+    config.test.merge_step = 0
+
+    # Sampling
+    ## sliding window scheduler
+    config.sample.use_sliding_window = True
+    config.sample.window_size = 1
+    config.sample.left_boundary = 1
+    config.sample.global_std = False
+    config.sample.use_history = False
+    config.sample.same_latent = False
+    config.sample.guidance_scale = 3.5
+    config.sample.subfig_permutation = False
+
+    config.sample.cps = False
+    config.sample.num_steps = 10
+    config.sample.noise_steps = [1]
+    config.sample.noise_level = 0.7
+    config.sample.merge_step = 0
+
+    ## batches
+    config.enable_gradient_checkpointing = False
+    config.sample.batch_size = 3
+    config.sample.num_images_per_prompt = 16
+    config.sample.max_group_size = 16
+    config.sample.unique_sample_num_per_epoch = 42 # Number of unique prompts used in each epoch all gathered
+
+    config.sample.sample_num_per_epoch = math.lcm(
+        config.sample.max_group_size * config.sample.unique_sample_num_per_epoch,
+        gpu_number * config.sample.batch_size
+    ) # Total number of samples on all processes
+
+    # Update number of unique prompt per epoch and check balance
+    unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.max_group_size
+    assert unique_sample_num_per_epoch % gpu_number == 0, f"""Assure all samples of one prompt are on the same GPU."""
+    config.sample.unique_sample_num_per_epoch = unique_sample_num_per_epoch
+
+    # number of batches per epoch per GPU
+    config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
+
+    # Training
+    config.train.param_noise_std = 0
+    config.train.loss_type = 'ppo'
+    config.train.batch_size = config.sample.batch_size
+    config.train.learning_rate = 3e-4
+    config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
+    assert config.sample.num_batches_per_epoch % config.train.gradient_step_per_epoch == 0, f"""Make sure num_batches_per_epoch is divisible by gradient_step_per_epoch."""
+    config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
+    config.train.num_inner_epochs = 1
+    config.train.timestep_fraction = 1
+    config.train.guidance_scale = 3.5
+    config.train.timesteps = config.sample.noise_steps # Train on all noise steps
+    config.train.beta = 0
+    config.train.nft_beta = 1
+    config.train.decay_type = 1 if 'nft' in config.train.loss_type else 0
+    config.train.ema = True
+    config.per_prompt_stat_tracking = True
+
+    return config
 
 def get_config(name):
     return globals()[name]()

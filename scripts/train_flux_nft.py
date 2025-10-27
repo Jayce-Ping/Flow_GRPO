@@ -143,7 +143,7 @@ def reward_compute(
         # Log some images
         logging_platform.log(
             {
-                "train/images": [
+                "train_samples": [
                     logging_platform.Image(
                         image,
                         caption=", ".join(f"{k}: {v:.2f}" for k, v in reward.items()) + f" | {prompt}",
