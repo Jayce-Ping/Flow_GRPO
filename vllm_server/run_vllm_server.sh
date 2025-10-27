@@ -25,7 +25,7 @@ echo "Launching vLLM on GPU: $CUDA_VISIBLE_DEVICES (num=$NUM_GPUS)"
 
 vllm serve $MODEL_PATH \
     --served-model-name "$MODEL_NAME" \
-    --gpu-memory-utilization 0.15 \
+    --gpu-memory-utilization 0.8 \
     --max-model-len 4096  \
     --host 0.0.0.0 \
     --port $VLLM_PORT \

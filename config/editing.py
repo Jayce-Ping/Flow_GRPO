@@ -266,10 +266,11 @@ def consistencyreward_for_editing_qwenimage():
     gpu_number = 1
     config = compressibility()
 
-    config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split"
+    # config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split"
+    config.dataset = "/root/siton-tmp/GEdit-Bench/train_split"
     config.prompt_fn = 'arrow_editing'
     config.resolution = 512
-    config.pretrained.model = FLUX_MODEL_PATH
+    config.pretrained.model = QWEN_EDIT_MODEL_PATH
     config.enable_flexible_size = False
     config.enable_mem_log = False
     config.logging_platform = "swanlab"
@@ -277,7 +278,7 @@ def consistencyreward_for_editing_qwenimage():
     config.run_name = 'Qwen-Image-Edit, ConsistencyReward-7B-Mix-epoch1, new prompt'
     config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'Qwen-GEdit-Split-mix-new-prompt')
     config.save_freq = 10 # epoch
-    config.eval_freq = 10 # 0 for no eval applied
+    config.eval_freq = 0 # 0 for no eval applied
     config.train.reward_fn = {
         "consistencyreward_for_editing": 1.0,
     }
@@ -304,13 +305,13 @@ def consistencyreward_for_editing_qwenimage():
     config.sample.cps = False
     config.sample.num_steps = 10
     config.sample.noise_steps = [1,2,3,4]
-    config.sample.noise_level = 1.5
+    config.sample.noise_level = 0.9
 
     ## batches
     config.enable_gradient_checkpointing = True
     config.sample.batch_size = 1
-    config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch all gathered
+    config.sample.num_images_per_prompt = 4
+    config.sample.unique_sample_num_per_epoch = 1 # Number of unique prompts used in each epoch all gathered
 
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,

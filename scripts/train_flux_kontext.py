@@ -23,7 +23,7 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed, ProjectConfiguration
 from collections import defaultdict, Counter
 from concurrent import futures
-from diffusers import FluxKontextPipeline
+from diffusers import FluxKontextPipeline, FluxTransformer2DModel
 from diffusers.utils.torch_utils import is_compiled_module, randn_tensor
 from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import retrieve_timesteps
 from functools import partial
@@ -97,30 +97,7 @@ def reward_compute(
         heights = [sample.get('height', config.resolution) for sample in batch]
         widths = [sample.get('width', config.resolution) for sample in batch]
         ref_images = [sample['ref_image'] for sample in batch]
-        
-        if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
-            height = heights[0]
-            width = widths[0]
-            # Convert the cleaned latents to images
-            latents = torch.cat([sample['all_latents'][:, -1] for sample in batch], dim=0).to(accelerator.device)
-            latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
-            latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
-            latents = latents.to(dtype=pipeline.vae.dtype)
-            images = pipeline.vae.decode(latents, return_dict=False)[0]
-            images = pipeline.image_processor.postprocess(images, output_type='pil')
-        else:
-            images = []
-            for sample in batch:
-                height = sample.get('height', config.resolution)
-                width = sample.get('width', config.resolution)
-                latents = sample['all_latents'][:, -1].to(accelerator.device)
-                latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
-                latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
-                latents = latents.to(dtype=pipeline.vae.dtype)
-                image = pipeline.vae.decode(latents, return_dict=False)[0]
-                image = pipeline.image_processor.postprocess(image, output_type='pil')[0]
-                images.append(image)
-        
+        images = [sample['image'] for sample in batch]  
         # Compute reward
         prompts = [sample['prompt'] for sample in batch]
         prompt_metadatas = [sample.get('metadata', {}) for sample in batch]
@@ -171,7 +148,7 @@ def compute_ppo_loss(
     config : Namespace,
     accelerator : Accelerator,
     pipeline: FluxKontextPipeline,
-    transformer,
+    transformer: FluxTransformer2DModel,
     sample : dict,
     timestep_index : int,
     autocast,
@@ -189,7 +166,6 @@ def compute_ppo_loss(
         )
         with torch.no_grad():
             transformer.module.set_adapter("old")
-            old_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
             _, old_log_prob, old_prev_sample_mean, _ = compute_log_prob(
                 transformer=transformer,
                 pipeline=pipeline,
@@ -215,6 +191,7 @@ def compute_ppo_loss(
     )
 
     ratio = torch.exp(log_prob - old_log_prob)
+    # print("ratio", ratio)
     unclipped_loss = -advantages * ratio
     clipped_loss = -advantages * torch.clamp(
         ratio,
@@ -223,24 +200,39 @@ def compute_ppo_loss(
     )
     policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
 
-    # KL divergence loss
-    loss = policy_loss
-    if config.train.beta > 0:
-        kl_loss = ((prev_sample_mean - ref_prev_sample_mean) ** 2).mean(dim=(1, 2), keepdim=True) / (2 * std_dev_t ** 2)
-        kl_loss = torch.mean(kl_loss)
-        loss = policy_loss + config.train.beta * kl_loss
-        info["kl_loss"] = kl_loss.detach()
-        info["old_kl_loss"] = torch.mean(
-            ((old_prev_sample_mean - ref_prev_sample_mean) ** 2).mean(dim=(1, 2), keepdim=True) / (2 * std_dev_t ** 2)
-        ).detach()
-
-    info["approx_kl"] = 0.5 * torch.mean((log_prob - old_log_prob) ** 2).detach()
-    info["clipfrac"] = torch.mean((torch.abs(ratio - 1.0) > config.train.clip_range).float()).detach()
+    kl_loss = ((prev_sample_mean - ref_prev_sample_mean) ** 2).mean(dim=tuple(range(1, prev_sample_mean.ndim)), keepdim=True) / (2 * std_dev_t ** 2 + 1e-7)
+    kl_loss = torch.mean(kl_loss)
+    
+    loss = policy_loss + config.train.beta * kl_loss
     info["policy_loss"] = policy_loss.detach()
-    info["loss"] = loss.detach()
+    info["unclipped_loss"] = unclipped_loss.mean().detach()
+    info["clipped_loss"] = clipped_loss.mean().detach()
+    info["kl_loss"] = kl_loss.mean().detach()
+    info['loss'] = loss.detach()
+    info['ratio'] = ratio.abs().mean()
+    info["approx_kl"] = 0.5 * torch.mean((log_prob - old_log_prob) ** 2)
+    info["clipfrac"] = torch.mean(
+        (
+            torch.abs(ratio - 1.0) > config.train.clip_range
+        ).float()
+    )
+    info["clipfrac_gt_one"] = torch.mean(
+        (
+            ratio - 1.0 > config.train.clip_range
+        ).float()
+    )
+    info["clipfrac_lt_one"] = torch.mean(
+        (
+            1.0 - ratio > config.train.clip_range
+        ).float()
+    )
+    info["clipfrac_lt_one"] = torch.mean(
+        (
+            1.0 - ratio > config.train.clip_range
+        ).float()
+    )
 
     return loss, info
-
 
 @torch.no_grad()
 def eval(pipeline : FluxKontextPipeline,
@@ -934,14 +926,14 @@ def main(_):
                             prompt=prompts,
                             num_inference_steps=config.sample.num_steps,
                             guidance_scale=config.sample.guidance_scale,
-                            output_type="pt",
+                            output_type="pil",
                             height=heights[0],
                             width=widths[0],
                             max_area=config.resolution * config.resolution,
                             generator=generator,
                             cps=config.sample.cps
                         )
-                    images = list(images.unbind(0)) # List[Tensor(C, H, W)] with length batch_size
+                    images = list(images) # List[Tensor(C, H, W)] with length batch_size
                     all_latents = torch.stack(all_latents, dim=1) # (batch_size, num_steps + 1, seq_len, C)
                     all_latents = list(all_latents.unbind(0)) # List[Tensor(num_steps + 1, seq_len, C)] with length batch_size
                     all_prompt_embeds = list(all_prompt_embeds.unbind(0)) # List[Tensor(seq_len, dim)] with length batch_size
@@ -966,14 +958,14 @@ def main(_):
                                 prompt=[prompts[index]],
                                 num_inference_steps=config.sample.num_steps,
                                 guidance_scale=config.sample.guidance_scale,
-                                output_type="pt",
+                                output_type="pil",
                                 height=heights[index],
                                 width=widths[index],
                                 max_area=config.resolution * config.resolution,
                                 generator=generator[index] if generator is not None else None,
                                 cps=config.sample.cps
                             )
-                    images.append(this_image.squeeze(0))  # add (C, H, W)
+                    images.append(this_image[0])  # add (C, H, W)
                     all_latents.append(torch.stack(this_all_latents, dim=1).squeeze(0))  # add (num_steps + 1, seq_len, C)
                     all_prompt_embeds.append(this_prompt_embeds.squeeze(0)) # (1, seq_len, dim) -> (seq_len, dim)
                     all_pooled_prompt_embeds.append(this_pooled_prompt_embeds.squeeze(0)) # (1, dim) -> (dim,)
@@ -995,6 +987,7 @@ def main(_):
                         'pooled_prompt_embeds': all_pooled_prompt_embeds[index].unsqueeze(0).cpu(), # Keep batch dimension as 1
                         'all_latents': all_latents[index].unsqueeze(0), # Keep batch dimension as 1, shape (1, num_steps + 1, seq_len, C)
                         'image_latents': image_latents[index].unsqueeze(0), # Keep batch dimension as 1, shape (1, image_seq_len, C)
+                        'image': images[index],
                     }
                     for index in range(len(prompts))
                 ]

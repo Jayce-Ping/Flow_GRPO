@@ -5,6 +5,7 @@ import torch
 import numpy as np
 import math
 from typing import Optional, Union
+from PIL import Image
 
 from diffusers import QwenImageEditPipeline
 from diffusers.utils import logging
@@ -343,7 +344,7 @@ def compute_log_prob(
         noise_level=noise_level,
         prev_sample=next_latents.float(),
         sigma_max=timestep_max / 1000,
-        cps=config.cps,
+        cps=config.sample.cps,
         return_log_prob=True,
     )
 
@@ -378,7 +379,7 @@ def qwenimage_edit_pipeline(
     noise_level: Optional[float] = None,
     cps : bool = False,
 ) -> Tuple[
-        torch.FloatTensor,
+        Union[List[Image.Image], torch.FloatTensor],
         List[torch.FloatTensor],
         torch.FloatTensor,
         torch.FloatTensor,

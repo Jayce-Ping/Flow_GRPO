@@ -363,7 +363,6 @@ def compute_ppo_loss(
         )
         with torch.no_grad():
             transformer.module.set_adapter("old")
-            old_trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
             _, old_log_prob, old_prev_sample_mean, _ = compute_log_prob(
                 transformer=transformer,
                 pipeline=pipeline,
