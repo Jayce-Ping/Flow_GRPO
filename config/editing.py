@@ -56,6 +56,7 @@ def compressibility():
     config.train.guidance_scale = 2.5
 
     # Testing
+    config.test.save_eval_images = True
     config.test.batch_size = 4
     config.test.num_steps = 20
 
@@ -124,6 +125,7 @@ def editscore_flux():
     config.test.aggregate_fn = agg_fn
 
     # Testing
+    config.test.save_eval_images = True
     config.test.batch_size = 1
     config.test.num_steps = 20
 
@@ -207,6 +209,7 @@ def consistencyreward_for_editing_flux():
     config.test.aggregate_fn = agg_fn
 
     # Testing
+    config.test.save_eval_images = True
     config.test.batch_size = 4
     config.test.num_steps = 20
 
@@ -292,6 +295,7 @@ def consistencyreward_for_editing_qwenimage():
     config.test.aggregate_fn = agg_fn
 
     # Testing
+    config.test.save_eval_images = True
     config.test.batch_size = 4
     config.test.num_steps = 50
 

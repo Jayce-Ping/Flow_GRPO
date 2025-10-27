@@ -739,13 +739,6 @@ def eval(pipeline : FluxPipeline,
     if memory_profiler is not None:
         memory_profiler.snapshot("before_eval")
 
-    # 'Deterministically' sample 'random' `log_sample_num` data for logging
-    # Make `num_processes` divides `log_sample_num` to make sure each process has same amount of data to log
-    log_sample_num = int(math.ceil(log_sample_num / accelerator.num_processes) * accelerator.num_processes)
-    generator = torch.Generator().manual_seed(config.seed + accelerator.process_index)
-    total_sample_num = len(test_dataloader) * config.test.batch_size
-    sample_indices = torch.randperm(total_sample_num, generator=generator)[:log_sample_num].tolist()
-
     for batch_idx, test_batch in enumerate(tqdm(
             test_dataloader,
             desc="Eval: ",
@@ -816,15 +809,14 @@ def eval(pipeline : FluxPipeline,
 
         # ---------------------------------Collect log data--------------------------------
         for i, prompt in enumerate(prompts):
-            sample_index = batch_idx * config.test.batch_size + i
-            if sample_index in sample_indices:
-                log_data['images'].append(images[i].cpu())
-                log_data['prompts'].append(prompt)
-                for key, value in rewards.items():
-                    if key not in log_data['rewards']:
-                        log_data['rewards'][key] = []
-                    
-                    log_data['rewards'][key].append(value[i])
+            # Add all data
+            log_data['images'].append(images[i].cpu())
+            log_data['prompts'].append(prompt)
+            for key, value in rewards.items():
+                if key not in log_data['rewards']:
+                    log_data['rewards'][key] = []
+                
+                log_data['rewards'][key].append(value[i])
         
         # log memory after reward computation
         if memory_profiler is not None:
@@ -885,7 +877,7 @@ def eval(pipeline : FluxPipeline,
         # Approach : by saving them in a temp dir
         # This approach saves images as JPG files in a temporary directory
         # Since uploading images with jpg is faster, if we need to do it anyway.
-        temp_dir = os.path.join(config.save_dir, 'temp_eval_images')
+        temp_dir = os.path.join(config.save_dir, 'eval_images', str(global_step))
         os.makedirs(temp_dir, exist_ok=True)
         for idx, img in enumerate(log_data['images']):
             # Save image to temp dir
@@ -908,6 +900,14 @@ def eval(pipeline : FluxPipeline,
         memory_profiler.snapshot("after_gather_images")
 
     if accelerator.is_main_process:
+        # 'Deterministically' sample 'random' `log_sample_num` data for logging
+        # Make `num_processes` divides `log_sample_num` to make sure each process has same amount of data to log
+        log_sample_num = int(math.ceil(log_sample_num / accelerator.num_processes) * accelerator.num_processes)
+        generator = torch.Generator().manual_seed(config.seed + accelerator.process_index)
+        sample_indices = torch.randperm(len(gathered_images), generator=generator)[:log_sample_num].tolist()
+        gathered_images = [gathered_images[i] for i in sample_indices]
+        gathered_prompts = [gathered_prompts[i] for i in sample_indices]
+        gathered_rewards = [gathered_rewards[i] for i in sample_indices]
         logging_platform.log(
             {
                 "eval_images": [
@@ -921,7 +921,7 @@ def eval(pipeline : FluxPipeline,
             step=global_step,
         )
         # Clean up temp dir
-        if approach == 1:
+        if approach == 1 and not config.test.save_eval_images:
             shutil.rmtree(temp_dir)
 
     if config.train.ema:

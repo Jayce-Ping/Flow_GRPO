@@ -59,6 +59,7 @@ def compressibility():
     config.train.guidance_scale = 3.5
 
     # Testing
+    config.test.save_eval_images = True
     config.test.batch_size = 4
     config.test.num_steps = 20
     config.test.merge_step = 1
@@ -129,6 +130,7 @@ def consistencyReward_clip():
     config.test.aggregate_fn = agg_fn
 
     # Testing
+    config.test.save_eval_images = True
     config.test.batch_size = 5
     config.test.num_steps = 20
     config.test.merge_step = 0

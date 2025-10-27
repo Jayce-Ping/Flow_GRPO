@@ -47,6 +47,7 @@ def compressibility():
     config.enable_gradient_checkpointing = True
 
     # Testing
+    config.test.save_eval_images = True
     config.test.batch_size = 4
     config.test.num_steps = 20
     config.test.merge_step = 1
@@ -85,6 +86,7 @@ def subfig_clip_dreamsim_flux():
     config.resolution = 1024
     config.max_sequence_length = 512
 
+    config.test.save_eval_images = True
     config.test.batch_size = 6
     config.test.num_steps = 20
     config.test.merge_step = 0
@@ -163,6 +165,7 @@ def subfig_clip_flux():
     config.resolution = 1024
     config.max_sequence_length = 512
 
+    config.test.save_eval_images = True
     config.test.batch_size = 6
     config.test.num_steps = 20
     config.test.merge_step = 0
@@ -240,6 +243,7 @@ def editscore_subfig_clip_flux():
     config.resolution = 1024
     config.max_sequence_length = 512
 
+    config.test.save_eval_images = True
     config.test.batch_size = 5
     config.test.num_steps = 20
     config.test.merge_step = 0
@@ -317,6 +321,7 @@ def grid_consistency_clip_flux():
     config.max_sequence_length = 512
 
     # Testing
+    config.test.save_eval_images = True
     config.test.batch_size = 5
     config.test.num_steps = 20
     config.test.merge_step = 0
