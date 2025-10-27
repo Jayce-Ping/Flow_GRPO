@@ -210,7 +210,6 @@ def compute_ppo_loss(
     info["kl_loss"] = kl_loss.mean().detach()
     info['loss'] = loss.detach()
     info['ratio'] = ratio.abs().mean()
-    info["approx_kl"] = 0.5 * torch.mean((log_prob - old_log_prob) ** 2)
     info["clipfrac"] = torch.mean(
         (
             torch.abs(ratio - 1.0) > config.train.clip_range
