@@ -13,6 +13,7 @@ spec.loader.exec_module(base)
 
 
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-Kontext-dev"
+QWEN_EDIT_MODEL_PATH = "Qwen/Qwen-Image-Edit"
 # SAVE_DIR = 'logs'
 SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_Kontext/logs'
 # SAVE_DIR = '/root/siton-tmp/Flow_Kontext/logs'
@@ -92,7 +93,7 @@ def harmonic_mean(**kwargs):
 
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
-def editscore():
+def editscore_flux():
     gpu_number = 2
     config = compressibility()
 
@@ -167,7 +168,7 @@ def editscore():
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 1
-    config.train.guidance_scale = 2.5
+    config.train.guidance_scale = config.sample.guidance_scale
     config.train.timesteps = config.sample.noise_steps # Train on all noise steps
     config.train.beta = 0
     config.train.nft_beta = 1
@@ -177,20 +178,20 @@ def editscore():
 
     return config
 
-def consistencyreward_for_editing():
-    gpu_number = 4
+def consistencyreward_for_editing_flux():
+    gpu_number = 2
     config = compressibility()
 
-    config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split_en"
+    config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split"
     config.prompt_fn = 'arrow_editing'
     config.resolution = 512
-    config.enable_flexible_size = False
     config.pretrained.model = FLUX_MODEL_PATH
+    config.enable_flexible_size = False
     config.enable_mem_log = False
-    # config.logging_platform = "swanlab"
+    config.logging_platform = "swanlab"
 
     config.run_name = 'Flux-Kontext, ConsistencyReward-7B-Mix-epoch1, new prompt'
-    config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'GEdit-Split-EN-mix-new-prompt')
+    config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'Flux-GEdit-Split-mix-new-prompt')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
     config.train.reward_fn = {
@@ -250,7 +251,7 @@ def consistencyreward_for_editing():
     config.train.gradient_accumulation_steps = config.sample.num_batches_per_epoch // config.train.gradient_step_per_epoch
     config.train.num_inner_epochs = 1
     config.train.timestep_fraction = 1
-    config.train.guidance_scale = 2.5
+    config.train.guidance_scale = config.sample.guidance_scale
     config.train.timesteps = config.sample.noise_steps # Train on all noise steps
     config.train.beta = 0
     config.train.nft_beta = 1

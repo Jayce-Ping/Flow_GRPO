@@ -264,7 +264,6 @@ def compute_log_prob(
     
     # 7. Compute log prob
     # Compute the log prob of next_latents given latents under the current model
-    # Here, use determistic denoising for normal diffusion process.
     prev_sample, log_prob, prev_sample_mean, std_dev_t = denoising_sde_step_with_logprob(
         scheduler=scheduler,
         model_output=model_pred.float(),

@@ -16,5 +16,5 @@ accelerate launch \
     --config_file scripts/accelerate_configs/deepspeed_zero2.yaml \
     --num_processes=$NUM_GPUS \
     --main_process_port $MAIN_PROCESS_PORT \
-    scripts/train_flux_kontext.py \
+    scripts/train_qwenimage_edit.py \
     --config config/editing.py:$CONFIG
