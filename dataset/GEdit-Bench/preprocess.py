@@ -1,52 +1,68 @@
-import argparse
-import os
+from datasets import Dataset, load_dataset
+import pyarrow.parquet as pq
 import random
-import json
-# Get absolute path of the current script
-current_dir = os.path.dirname(os.path.abspath(__file__))
+import os
 
-random.seed(42)
+def split_dataset(dataset, test_num=128, seed=42, language=None):
+    if language is None:
+        language = ['en', 'cn']
+    elif isinstance(language, str):
+        language = [language]
 
-def preprocess_data(dataset_dir, output_dir):
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    dataset = [
+        {'prompt': item['instruction'], 'image': item['input_image'], 'instruction_language': item['instruction_language']}
+        for item in dataset if item['instruction_language'] in language
+    ]
+    dataset = Dataset.from_list(dataset)
 
-    datafile_path = os.path.join(dataset_dir, 'text_and_image_to_image.json')
-    with open(datafile_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    random.seed(seed)
+    test_indices = random.sample(range(len(dataset)), test_num)
+    train_indices = [i for i in range(len(dataset)) if i not in test_indices]
+    test_dataset = [dataset[i] for i in test_indices]
+    train_dataset = [dataset[i] for i in train_indices]
+    test_dataset = Dataset.from_list(test_dataset)
+    train_dataset = Dataset.from_list(train_dataset)
+    return train_dataset, test_dataset
 
+def save_train_all(dataset, output_dir='train_all'):
+    os.makedirs(output_dir, exist_ok=True)
+    print("Full dataset size:", len(dataset))
+    table = dataset.data.table
+    pq.write_table(table, os.path.join(output_dir, 'train.parquet'))
+    pq.write_table(table, os.path.join(output_dir, 'test.parquet'))
 
-    new_data = []
-    for item in data:
-        for input_image in item['input_image']:
-            new_item = {
-                'ref_image': input_image,
-                'prompt': item['input_prompt'],
-                'metadata': item
-            }
-            new_data.append(new_item)
+def save_train_split(dataset, output_dir='train_split'):
+    train_dataset, test_dataset = split_dataset(dataset, test_num=128, seed=42)
+    os.makedirs(output_dir, exist_ok=True)
+    print("Train dataset size:", len(train_dataset))
+    print("Test dataset size:", len(test_dataset))
+    pq.write_table(train_dataset.data.table, os.path.join(output_dir, 'train.parquet'))
+    pq.write_table(test_dataset.data.table, os.path.join(output_dir, 'test.parquet'))
 
-    test_num = 128
-    random.shuffle(new_data)
-    test_data = new_data[:test_num]
-    train_data = new_data[test_num:]
-    print("Total number of data:", len(new_data))
-    print("Total number of train data:", len(train_data), " ({:.2f}%)".format(len(train_data)/len(new_data)*100))
-    print("Total number of test data:", len(test_data), " ({:.2f}%)".format(len(test_data)/len(new_data)*100))
-    with open(os.path.join(output_dir, 'train_metadata.jsonl'), 'w', encoding='utf-8') as f:
-        for item in train_data:
-            f.write(json.dumps(item) + '\n')
+def save_train_split_cn(dataset, output_dir='train_split_cn'):
+    train_dataset, test_dataset = split_dataset(dataset, test_num=128, seed=42, language='cn')
+    os.makedirs(output_dir, exist_ok=True)
+    print("Train dataset size (CN):", len(train_dataset))
+    print("Test dataset size (CN):", len(test_dataset))
+    pq.write_table(train_dataset.data.table, os.path.join(output_dir, 'train.parquet'))
+    pq.write_table(test_dataset.data.table, os.path.join(output_dir, 'test.parquet'))
 
-    with open(os.path.join(output_dir, 'test_metadata.jsonl'), 'w', encoding='utf-8') as f:
-        for item in test_data:
-            f.write(json.dumps(item) + '\n')
+def save_train_split_en(dataset, output_dir='train_split_en'):
+    train_dataset, test_dataset = split_dataset(dataset, test_num=128, seed=42, language='en')
+    os.makedirs(output_dir, exist_ok=True)
+    print("Train dataset size (EN):", len(train_dataset))
+    print("Test dataset size (EN):", len(test_dataset))
+    pq.write_table(train_dataset.data.table, os.path.join(output_dir, 'train.parquet'))
+    pq.write_table(test_dataset.data.table, os.path.join(output_dir, 'test.parquet'))
 
+def main():
+    dataset = load_dataset('stepfun-ai/GEdit-Bench', split='train')
+    output_root = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench"
+    # save_train_all(dataset, output_dir='train_all')
+    # save_train_split(dataset, output_dir='train_split')
+    # save_train_split_cn(dataset, output_dir='train_split_cn')
+    save_train_split_en(dataset, output_dir=os.path.join(output_root, 'train_split_en'))
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Preprocess ShareGPT-4o-Image Dataset")
-    parser.add_argument('--dataset_dir', type=str, required=True, help='Path to the raw dataset directory')
-    return parser.parse_args()
 
 if __name__ == "__main__":
-    args = parse_args()
-    preprocess_data(args.dataset_dir, args.dataset_dir)
+    main()
