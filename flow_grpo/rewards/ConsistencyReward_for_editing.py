@@ -66,7 +66,8 @@ class ConsistencyScorerForEditing:
             consistency_text_prompt = (
                 f"Compare the edited image (second) with the original image (first). "
                 f"Instruction: '{prompt}'. "
-                f"Does the edited image remain consistent with the original in terms of style, logic, and identity? "
+                f"Except for the parts that are intentionally changed according to the instruction, "
+                f"does the edited image remain consistent with the original in style, logic, and identity? "
                 f"Answer only 'Yes' or 'No'."
             )
             prompt_following_text_prompt = (
@@ -77,14 +78,14 @@ class ConsistencyScorerForEditing:
             )
             consistency_score = await self._async_compute_image_consistency(
                 criteria_text=consistency_text_prompt,
-                image=image,
                 ref_image=ref_image,
+                image=image,
                 canonicalize=canonicalize
             )
             prompt_following_score = await self._async_compute_image_consistency(
                 criteria_text=prompt_following_text_prompt,
-                image=image,
                 ref_image=ref_image,
+                image=image,
                 canonicalize=canonicalize
             )
             # Combine the two scores (e.g., geometric mean following EditScore)
@@ -101,8 +102,8 @@ class ConsistencyScorerForEditing:
     async def _async_compute_image_consistency(
             self,
             criteria_text: str,
-            image: Image.Image,
             ref_image: Image.Image,
+            image: Image.Image,
             top_logprobs: int = 20,
             canonicalize: bool = False
         ) -> float:
@@ -117,8 +118,8 @@ class ConsistencyScorerForEditing:
                 "role": "user",
                 "content":
                 [
-                    {"type": "image_url", "image_url": {"url": pil_image_to_base64(image)}},
                     {"type": "image_url", "image_url": {"url": pil_image_to_base64(ref_image)}},
+                    {"type": "image_url", "image_url": {"url": pil_image_to_base64(image)}},
                     {"type": "text", "text": criteria_text},
                 ]
             }
