@@ -61,8 +61,20 @@ class ConsistencyScorerForEditing:
         
         async def process_single_image(prompt, image, metadata):
             ref_image = metadata['ref_image']
-            consistency_text_prompt = f"Given two images after an edit with instruction '{prompt}', do they maintain consistency in terms of style, logic and identity? Answer 'Yes' or 'No' only."
-            prompt_following_text_prompt = f"Given two images after an edit with instruction '{prompt}', is the edit following the instruction well? Answer 'Yes' or 'No' only."
+            # consistency_text_prompt = f"Given two images after an edit with instruction '{prompt}', do they maintain consistency in terms of style, logic and identity? Answer 'Yes' or 'No' only."
+            # prompt_following_text_prompt = f"Given two images after an edit with instruction '{prompt}', is the edit following the instruction well? Answer 'Yes' or 'No' only."
+            consistency_text_prompt = (
+                f"Compare the edited image (second) with the original image (first). "
+                f"Instruction: '{prompt}'. "
+                f"Does the edited image remain consistent with the original in terms of style, logic, and identity? "
+                f"Answer only 'Yes' or 'No'."
+            )
+            prompt_following_text_prompt = (
+                f"Compare the edited image (second) with the original image (first). "
+                f"Instruction: '{prompt}'. "
+                f"Does the edited image accurately follow this instruction? "
+                f"Answer only 'Yes' or 'No'."
+            )
             consistency_score = await self._async_compute_image_consistency(
                 criteria_text=consistency_text_prompt,
                 image=image,
