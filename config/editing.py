@@ -15,7 +15,8 @@ spec.loader.exec_module(base)
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-Kontext-dev"
 QWEN_EDIT_MODEL_PATH = "Qwen/Qwen-Image-Edit"
 # SAVE_DIR = 'logs'
-SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_Kontext/logs'
+# SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_Kontext/logs'
+SAVE_DIR = '/home/users/astar/cfar/qianh/scratch/Flow_Kontext/logs'
 # SAVE_DIR = '/root/siton-tmp/Flow_Kontext/logs'
 # SAVE_DIR = '/home/hangwei/storage/jcy/Flow_Kontext/logs'
 
@@ -266,17 +267,18 @@ def consistencyreward_for_editing_flux():
 
 
 def consistencyreward_for_editing_qwenimage():
-    gpu_number = 1
+    gpu_number = 4
     config = compressibility()
 
     # config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split"
-    config.dataset = "/root/siton-tmp/GEdit-Bench/train_split"
+    config.dataset = "/home/users/astar/cfar/qianh/scratch/datasets/GEdit-Bench/train_split"
+    # config.dataset = "/root/siton-tmp/GEdit-Bench/train_split"
     config.prompt_fn = 'arrow_editing'
     config.resolution = 512
     config.pretrained.model = QWEN_EDIT_MODEL_PATH
     config.enable_flexible_size = False
     config.enable_mem_log = False
-    config.logging_platform = "swanlab"
+    # config.logging_platform = "swanlab"
 
     config.run_name = 'Qwen-Image-Edit, ConsistencyReward-7B-Mix-epoch1, new prompt'
     config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'Qwen-GEdit-Split-mix-new-prompt')
@@ -312,7 +314,7 @@ def consistencyreward_for_editing_qwenimage():
     config.sample.noise_level = 1.0
 
     ## batches
-    config.enable_gradient_checkpointing = True
+    config.enable_gradient_checkpointing = False
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
     config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch all gathered
