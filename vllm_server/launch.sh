@@ -9,11 +9,11 @@ set -e
 #=============================================================================
 
 # Models (comma-separated)
-VLLM_MODEL_PATHS=${VLLM_MODEL_PATHS:-"Qwen/Qwen2.5-VL-7B-Instruct,meta-llama/Llama-2-7b-chat-hf"}
-VLLM_MODEL_NAMES=${VLLM_MODEL_NAMES:-"Qwen2.5-VL-7B-Instruct,Meta-Llama-2-7b-Chat-HF"}
+VLLM_MODEL_PATHS=${VLLM_MODEL_PATHS:-"Qwen/Qwen2.5-VL-7B-Instruct,OpenGVLab/InternVL3_5-8B"}
+VLLM_MODEL_NAMES=${VLLM_MODEL_NAMES:-"Qwen2.5-VL-7B-Instruct,InternVL3_5-8B"}
 
 # Server settings
-GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.45}
+GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.48} # 0.45 will cause OOM issue to load 2 models at once on 80GB GPU
 VLLM_PORT=${VLLM_PORT:-8000}  # Gateway port (public-facing)
 VLLM_LABEL=${VLLM_LABEL:-"vllm"}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-4096}
@@ -52,6 +52,22 @@ fi
 echo "📦 Models: $NUM_MODELS"
 
 #=============================================================================
+# Calculate GPU allocation
+#=============================================================================
+
+# Calculate how many models can fit per GPU
+MODELS_PER_GPU=$(awk "BEGIN {print int(1.0 / $GPU_MEMORY_UTILIZATION)}")
+echo "💡 Models per GPU: $MODELS_PER_GPU (based on ${GPU_MEMORY_UTILIZATION} utilization)"
+
+# Build GPU assignment array
+GPU_ASSIGNMENT=()
+for i in "${!MODEL_PATHS[@]}"; do
+    GPU_INDEX=$((i / MODELS_PER_GPU % NUM_GPUS))
+    GPU_ID="${AVAILABLE_GPUS[$GPU_INDEX]}"
+    GPU_ASSIGNMENT+=($GPU_ID)
+done
+
+#=============================================================================
 # Cleanup
 #=============================================================================
 
@@ -83,7 +99,7 @@ PORTS=()
 for i in "${!MODEL_PATHS[@]}"; do
     MODEL_PATH="${MODEL_PATHS[$i]}"
     MODEL_NAME="${MODEL_NAMES[$i]}"
-    GPU_ID="${AVAILABLE_GPUS[$((i % NUM_GPUS))]}"
+    GPU_ID="${GPU_ASSIGNMENT[$i]}"
     PORT=$((BACKEND_BASE_PORT + i))
     LOG_FILE="${VLLM_LABEL}_${MODEL_NAME}.log"
     PID_FILE="${VLLM_LABEL}_${MODEL_NAME}.pid"
@@ -97,6 +113,7 @@ for i in "${!MODEL_PATHS[@]}"; do
         --host 127.0.0.1 \
         --port $PORT \
         --tensor-parallel-size 1 \
+        --trust-remote-code \
         > "$LOG_FILE" 2>&1 &
     
     PID=$!
@@ -156,7 +173,7 @@ for i in "${!MODEL_NAMES[@]}"; do
   {
     "model_name": "${MODEL_NAMES[$i]}",
     "model_path": "${MODEL_PATHS[$i]}",
-    "gpu_id": ${AVAILABLE_GPUS[$((i % NUM_GPUS))]},
+    "gpu_id": ${GPU_ASSIGNMENT[$i]},
     "port": $((BACKEND_BASE_PORT + i)),
     "pid": ${PIDS[$i]}
   }
