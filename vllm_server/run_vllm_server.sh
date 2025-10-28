@@ -1,19 +1,18 @@
 #!/bin/bash
 # filepath: vllm/run_vllm_server.sh
 
-export CUDA_VISIBLE_DEVICES=1
+# export CUDA_VISIBLE_DEVICES=1
 
-# MODEL_PATH="Qwen/Qwen2.5-VL-7B-Instruct"
-# MODEL_NAME="Qwen2.5-VL-7B-Instruct"
-MODEL_PATH="/root/siton-tmp/models/ConsistencyReward-7B-Mix-epoch1"
-MODEL_NAME="ConsistencyReward-7B"
-# MODEL_PATH="/root/siton-tmp/models/EditScore-7B"
-# MODEL_NAME="EditScore-7B"
-# MODEL_PATH="/root/siton-tmp/models/ConsistencyReward-7B"
-# MODEL_NAME="ConsistencyReward-7B"
-# MODEL_PATH="zai-org/GLM-4.1V-9B-Thinking"
-# MODEL_NAME="GLM-4.1V-9B-Thinking"
-LOG_FILE="vllm.log"
+# VLLM_MODEL_PATH="Qwen/Qwen2.5-VL-7B-Instruct"
+# VLLM_MODEL_NAME="Qwen2.5-VL-7B-Instruct"
+Default_model_path="Qwen/Qwen2.5-VL-7B-Instruct"
+Default_model_name="ConsistencyReward-7B"
+Default_log_file="vllm.log"
+
+VLLM_MODEL_PATH=${VLLM_MODEL_PATH:-$Default_model_path}
+VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-$Default_model_name}
+LOG_FILE=${LOG_FILE:-$Default_log_file}
+GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.2}
 VLLM_PORT=${VLLM_PORT:-8000}
 
 if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
@@ -23,9 +22,9 @@ fi
 NUM_GPUS=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
 echo "Launching vLLM on GPU: $CUDA_VISIBLE_DEVICES (num=$NUM_GPUS)"
 
-vllm serve $MODEL_PATH \
-    --served-model-name "$MODEL_NAME" \
-    --gpu-memory-utilization 0.8 \
+vllm serve $VLLM_MODEL_PATH \
+    --served-model-name "$VLLM_MODEL_NAME" \
+    --gpu-memory-utilization $GPU_MEMORY_UTILIZATION \
     --max-model-len 4096  \
     --host 0.0.0.0 \
     --port $VLLM_PORT \
@@ -36,7 +35,7 @@ echo $! > vllm.pid
 echo "vLLM server launched (PID=$(cat vllm.pid))"
 
 READY=0
-TIMEOUT=3000
+TIMEOUT=600
 START=$(date +%s)
 while [ $(( $(date +%s) - START )) -lt $TIMEOUT ]; do
     if curl -s -f http://127.0.0.1:$VLLM_PORT/v1/models > /dev/null 2>&1; then
