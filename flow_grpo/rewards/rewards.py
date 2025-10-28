@@ -157,7 +157,7 @@ def grid_layout_score():
 
     return _fn
 
-def consistency_score():
+def consistency_score(model='Qwen2.5-VL-7B-Instruct'):
     import asyncio
     from flow_grpo.rewards.consistency_scorer import ConsistencyScorer
 
@@ -170,7 +170,7 @@ def consistency_score():
         # Create the ConsistencyScorer instance inside the function, to create its own semaphore for this call
         scorer = ConsistencyScorer(
             client=client,
-            model='Qwen2.5-VL-7B-Instruct',
+            model=model,
             max_concurrent=100, # Adjust based on the system's capabilities (especially when using vllm as local model server)
         )
         scores = scorer(images, prompts, metadatas)
@@ -242,9 +242,9 @@ def subfig_edit_score(device):
     return _fn
 
 def multi_score(
-    device: str,
     score_dict: Dict[str, float],
     aggregate_fn: Optional[Callable[[Dict[str, np.ndarray]], np.ndarray]] = None,
+    **reward_fn_kwargs,
 ) -> Callable[[List[Image.Image], List[str], List[dict]], Tuple[dict[str, np.ndarray], dict]]:
     """
     Constructs a multi-score reward function that computes multiple reward metrics for a batch of images and prompts.
@@ -314,10 +314,9 @@ def multi_score(
         if factory is None:
             raise ValueError(f"Unknown score: {score_name}")
         params = inspect.signature(factory).parameters
-        if "device" in params:
-            score_fns[score_name] = factory(device)
-        else:
-            score_fns[score_name] = factory()
+        # Filter reward_fn_kwargs to only include those accepted by the factory
+        filtered_kwargs = {k: v for k, v in reward_fn_kwargs.items() if k in params}
+        score_fns[score_name] = factory(**filtered_kwargs)
 
     def _fn(
         images : Union[List[Image.Image], torch.Tensor, np.ndarray, List[torch.Tensor], List[np.ndarray]],
