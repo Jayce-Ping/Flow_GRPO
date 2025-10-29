@@ -6,10 +6,28 @@ import inspect
 
 import numpy as np
 from scipy.stats import gmean, hmean
+import torch
 
 spec = spec_from_file_location('base', os.path.join(os.path.dirname(__file__), "base.py"))
 base = module_from_spec(spec)
 spec.loader.exec_module(base)
+
+def get_gpu_count():
+    """
+        Get gpu number
+    """
+    # 1. Get CUDA_VISIBLE_DEVICES first
+    if 'CUDA_VISIBLE_DEVICES' in os.environ:
+        cuda_visible = os.environ['CUDA_VISIBLE_DEVICES']
+        if cuda_visible:
+            return len(cuda_visible.split(','))
+    
+    # 2. Use torch
+    if torch.cuda.is_available():
+        return torch.cuda.device_count()
+    
+    return 1
+
 
 
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-Kontext-dev"
