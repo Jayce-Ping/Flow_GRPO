@@ -287,11 +287,17 @@ def consistencyreward_for_editing_qwenimage():
     config.train.reward_fn = {
         "consistencyreward_for_editing": 1.0,
     }
+    config.train.reward_fn_kwargs = {
+        'model': 'ConsistencyReward-7B-Mix',
+    }
     agg_fn = None
     config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
     config.train.aggregate_fn = agg_fn
     config.test.reward_fn = {
         "consistencyreward_for_editing": 1.0,
+    }
+    config.test.reward_fn_kwargs = {
+        'model': 'ConsistencyReward-7B-Mix',
     }
     config.test.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
     config.test.aggregate_fn = agg_fn

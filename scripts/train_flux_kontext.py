@@ -809,8 +809,16 @@ def main(_):
     if accelerator.is_main_process:
         print(f"Train Reward dict: {config.train.reward_fn}")
         print(f"Test Reward dict: {config.test.reward_fn}")
-    train_reward_fn = multi_score(accelerator.device, config.train.reward_fn, config.train.aggregate_fn)
-    test_reward_fn = multi_score(accelerator.device, config.test.reward_fn, config.test.aggregate_fn)
+    train_reward_fn_kwargs = {
+        "device": accelerator.device,
+        **config.train.reward_fn_kwargs
+    }
+    test_reward_fn_kwargs = {
+        "device": accelerator.device,
+        **config.test.reward_fn_kwargs
+    }
+    train_reward_fn = multi_score(config.train.reward_fn, config.train.aggregate_fn, **train_reward_fn_kwargs)
+    test_reward_fn = multi_score(config.test.reward_fn, config.test.aggregate_fn, **test_reward_fn_kwargs)
 
     if memory_profiler is not None:
         memory_profiler.snapshot("after_loading_reward_fn")

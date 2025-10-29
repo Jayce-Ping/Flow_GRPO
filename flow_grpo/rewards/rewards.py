@@ -94,7 +94,7 @@ def edit_score():
     
     return _fn
 
-def consistencyreward_for_editing():
+def consistencyreward_for_editing(model='ConsistencyReward-7B'):
     from flow_grpo.rewards.ConsistencyReward_for_editing import ConsistencyScorerForEditing
 
     client = AsyncOpenAI(
@@ -105,7 +105,7 @@ def consistencyreward_for_editing():
     def _fn(images: List[Image.Image], prompts: List[str], metadatas: List[dict]) -> Tuple[np.ndarray, dict]:
         scorer = ConsistencyScorerForEditing(
             client=client,
-            model='ConsistencyReward-7B',
+            model=model,
         )
         scores = scorer(images, prompts, metadatas)
         return scores, {}
