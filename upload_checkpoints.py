@@ -41,11 +41,11 @@ def delete_checkpoint_dir(path_in_repo, repo_id, commit_message="Delete folder",
     print(f"Folder '{path_in_repo}' successfully deleted from '{repo_id}'.")
 
 if __name__ == "__main__":
-    label = "Flux Kontext GRPO"
+    label = "Flux Kontext GRPO - new prompt"
     # SAVE_DIR = '/home/users/astar/ares/cp3jia/scratch/Flow_NFT/logs'
     SAVE_DIR = '/home/users/astar/ares/cp3jia/scratch/Flow_Kontext/logs'
     # folder_name = 'consistencyReward-subclip/8s-log-2cr_ppo_10sde_train1_groupstd_train-mini'
-    folder_name = "consistency_for_editing"
+    folder_name = "consistency_for_editing/Flux-GEdit-Split-mix/checkpoints"
     folder_path = os.path.join(SAVE_DIR, folder_name)
     path_in_repo = folder_name
     repo_id = "Jayce-Ping/Flux-NFT"
