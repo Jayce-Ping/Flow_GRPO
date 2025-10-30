@@ -115,6 +115,27 @@ def harmonic_mean(**kwargs):
     hm = hmean(values)
     return hm
 
+def get_log_tamed_aggregate_fn(delta: float = 0.2, epsilon: float = 1e-4):
+    def agg_fn(**kwargs):
+        # Filter out None values
+        values = np.stack(
+            [v for v in kwargs.values() if v is not None],
+            axis=0
+        ) # (num_rewards, group_size) or (num_rewards, batch_size, group_size)
+        # Compute mean and std for each group
+        means = np.mean(values, axis=-1, keepdims=True)
+        stds = np.std(values, axis=-1, keepdims=True)
+        # h = std / (means + epsilon)
+        h = stds / (means + epsilon)
+        # Apply log transformation to values where h > delta
+        values[h > delta] = np.log(1 + values[h > delta])
+        # Aggregate by summation
+        aggregated = np.sum(values, axis=0)
+        return aggregated
+
+    return agg_fn
+
+
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
 def generate_ConsistencyReward_clip_config_for_resolution_exp(
@@ -151,8 +172,9 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     config.train.reward_fn_kwargs = {
         'model': 'ConsistencyReward-7B-Mix',
     }
-    def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
-        return np.log(1 + consistency_score) + subfig_clipT
+    # def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
+    #     return np.log(1 + consistency_score) + subfig_clipT
+    agg_fn = get_log_tamed_aggregate_fn(delta=0.2, epsilon=1e-4)
 
     config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
     config.train.aggregate_fn = agg_fn

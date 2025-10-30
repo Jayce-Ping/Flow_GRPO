@@ -1,6 +1,10 @@
-from typing import List
+from typing import List, Optional, Union, Callable, Dict
 import numpy as np
 import torch
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class PerPromptStatTracker:
     def __init__(self, global_std=True, use_history=False):
@@ -8,6 +12,50 @@ class PerPromptStatTracker:
         self.use_history = use_history
         self.stats = {}
         self.history_prompts = set()
+
+    def multi_reward_update(
+            self,
+            prompts : List[str],
+            rewards : dict[str, np.ndarray | torch.Tensor],
+            reward_weights : Optional[dict[str, float]] = {},
+            type : str = 'grpo',
+            aggregate_fn: Optional[Callable[[Dict[str, np.ndarray]], np.ndarray]] = None,
+        ) -> dict[str, np.ndarray]:
+        """
+            Add `prompts` and corresponding multi-dimensional `rewards` to the tracker and return advantages.
+
+            rewards is a dictionary of reward_name to reward_array, where reward_array can be a tensor with extract timestep dimension for each prompt, of shape (prompt_num, timestep_num). Or just a one-dimensional array
+            The return `advantage` keeps the same dimension as `rewards`.
+        """
+        if aggregate_fn is None:
+            # If not given, use np.sum directly
+            aggregate_fn = lambda **kwargs: np.sum(list(kwargs.values()), axis=0)
+
+        assert aggregate_fn is not None, "aggregate_fn must be provided for multi_reward_update."
+
+        if reward_weights is None:
+            reward_weights = {k: 1.0 for k in rewards.keys()}
+
+        if 'avg' in rewards:
+            # Drop 'avg' key if exists to avoid confusion and log a warning
+            logger.warning("'avg' key found in rewards dictionary. It will be ignored in multi_reward_update.")
+            rewards = {k: v for k, v in rewards.items() if k != 'avg'}
+        
+        # Aggregate rewards within each prompt (group)
+        prompts = np.array(prompts)
+        unique = np.unique(prompts)
+        aggregated_rewards = np.zeros_like(next(iter(rewards.values())), dtype=np.float64)
+        for prompt in unique:
+            prompt_rewards = {k: np.array(v[prompts == prompt], dtype=np.float64) for k, v in rewards.items()}
+            # Apply weights
+            for k in prompt_rewards.keys():
+                prompt_rewards[k] = prompt_rewards[k] * reward_weights.get(k, 1.0)
+            # Aggregate
+            aggregated = aggregate_fn(**prompt_rewards)
+            aggregated_rewards[prompts == prompt] = aggregated
+
+        # Now use the aggregated rewards to update stats and compute advantages
+        return self.update(prompts, aggregated_rewards, type=type)
 
     def update(self, prompts : List[str], rewards : np.ndarray | torch.Tensor, type : str = 'grpo') -> np.ndarray:
         """

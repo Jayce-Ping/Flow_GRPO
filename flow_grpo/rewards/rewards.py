@@ -324,7 +324,7 @@ def multi_score(
         metadata: List[dict],
         ref_images: Optional[Union[List[Image.Image], torch.Tensor, np.ndarray]] = None
     ) -> Tuple[dict[str, np.ndarray], dict]:
-        aggregated_scores = {}
+        # aggregated_scores = {}
         score_details = {}
 
         # Convert images to PIL format if they are tensors or numpy arrays
@@ -368,12 +368,12 @@ def multi_score(
 
             score_details[score_name] = scores
             # Scale each reward by corresponding weight
-            aggregated_scores[score_name] = weight * scores
+            # aggregated_scores[score_name] = weight * scores
 
-        # Aggregate scores from different reward models
-        aggregated_scores = aggregate_fn(**aggregated_scores)
+        # Aggregate scores from different reward models - do it in stat_tracker instead
+        # aggregated_scores = aggregate_fn(**aggregated_scores)
 
-        score_details['avg'] = aggregated_scores
+        # score_details['avg'] = aggregated_scores
         return score_details, {}
 
     return _fn
