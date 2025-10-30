@@ -142,8 +142,8 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
 
     config.run_name = run_name
     config.save_dir = os.path.join(SAVE_DIR, f'consistencyReward-subclip', save_dir_suffix)
-    config.save_freq = 0 # epoch
-    config.eval_freq = 0 # 0 for no eval applied
+    config.save_freq = 10 # epoch
+    config.eval_freq = 10 # 0 for no eval applied
     config.train.reward_fn = {
         "consistency_score": 0.1,
         "subfig_clipT" : 1
