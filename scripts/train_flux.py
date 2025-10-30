@@ -1523,20 +1523,6 @@ def main(_):
             for key, value in gathered_rewards.items()
         }
 
-        # log rewards and images
-        if accelerator.is_main_process:
-            print(f"Epoch {epoch} rewards: ")
-            for key, value in gathered_rewards.items():
-                print(f"  {key}: {value.mean():.4f} ± {value.std():.4f}")
-            logging_platform.log(
-                {
-                    "epoch": epoch,
-                    **{f"reward_{key}": value.mean() for key, value in gathered_rewards.items()},
-                    **{f"reward_{key}_std": value.std() for key, value in gathered_rewards.items()},
-                },
-                step=global_step,
-            )
-
         # per-prompt mean/std tracking
         if config.per_prompt_stat_tracking:
             # gather the prompts across processes
@@ -1580,6 +1566,20 @@ def main(_):
             stat_tracker.clear()
         else:
             advantages = (gathered_rewards['avg'] - gathered_rewards['avg'].mean()) / (gathered_rewards['avg'].std() + 1e-4)
+
+        # log rewards and images
+        if accelerator.is_main_process:
+            print(f"Epoch {epoch} rewards: ")
+            for key, value in gathered_rewards.items():
+                print(f"  {key}: {value.mean():.4f} ± {value.std():.4f}")
+            logging_platform.log(
+                {
+                    "epoch": epoch,
+                    **{f"reward_{key}": value.mean() for key, value in gathered_rewards.items()},
+                    **{f"reward_{key}_std": value.std() for key, value in gathered_rewards.items()},
+                },
+                step=global_step,
+            )
 
         # ungather advantages; we only need to keep the entries corresponding to the samples on this process
         advantages = torch.as_tensor(advantages)

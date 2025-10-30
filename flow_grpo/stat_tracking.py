@@ -53,6 +53,9 @@ class PerPromptStatTracker:
             # Aggregate
             aggregated = aggregate_fn(**prompt_rewards)
             aggregated_rewards[prompts == prompt] = aggregated
+        
+        # Store the aggregated rewards under 'avg' key
+        rewards['avg'] = aggregated_rewards
 
         # Now use the aggregated rewards to update stats and compute advantages
         return self.update(prompts, aggregated_rewards, type=type)
