@@ -1566,6 +1566,7 @@ def main(_):
                 if accelerator.is_main_process:
                     logging_platform.log(
                         {
+                            "adv_abs_mean": np.abs(advantages).mean(),
                             "avg_group_size": avg_group_size,
                             "trained_prompt_num": trained_prompt_num,
                             "avg_group_std": avg_group_std,
@@ -1589,11 +1590,6 @@ def main(_):
         # Distribute advantages to samples
         for i, sample in enumerate(samples):
             sample['advantages'] = advantages[i].unsqueeze(0) # keep batch dimension
-
-        if accelerator.is_local_main_process:
-            print("len samples", len(samples))
-            print("advantages has shape", advantages.shape)
-            print("advantages: ", advantages.abs().mean())
 
         # clean up to save memory
         del gathered_rewards

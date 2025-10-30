@@ -123,8 +123,8 @@ def get_log_tamed_aggregate_fn(delta: float = 0.2, epsilon: float = 1e-4):
             axis=0
         ) # (num_rewards, group_size) or (num_rewards, batch_size, group_size)
         # Compute mean and std for each group
-        means = np.mean(values, axis=-1, keepdims=True)
-        stds = np.std(values, axis=-1, keepdims=True)
+        means = np.mean(values, axis=-1)
+        stds = np.std(values, axis=-1)
         # h = std / (means + epsilon)
         h = stds / (means + epsilon)
         # Apply log transformation to values where h > delta
@@ -141,7 +141,8 @@ def get_log_tamed_aggregate_fn(delta: float = 0.2, epsilon: float = 1e-4):
 def generate_ConsistencyReward_clip_config_for_resolution_exp(
     run_name: str,
     save_dir_suffix: str,
-    resolution: int
+    resolution: int,
+    auto_log_tame: bool = False
 ):
     assert resolution in [256, 384, 512, 720, 1024], f"Unsupported resolution: {resolution}"
     gpu_number = get_gpu_count()
@@ -172,12 +173,14 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     config.train.reward_fn_kwargs = {
         'model': 'ConsistencyReward-7B-Mix',
     }
-    # def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
-    #     return np.log(1 + consistency_score) + subfig_clipT
-    agg_fn = get_log_tamed_aggregate_fn(delta=0.2, epsilon=1e-4)
+    if auto_log_tame:
+        agg_fn_auto = get_log_tamed_aggregate_fn(delta=0.2, epsilon=1e-4)
+    else:
+        def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
+            return np.log(1 + consistency_score) + subfig_clipT
 
     config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
-    config.train.aggregate_fn = agg_fn
+    config.train.aggregate_fn = agg_fn_auto if auto_log_tame else agg_fn
 
     config.test.reward_fn = config.train.reward_fn
     config.test.reward_fn_kwargs = {
@@ -185,7 +188,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
         'model': 'ConsistencyReward-7B-Mix',
     }
     config.train.aggregate_fn_code = config.train.aggregate_fn_code
-    config.test.aggregate_fn = agg_fn
+    config.test.aggregate_fn = config.train.aggregate_fn
 
     # Testing
     config.test.save_eval_images = True
@@ -286,6 +289,18 @@ def consistencyReward_clip_small():
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution
+    )
+    return config
+
+def consistencyReward_clip_small_auto_tame():
+    run_name = 'H200, PPO, auto-tame, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], small, groupstd,'
+    save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-small-auto_tame'
+    resolution = 512
+    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
+        run_name=run_name,
+        save_dir_suffix=save_dir_suffix,
+        resolution=resolution,
+        auto_log_tame=True
     )
     return config
 

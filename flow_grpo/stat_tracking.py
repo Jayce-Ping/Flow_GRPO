@@ -20,7 +20,7 @@ class PerPromptStatTracker:
             reward_weights : Optional[dict[str, float]] = {},
             type : str = 'grpo',
             aggregate_fn: Optional[Callable[[Dict[str, np.ndarray]], np.ndarray]] = None,
-        ) -> dict[str, np.ndarray]:
+        ) -> np.ndarray:
         """
             Add `prompts` and corresponding multi-dimensional `rewards` to the tracker and return advantages.
 
