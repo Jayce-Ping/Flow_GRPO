@@ -890,6 +890,7 @@ def eval(pipeline : FluxPipeline,
         gathered_images = [
             os.path.join(temp_dir, f)
             for f in sorted(os.listdir(temp_dir), key=sort_key)
+            if f.endswith('.jpg')
         ]
     else:
         # Approach: flatten and gather, then reshape
