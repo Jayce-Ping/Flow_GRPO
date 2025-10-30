@@ -878,6 +878,9 @@ def eval(pipeline : FluxPipeline,
         # This approach saves images as JPG files in a temporary directory
         # Since uploading images with jpg is faster, if we need to do it anyway.
         temp_dir = os.path.join(config.save_dir, 'eval_images', str(global_step))
+        if os.path.isdir(temp_dir):
+            # Remove existing temp dir
+            shutil.rmtree(temp_dir)
         os.makedirs(temp_dir, exist_ok=True)
         for idx, img in enumerate(log_data['images']):
             # Save image to temp dir
