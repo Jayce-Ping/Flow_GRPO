@@ -1,6 +1,9 @@
 # Created by https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,intellij+all,vim
 # Edit at https://www.toptal.com/developers/gitignore?templates=visualstudiocode,python,intellij+all,vim
 
+vllm_*.json
+*.tmux
+
 .DS_Store
 ### Intellij+all ###
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider

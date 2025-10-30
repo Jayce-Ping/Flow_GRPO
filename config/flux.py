@@ -32,9 +32,10 @@ def get_gpu_count():
 FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 # FLUX_MODEL_PATH = "/root/siton-data-51d3ce9aba3246f88f64ea65f79d5133/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21"
 # SAVE_DIR = 'logs'
-SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_NFT/logs'
-# SAVE_DIR = '/root/siton-tmp/Flow_NFT/logs'
-# SAVE_DIR = '/home/hangwei/storage/jcy/Flow_NFT/logs'
+# SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flux_GRPO/logs'
+# SAVE_DIR = '/root/siton-tmp/Flux_GRPO/logs'
+# SAVE_DIR = '/home/hangwei/storage/jcy/Flux_GRPO/logs'
+SAVE_DIR = '/home/users/astar/cfar/stuchengyou/jcy/Flux_GRPO/logs'
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
     config = base.get_config()
@@ -120,12 +121,12 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     save_dir_suffix: str,
     resolution: int
 ):
-    assert resolution in [256, 360, 512, 720, 1024], f"Unsupported resolution: {resolution}"
+    assert resolution in [256, 384, 512, 720, 1024], f"Unsupported resolution: {resolution}"
     gpu_number = get_gpu_count()
     config = compressibility()
     dataset_map = {
         256: "dataset/T2IS/half_2by2_micro_train",
-        360: "dataset/T2IS/half_2by2_mini_train",
+        384: "dataset/T2IS/half_2by2_mini_train",
         512: "dataset/T2IS/half_2by2_small_train",
         720: "dataset/T2IS/half_2by2_medium_train",
         1024: "dataset/T2IS/half_2by2"
@@ -157,7 +158,8 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
 
     config.test.reward_fn = config.train.reward_fn
     config.test.reward_fn_kwargs = {
-        'model': 'InternVL3_5-8B'
+        # 'model': 'InternVL'
+        'model': 'ConsistencyReward-7B-Mix',
     }
     config.train.aggregate_fn_code = config.train.aggregate_fn_code
     config.test.aggregate_fn = agg_fn
@@ -266,7 +268,7 @@ def consistencyReward_clip_small():
 def consistencyReward_clip_mini():
     run_name = 'H100, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], mini, groupstd,'
     save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-mini'
-    resolution = 360
+    resolution = 384
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,

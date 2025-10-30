@@ -191,27 +191,27 @@ echo "🌐 Starting gateway on port $VLLM_PORT..."
 # Check if tmux is available
 if ! command -v tmux &> /dev/null; then
     echo "⚠️  tmux not found, using nohup instead"
-    nohup python3 gateway_fastapi.py \
+    nohup python vllm_server/gateway_fastapi.py \
         --port "$VLLM_PORT" \
         --label "$VLLM_LABEL" \
         --workers "$GATEWAY_WORKERS" \
-        > gateway.log 2>&1 &
+        > gateway_${VLLM_LABEL}.log 2>&1 &
     GATEWAY_PID=$!
-    echo $GATEWAY_PID > gateway.pid
+    echo $GATEWAY_PID > gateway_${VLLM_LABEL}.pid
 else
     # Kill existing tmux session if exists
     tmux kill-session -t ${VLLM_LABEL}_gateway 2>/dev/null || true
     
     # Start gateway in tmux session
     tmux new-session -d -s ${VLLM_LABEL}_gateway \
-        "python3 gateway_fastapi.py \
+        "python vllm_server/gateway_fastapi.py \
         --port $VLLM_PORT \
         --label $VLLM_LABEL \
         --workers $GATEWAY_WORKERS \
-        2>&1 | tee gateway.log"
+        2>&1 | tee gateway_${VLLM_LABEL}.log"
     
     # Save tmux session name for later cleanup
-    echo "${VLLM_LABEL}_gateway" > gateway.tmux
+    echo "${VLLM_LABEL}_gateway" > gateway_${VLLM_LABEL}.tmux
 fi
 
 sleep 3

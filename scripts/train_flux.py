@@ -899,6 +899,18 @@ def eval(pipeline : FluxPipeline,
     if memory_profiler is not None:
         memory_profiler.snapshot("after_gather_images")
 
+    if approach == 1 and config.test.save_eval_images and accelerator.is_main_process:
+        # Save eval data info
+        eval_info_data = [{
+            'prompt': p,
+            'reward': {k: float(v) for k, v in r.items()},
+            'image_path': img_path,
+        }
+            for p, r, img_path in zip(gathered_prompts, gathered_rewards, gathered_images)
+        ]
+        with open(os.path.join(temp_dir, "eval_data.json"), 'w') as f:
+            json.dump(eval_info_data, f, indent=4)
+
     if accelerator.is_main_process:
         # 'Deterministically' sample 'random' `log_sample_num` data for logging
         # Make `num_processes` divides `log_sample_num` to make sure each process has same amount of data to log

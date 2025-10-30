@@ -25,8 +25,8 @@ for PID_FILE in ${VLLM_LABEL}_*.pid; do
 done
 
 # Stop gateway
-if [ -f "gateway.tmux" ]; then
-    TMUX_SESSION=$(cat gateway.tmux)
+if [ -f "gateway_${VLLM_LABEL}.tmux" ]; then
+    TMUX_SESSION=$(cat gateway_${VLLM_LABEL}.tmux)
     echo -n "   Gateway (tmux: $TMUX_SESSION)... "
     
     if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
@@ -35,9 +35,9 @@ if [ -f "gateway.tmux" ]; then
     else
         echo "⚠️  Not running"
     fi
-    rm -f gateway.tmux
-elif [ -f "gateway.pid" ]; then
-    GATEWAY_PID=$(cat gateway.pid)
+    rm -f gateway_${VLLM_LABEL}.tmux
+elif [ -f "gateway_${VLLM_LABEL}.pid" ]; then
+    GATEWAY_PID=$(cat gateway_${VLLM_LABEL}.pid)
     echo -n "   Gateway (PID $GATEWAY_PID)... "
     
     if kill -0 $GATEWAY_PID 2>/dev/null; then
@@ -46,7 +46,7 @@ elif [ -f "gateway.pid" ]; then
     else
         echo "⚠️  Not running"
     fi
-    rm -f gateway.pid
+    rm -f gateway_${VLLM_LABEL}.pid
 else
     GATEWAY_PID=$(lsof -ti:$VLLM_PORT 2>/dev/null || true)
     if [ -n "$GATEWAY_PID" ]; then
@@ -57,6 +57,6 @@ else
 fi
 
 # Cleanup
-rm -f ${VLLM_LABEL}_*.log gateway.log gateway.tmux ${VLLM_LABEL}_servers.json
+rm -f ${VLLM_LABEL}_*.log gateway_${VLLM_LABEL}.log gateway_${VLLM_LABEL}.tmux ${VLLM_LABEL}_servers.json
 
 echo "✅ All services stopped"
