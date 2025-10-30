@@ -889,9 +889,12 @@ def eval(pipeline : FluxPipeline,
         sort_key = lambda filename: tuple([int(i) for i in filename.split('.')[0].split('-')])
         gathered_images = [
             os.path.join(temp_dir, f)
-            for f in sorted(os.listdir(temp_dir), key=sort_key)
-            if f.endswith('.jpg')
-        ]
+            for f in sorted(
+            [
+                f for f in os.listdir(temp_dir)
+                if f.endswith('.jpg')
+            ], key=sort_key
+        )]
     else:
         # Approach: flatten and gather, then reshape
         gathered_images = all_gather_tensor_list(accelerator, log_data['images'], device="cpu")
