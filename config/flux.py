@@ -53,6 +53,7 @@ def compressibility():
     config.sample.left_boundary = 0
     config.sample.window_size = 20
     config.sample.batch_size = 1
+    config.sample.reward_batch_size = config.sample.batch_size
     config.sample.num_steps = 20
     config.sample.num_images_per_prompt = 3
     config.sample.max_group_size = 16
@@ -141,8 +142,8 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
 
     config.run_name = run_name
     config.save_dir = os.path.join(SAVE_DIR, f'consistencyReward-subclip', save_dir_suffix)
-    config.save_freq = 10 # epoch
-    config.eval_freq = 10 # 0 for no eval applied
+    config.save_freq = 0 # epoch
+    config.eval_freq = 0 # 0 for no eval applied
     config.train.reward_fn = {
         "consistency_score": 0.1,
         "subfig_clipT" : 1
@@ -187,6 +188,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     ## batches
     config.enable_gradient_checkpointing = False
     config.sample.batch_size = 1
+    config.sample.reward_batch_size = config.sample.batch_size * 4
     config.sample.num_images_per_prompt = 16
     config.sample.max_group_size = config.sample.num_images_per_prompt or 16
     unique_sample_num_range = range(42, 50)
@@ -233,7 +235,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
 
 
 def consistencyReward_clip_ori():
-    run_name = 'H100, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], original_size, groupstd,'
+    run_name = 'H200, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], original_size, groupstd,'
     save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-original'
     resolution = 1024
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
@@ -244,7 +246,7 @@ def consistencyReward_clip_ori():
     return config
 
 def consistencyReward_clip_medium():
-    run_name = 'H100, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], medium, groupstd,'
+    run_name = 'H200, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], medium, groupstd,'
     save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-medium'
     resolution = 720
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
@@ -255,7 +257,7 @@ def consistencyReward_clip_medium():
     return config
 
 def consistencyReward_clip_small():
-    run_name = 'H100, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], small, groupstd,'
+    run_name = 'H200, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], small, groupstd,'
     save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-small'
     resolution = 512
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
@@ -266,7 +268,7 @@ def consistencyReward_clip_small():
     return config
 
 def consistencyReward_clip_mini():
-    run_name = 'H100, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], mini, groupstd,'
+    run_name = 'H200, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], mini, groupstd,'
     save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-mini'
     resolution = 384
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
@@ -277,7 +279,7 @@ def consistencyReward_clip_mini():
     return config
 
 def consistencyReward_clip_micro():
-    run_name = 'H100, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], micro, groupstd,'
+    run_name = 'H200, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], micro, groupstd,'
     save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-micro'
     resolution = 256
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(

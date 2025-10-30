@@ -87,15 +87,11 @@ def reward_compute(
     log_items = []
     # Compute reward for each sample
     for i in tqdm(
-        range(0, len(samples), config.train.batch_size),
+        range(0, len(samples), config.sample.reward_batch_size),
         desc="Computing rewards",
         disable=not accelerator.is_local_main_process
     ):
-        # Compute reward with train.batch_size to avoid OOM
-        # HOW?
-        # 1. encode criteria and communicate
-        # 2. modify sampler to make sure all group of one prompt is in one gpu (looks better)
-        batch = samples[i : i + config.train.batch_size]
+        batch = samples[i : i + config.sample.reward_batch_size]
         heights = [sample.get('height', config.resolution) for sample in batch]
         widths = [sample.get('width', config.resolution) for sample in batch]
         if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
@@ -275,12 +271,11 @@ def augment_and_reward_compute(
     # Some subfigs will be paired multiple times for reward computation
     log_items = []
     for i in tqdm(
-        range(0, len(augmented_samples), config.train.batch_size),
+        range(0, len(augmented_samples), config.sample.reward_batch_size),
         desc="Computing rewards",
         disable=not accelerator.is_local_main_process
     ):
-        # Compute reward with train.batch_size to avoid OOM
-        batch = augmented_samples[i : i + config.train.batch_size]
+        batch = augmented_samples[i : i + config.sample.reward_batch_size]
         heights = [sample.get('height', config.resolution) for sample in batch]
         widths = [sample.get('width', config.resolution) for sample in batch]
         if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
@@ -878,9 +873,9 @@ def eval(pipeline : FluxPipeline,
         # This approach saves images as JPG files in a temporary directory
         # Since uploading images with jpg is faster, if we need to do it anyway.
         temp_dir = os.path.join(config.save_dir, 'eval_images', str(global_step))
-        if os.path.isdir(temp_dir):
-            # Remove existing temp dir
-            shutil.rmtree(temp_dir)
+        # if os.path.isdir(temp_dir):
+        #     # Remove existing temp dir
+        #     shutil.rmtree(temp_dir)
         os.makedirs(temp_dir, exist_ok=True)
         for idx, img in enumerate(log_data['images']):
             # Save image to temp dir
