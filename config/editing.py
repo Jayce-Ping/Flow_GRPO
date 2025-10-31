@@ -122,6 +122,8 @@ def editscore_flux():
     # config.prompt_fn = 'general_editing'
     config.prompt_fn = 'arrow_editing'
     config.resolution = 512
+    config.train.resolution = 384
+    config.test.resolution = 512
     config.enable_flexible_size = False
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_mem_log = False
@@ -285,28 +287,28 @@ def consistencyreward_for_editing_flux():
 
 
 def consistencyreward_for_editing_qwenimage():
-    gpu_number = 4
+    gpu_number = 8
     config = compressibility()
 
-    # config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split"
-    config.dataset = "/home/users/astar/cfar/qianh/scratch/datasets/GEdit-Bench/train_split"
-    # config.dataset = "/root/siton-tmp/GEdit-Bench/train_split"
+    config.dataset = "/home/users/astar/cfar/stuchengyou/jcy/datasets/GEdit-Bench/train_split"
     config.prompt_fn = 'arrow_editing'
-    config.resolution = 512
+    config.resolution = 384
+    config.train.resolution = 384
+    config.test.resolution = 1024
     config.pretrained.model = QWEN_EDIT_MODEL_PATH
     config.enable_flexible_size = False
     config.enable_mem_log = False
     # config.logging_platform = "swanlab"
 
-    config.run_name = 'Qwen-Image-Edit, ConsistencyReward-7B-Mix-epoch1, new prompt'
-    config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'Qwen-GEdit-Split-mix-new-prompt')
+    config.run_name = 'Qwen-Image-Edit, ConsistencyReward-7B-CoT-09'
+    config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'Qwen-GEdit-Split-CoT')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
     config.train.reward_fn = {
         "consistencyreward_for_editing": 1.0,
     }
     config.train.reward_fn_kwargs = {
-        'model': 'ConsistencyReward-7B-Mix',
+        'model': 'ConsistencyReward-7B-CoT-09',
     }
     agg_fn = None
     config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
@@ -315,7 +317,7 @@ def consistencyreward_for_editing_qwenimage():
         "consistencyreward_for_editing": 1.0,
     }
     config.test.reward_fn_kwargs = {
-        'model': 'ConsistencyReward-7B-Mix',
+        'model': 'ConsistencyReward-7B-CoT-09',
     }
     config.test.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
     config.test.aggregate_fn = agg_fn
@@ -334,8 +336,8 @@ def consistencyreward_for_editing_qwenimage():
 
     config.sample.cps = False
     config.sample.num_steps = 10
-    config.sample.noise_steps = [1,2,3,4]
-    config.sample.noise_level = 1.0
+    config.sample.noise_steps = [1,2,3]
+    config.sample.noise_level = 1.5
 
     ## batches
     config.enable_gradient_checkpointing = False

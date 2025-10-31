@@ -58,9 +58,9 @@ def save_train_split_en(dataset, output_dir='train_split_en'):
 def main():
     dataset = load_dataset('stepfun-ai/GEdit-Bench', split='train')
     # output_root = "~/scratch/datasets/GEdit-Bench"
-    output_root = '/home/users/astar/cfar/qianh/scratch/datasets/GEdit-Bench'
+    output_root = '/home/users/astar/cfar/stuchengyou/jcy/datasets/GEdit-Bench'
     # save_train_all(dataset, output_dir='train_all')
-    save_train_split(dataset, output_dir='train_split')
+    save_train_split(dataset, output_dir=os.path.join(output_root, 'train_split'))
     # save_train_split_cn(dataset, output_dir='train_split_cn')
     # save_train_split_en(dataset, output_dir=os.path.join(output_root, 'train_split_en'))
 

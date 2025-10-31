@@ -94,8 +94,8 @@ def reward_compute(
     ):
         # Compute reward with train.batch_size to avoid OOM
         batch = samples[i : i + config.train.batch_size]
-        heights = [sample.get('height', config.resolution) for sample in batch]
-        widths = [sample.get('width', config.resolution) for sample in batch]
+        heights = [sample.get('height', config.train.resolution) for sample in batch]
+        widths = [sample.get('width', config.train.resolution) for sample in batch]
         ref_images = [sample['ref_image'] for sample in batch]
         images = [sample['image'] for sample in batch]  
         # Compute reward
@@ -274,8 +274,8 @@ def eval(pipeline : FluxKontextPipeline,
         prompts, prompt_metadata, ref_images = test_batch
         generator = create_generator(prompts, config.seed + accelerator.process_index)
 
-        heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
-        widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
+        heights = [prompt_meta.get('height', config.test.resolution) for prompt_meta in prompt_metadata]
+        widths = [prompt_meta.get('width', config.test.resolution) for prompt_meta in prompt_metadata]
         
         if not all(h == heights[0] for h in heights) or not all(w == widths[0] for w in widths):
             # Split the batch if there are different sizes
@@ -302,7 +302,7 @@ def eval(pipeline : FluxKontextPipeline,
                         height=heights[i],
                         width=widths[i],
                         noise_level=0,
-                        max_area=config.resolution * config.resolution
+                        max_area=config.test.resolution * config.test.resolution
                     )
 
                 images.append(imgs.squeeze(0))  # (C, H, W)
@@ -320,7 +320,7 @@ def eval(pipeline : FluxKontextPipeline,
                     height=heights[0],
                     width=widths[0],
                     noise_level=0,
-                    max_area=config.resolution * config.resolution
+                    max_area=config.test.resolution * config.test.resolution
                 )
                 images = list(images.unbind(0)) # List[torch.Tensor(C, H, W)]
         
@@ -902,7 +902,7 @@ def main(_):
             position=0,
         ):
             prompts, prompt_metadata, ref_images = next(train_iter)
-            ref_images = [ref_image.resize((config.resolution, config.resolution)) for ref_image in ref_images]
+            ref_images = [ref_image.resize((config.train.resolution, config.train.resolution)) for ref_image in ref_images]
 
             # the input of edit task is determined by both the image and the edit prompt
             prompt_ids = tokenizers[1](
@@ -914,8 +914,8 @@ def main(_):
             ).input_ids.to(accelerator.device)
 
             # Get heights and widths
-            heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
-            widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
+            heights = [prompt_meta.get('height', config.train.resolution) for prompt_meta in prompt_metadata]
+            widths = [prompt_meta.get('width', config.train.resolution) for prompt_meta in prompt_metadata]
 
             # sample
             if config.sample.same_latent:
@@ -937,7 +937,7 @@ def main(_):
                             output_type="pil",
                             height=heights[0],
                             width=widths[0],
-                            max_area=config.resolution * config.resolution,
+                            max_area=config.train.resolution * config.train.resolution,
                             generator=generator,
                             cps=config.sample.cps
                         )
@@ -969,7 +969,7 @@ def main(_):
                                 output_type="pil",
                                 height=heights[index],
                                 width=widths[index],
-                                max_area=config.resolution * config.resolution,
+                                max_area=config.train.resolution * config.train.resolution,
                                 generator=generator[index] if generator is not None else None,
                                 cps=config.sample.cps
                             )
