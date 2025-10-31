@@ -167,25 +167,27 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
     config.train.reward_fn = {
-        "consistency_score": 0.1,
+        "consistency_score": 0.2,
         "subfig_clipT" : 1
     }
     config.train.reward_fn_kwargs = {
         'model': 'ConsistencyReward-7B-Mix',
+        'port': 8000,
     }
     if auto_log_tame:
-        agg_fn_auto = get_log_tamed_aggregate_fn(delta=0.2, epsilon=1e-4)
+        agg_fn = get_log_tamed_aggregate_fn(delta=0.2, epsilon=1e-4)
     else:
         def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
             return np.log(1 + consistency_score) + subfig_clipT
 
     config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
-    config.train.aggregate_fn = agg_fn_auto if auto_log_tame else agg_fn
+    config.train.aggregate_fn = agg_fn
 
     config.test.reward_fn = config.train.reward_fn
     config.test.reward_fn_kwargs = {
         # 'model': 'InternVL'
         'model': 'ConsistencyReward-7B-Mix',
+        'port': 8000,
     }
     config.train.aggregate_fn_code = config.train.aggregate_fn_code
     config.test.aggregate_fn = config.train.aggregate_fn
@@ -281,6 +283,18 @@ def consistencyReward_clip_medium():
     )
     return config
 
+def consistencyReward_clip_medium_auto_tame():
+    run_name = 'H200, PPO, 1s+log(1+0.2crm), 10sde, noise=0.7 at [1], medium, groupstd,'
+    save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-medium-auto_tame'
+    resolution = 720
+    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
+        run_name=run_name,
+        save_dir_suffix=save_dir_suffix,
+        resolution=resolution,
+        auto_log_tame=True
+    )
+    return config
+
 def consistencyReward_clip_small():
     run_name = 'H200, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], small, groupstd,'
     save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-small'
@@ -293,7 +307,7 @@ def consistencyReward_clip_small():
     return config
 
 def consistencyReward_clip_small_auto_tame():
-    run_name = 'H200, PPO, auto-tame, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], small, groupstd,'
+    run_name = 'H200, PPO, auto-tame, 1s+log(1+0.2crm), 10sde, noise=0.7 at [1], small, groupstd,'
     save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-small-auto_tame'
     resolution = 512
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(

@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from huggingface_hub import upload_folder, delete_folder
+from huggingface_hub import upload_folder, delete_folder, upload_large_folder
 def upload_checkpoint_dir(folder_path, path_in_repo, repo_id, commit_message="Upload folder", token=None):
     """
     Upload a folder to the Hugging Face Hub.
@@ -17,7 +17,8 @@ def upload_checkpoint_dir(folder_path, path_in_repo, repo_id, commit_message="Up
         repo_id=repo_id,
         commit_message=commit_message,
         token=token,
-        repo_type='model'
+        repo_type='model',
+        ignore_patterns=["*.tmp", "*.DS_Store", "*.log", "*.ipynb", 'eval_images'],
     )
     print(f"Folder '{folder_path}' successfully uploaded to '{repo_id}'.")
 
@@ -41,11 +42,12 @@ def delete_checkpoint_dir(path_in_repo, repo_id, commit_message="Delete folder",
     print(f"Folder '{path_in_repo}' successfully deleted from '{repo_id}'.")
 
 if __name__ == "__main__":
-    label = "Flux Kontext GRPO - new prompt"
+    label = "Flux GRPO - add log series results"
     # SAVE_DIR = '/home/users/astar/ares/cp3jia/scratch/Flow_NFT/logs'
-    SAVE_DIR = '/home/users/astar/ares/cp3jia/scratch/Flow_Kontext/logs'
+    # SAVE_DIR = '/home/users/astar/ares/cp3jia/scratch/Flow_Kontext/logs'
+    SAVE_DIR = '/home/users/astar/cfar/stuchengyou/jcy/Flux_GRPO/logs/'
     # folder_name = 'consistencyReward-subclip/8s-log-2cr_ppo_10sde_train1_groupstd_train-mini'
-    folder_name = "consistency_for_editing/Flux-GEdit-Split-mix/checkpoints"
+    folder_name = "consistencyReward-subclip"
     folder_path = os.path.join(SAVE_DIR, folder_name)
     path_in_repo = folder_name
     repo_id = "Jayce-Ping/Flux-NFT"

@@ -157,13 +157,13 @@ def grid_layout_score():
 
     return _fn
 
-def consistency_score(model='Qwen2.5-VL-7B-Instruct'):
+def consistency_score(model='Qwen2.5-VL-7B-Instruct', port=8000):
     import asyncio
     from flow_grpo.rewards.consistency_scorer import ConsistencyScorer
 
     client = AsyncOpenAI(
         api_key='dummy-key',
-        base_url='http://127.0.0.1:8000/v1'
+        base_url=f'http://127.0.0.1:{port}/v1'
     )
 
     def _fn(images : List[Image.Image], prompts : List[str], metadatas : List[dict]) -> Tuple[List[float], dict]:
@@ -171,7 +171,7 @@ def consistency_score(model='Qwen2.5-VL-7B-Instruct'):
         scorer = ConsistencyScorer(
             client=client,
             model=model,
-            max_concurrent=100, # Adjust based on the system's capabilities (especially when using vllm as local model server)
+            max_concurrent=120, # Adjust based on the system's capabilities (especially when using vllm as local model server)
         )
         scores = scorer(images, prompts, metadatas)
         return scores, {}
