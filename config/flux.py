@@ -121,13 +121,13 @@ def get_log_tamed_aggregate_fn(delta: float = 0.2, epsilon: float = 1e-4):
         values = np.stack(
             [v for v in kwargs.values() if v is not None],
             axis=0
-        ) # (num_rewards, group_size) or (num_rewards, batch_size, group_size)
+        ) # (num_rewards, sample_num) or (num_rewards, num_time_steps, sample_num)
         # Compute mean and std for each group
         means = np.mean(values, axis=-1)
         stds = np.std(values, axis=-1)
-        # h = std / (means + epsilon)
+
         h = stds / (means + epsilon)
-        # Apply log transformation to values where h > delta
+        # Apply log transformation to values those rewards with high h values
         values[h > delta] = np.log(1 + values[h > delta])
         # Aggregate by summation
         aggregated = np.sum(values, axis=0)
