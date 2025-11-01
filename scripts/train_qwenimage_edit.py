@@ -446,7 +446,7 @@ def eval(pipeline : QwenImageEditPipeline,
         for ref_img, img in zip(gathered_ref_images, gathered_images):
             ref_img = Image.open(ref_img).convert("RGB")
             edited_img = Image.open(img).convert("RGB")
-            # Create a new image with width = sum of both widths, height = max of both heights
+            # Create a new image with width = sum of both widths, height = ref image height
             # Resize the edited image to the same height as ref image for better visualization
             target_height = ref_img.height
             edited_img = edited_img.resize((int(edited_img.width * target_height / edited_img.height), target_height))
