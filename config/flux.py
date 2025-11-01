@@ -156,6 +156,9 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     }
     config.dataset = os.path.join(os.getcwd(), dataset_map[resolution])
     config.resolution = resolution
+    config.train.resolution = resolution
+    config.test.resolution = 1024 # Keep test resolution to 1024 for evaluation
+
     config.enable_flexible_size = False
     config.prompt_fn = "geneval"
     config.pretrained.model = FLUX_MODEL_PATH

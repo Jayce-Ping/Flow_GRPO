@@ -195,8 +195,8 @@ def compute_log_prob(
 
     batch_size = latents.shape[0]
     num_channels_latents = pipeline.transformer.config.in_channels // 4
-    height = config.resolution if 'height' not in sample else sample['height'][0] # All height/width in the batch should be the same
-    width = config.resolution if 'width' not in sample else sample['width'][0] # All height/width in the batch should be the same
+    height = config.train.resolution if 'height' not in sample else sample['height'][0] # All height/width in the batch should be the same
+    width = config.train.resolution if 'width' not in sample else sample['width'][0] # All height/width in the batch should be the same
     layout = (1, 1) if 'layout' not in sample else sample['layout'][0] # All layout in the batch should be the same
     prompt = sample['prompt']
     device = latents.device

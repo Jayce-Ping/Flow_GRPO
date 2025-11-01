@@ -36,7 +36,7 @@ from torch.utils.data import Dataset, DataLoader, Sampler
 from flow_grpo.logging_utils import set_online_log
 from flow_grpo.utils import tensor_list_to_pil_image, tensor_to_pil_image, all_gather_tensor_list, divide_prompt, divide_latents, merge_latents, num_to_base_tuple, create_generator
 from flow_grpo.rewards.rewards import multi_score
-from flow_grpo.diffusers_patch.flux_pipeline_nft import calculate_shift, flux_pipeline, compute_log_prob
+from flow_grpo.diffusers_patch.flux_pipeline import calculate_shift, flux_pipeline, compute_log_prob
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.datasets.prompt_dataset import TextPromptDataset, GenevalPromptDataset
@@ -92,8 +92,8 @@ def reward_compute(
         disable=not accelerator.is_local_main_process
     ):
         batch = samples[i : i + config.sample.reward_batch_size]
-        heights = [sample.get('height', config.resolution) for sample in batch]
-        widths = [sample.get('width', config.resolution) for sample in batch]
+        heights = [sample.get('height', config.train.resolution) for sample in batch]
+        widths = [sample.get('width', config.train.resolution) for sample in batch]
         if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
             height = heights[0]
             width = widths[0]
@@ -107,8 +107,8 @@ def reward_compute(
         else:
             images = []
             for sample in batch:
-                height = sample.get('height', config.resolution)
-                width = sample.get('width', config.resolution)
+                height = sample.get('height', config.train.resolution)
+                width = sample.get('width', config.train.resolution)
                 # Convert cleaned latents to images
                 latents = sample['all_latents'][:, -1].to(accelerator.device)
                 latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
@@ -177,8 +177,8 @@ def augment_and_reward_compute(
     group_size = config.sample.num_images_per_prompt
     for prompt, group_samples in prompt_to_samples.items():
         assert len(group_samples) == group_size, f"Expected {group_size} samples for prompt {prompt}, but got {len(group_samples)}"
-        height = group_samples[0].get('height', config.resolution)
-        width = group_samples[0].get('width', config.resolution)
+        height = group_samples[0].get('height', config.train.resolution)
+        width = group_samples[0].get('width', config.train.resolution)
         layout = group_samples[0].get('layout', (1, 1))
         sub_height = height // layout[0]
         sub_width = width // layout[1]
@@ -276,8 +276,8 @@ def augment_and_reward_compute(
         disable=not accelerator.is_local_main_process
     ):
         batch = augmented_samples[i : i + config.sample.reward_batch_size]
-        heights = [sample.get('height', config.resolution) for sample in batch]
-        widths = [sample.get('width', config.resolution) for sample in batch]
+        heights = [sample.get('height', config.train.resolution) for sample in batch]
+        widths = [sample.get('width', config.train.resolution) for sample in batch]
         if all(h == heights[0] for h in heights) and all(w == widths[0] for w in widths):
             height = heights[0]
             width = widths[0]
@@ -291,8 +291,8 @@ def augment_and_reward_compute(
         else:
             images = []
             for sample in batch:
-                height = sample.get('height', config.resolution)
-                width = sample.get('width', config.resolution)
+                height = sample.get('height', config.train.resolution)
+                width = sample.get('width', config.train.resolution)
                 latents = sample['all_latents'][:, -1].to(accelerator.device)
                 latents = pipeline._unpack_latents(latents, height, width, pipeline.vae_scale_factor)
                 latents = (latents / pipeline.vae.config.scaling_factor) + pipeline.vae.config.shift_factor
@@ -746,8 +746,8 @@ def eval(pipeline : FluxPipeline,
         prompts, prompt_metadata = test_batch
         generator = create_generator(prompts, config.seed + accelerator.process_index)
 
-        heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
-        widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
+        heights = [prompt_meta.get('height', config.test.resolution) for prompt_meta in prompt_metadata]
+        widths = [prompt_meta.get('width', config.test.resolution) for prompt_meta in prompt_metadata]
         layouts = [prompt_meta.get('layout', '1x1') for prompt_meta in prompt_metadata]
         layouts = [tuple(map(int, l.split('x'))) for l in layouts] # Convert '2x3' to (2, 3)
         if not all(h == heights[0] for h in heights) or not all(w == widths[0] for w in widths) or not all(l == layouts[0] for l in layouts):
@@ -1382,8 +1382,8 @@ def main(_):
             ).input_ids.to(accelerator.device)
 
             # Get heights and widths
-            heights = [prompt_meta.get('height', config.resolution) for prompt_meta in prompt_metadata]
-            widths = [prompt_meta.get('width', config.resolution) for prompt_meta in prompt_metadata]
+            heights = [prompt_meta.get('height', config.train.resolution) for prompt_meta in prompt_metadata]
+            widths = [prompt_meta.get('width', config.train.resolution) for prompt_meta in prompt_metadata]
             layouts = [prompt_meta.get('layout', '1x1') for prompt_meta in prompt_metadata]
             layouts = [
                 tuple(map(int, l.split('x'))) if isinstance(l, str) else tuple(map(int, l))

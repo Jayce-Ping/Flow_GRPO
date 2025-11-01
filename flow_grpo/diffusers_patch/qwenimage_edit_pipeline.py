@@ -211,13 +211,13 @@ def compute_log_prob(
 
     batch_size: int = latents.shape[0]
     num_channels_latents: int = pipeline.transformer.config.in_channels // 4
-    height: int = config.resolution if 'height' not in sample else sample['height'][0] # All height/width in the batch should be the same
-    width: int = config.resolution if 'width' not in sample else sample['width'][0] # All height/width in the batch should be the same
+    height: int = config.train.resolution if 'height' not in sample else sample['height'][0] # All height/width in the batch should be the same
+    width: int = config.train.resolution if 'width' not in sample else sample['width'][0] # All height/width in the batch should be the same
     device = latents.device
     dtype = latents.dtype
     true_cfg_scale = config.train.guidance_scale
 
-    max_area = config.resolution ** 2
+    max_area = config.train.resolution ** 2
     calculated_width, calculated_height, _ = calculate_dimensions(max_area, width / height)
     height = height or calculated_height
     width = width or calculated_width
