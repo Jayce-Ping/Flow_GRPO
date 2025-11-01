@@ -447,9 +447,11 @@ def eval(pipeline : QwenImageEditPipeline,
             ref_img = Image.open(ref_img).convert("RGB")
             edited_img = Image.open(img).convert("RGB")
             # Create a new image with width = sum of both widths, height = max of both heights
+            # Resize the edited image to the same height as ref image for better visualization
+            target_height = ref_img.height
+            edited_img = edited_img.resize((int(edited_img.width * target_height / edited_img.height), target_height))
             total_width = ref_img.width + edited_img.width
-            max_height = max(ref_img.height, edited_img.height)
-            new_img = Image.new('RGB', (total_width, max_height))
+            new_img = Image.new('RGB', (total_width, target_height))
             new_img.paste(ref_img, (0, 0))
             new_img.paste(edited_img, (ref_img.width, 0))
             images.append(new_img)
