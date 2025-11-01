@@ -215,7 +215,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     ## batches
     config.enable_gradient_checkpointing = False
     config.sample.batch_size = 1
-    config.sample.reward_batch_size = config.sample.batch_size * 4
+    config.sample.reward_batch_size = min(config.sample.batch_size * 4, 8)
     config.sample.num_images_per_prompt = 16
     config.sample.max_group_size = config.sample.num_images_per_prompt or 16
     unique_sample_num_range = range(42, 50)

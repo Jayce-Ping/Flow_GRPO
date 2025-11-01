@@ -34,10 +34,10 @@ FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-Kontext-dev"
 QWEN_EDIT_MODEL_PATH = "Qwen/Qwen-Image-Edit"
 # SAVE_DIR = 'logs'
 # SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flow_Kontext/logs'
-SAVE_DIR = '/home/users/astar/cfar/qianh/scratch/Flow_Kontext/logs'
+# SAVE_DIR = '/home/users/astar/cfar/qianh/scratch/Flow_Kontext/logs'
 # SAVE_DIR = '/root/siton-tmp/Flow_Kontext/logs'
 # SAVE_DIR = '/home/hangwei/storage/jcy/Flow_Kontext/logs'
-
+SAVE_DIR = '/home/users/astar/cfar/stuchengyou/jcy/Flux_Kontext/logs'
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
     config = base.get_config()

@@ -1022,11 +1022,10 @@ def load_pipeline(config : Namespace, accelerator : Accelerator):
         inference_dtype = torch.bfloat16
 
     # Move vae and text_encoder to device and cast to inference_dtype
-    pipeline.vae.to(accelerator.device, dtype=torch.float32)
     pipeline.text_encoder.to(accelerator.device, dtype=inference_dtype)
     pipeline.text_encoder_2.to(accelerator.device, dtype=inference_dtype)
-    
-    pipeline.transformer.to(accelerator.device)
+    pipeline.vae.to(accelerator.device, dtype=inference_dtype if config.use_lora else torch.float32)
+    pipeline.transformer.to(accelerator.device, dtype=inference_dtype if config.use_lora else torch.float32)
 
     if config.use_lora:
         # Set correct lora layers
