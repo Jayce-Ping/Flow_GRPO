@@ -68,13 +68,13 @@ class ConsistencyScorerForEditing:
                 f"Instruction: '{prompt}'. "
                 f"Except for the parts that are intentionally changed according to the instruction, "
                 f"does the edited image remain consistent with the original in style, logic, and identity? "
-                f"Answer only 'Yes' or 'No'."
+                f"Answer 'Yes' or 'No' first, then provide detailed reasons."
             )
             prompt_following_text_prompt = (
                 f"Compare the edited image (second) with the original image (first). "
                 f"Instruction: '{prompt}'. "
                 f"Does the edited image accurately follow this instruction? "
-                f"Answer only 'Yes' or 'No'."
+                f"Answer 'Yes' or 'No' first, then provide detailed reasons."
             )
             consistency_score = await self._async_compute_image_consistency(
                 criteria_text=consistency_text_prompt,
