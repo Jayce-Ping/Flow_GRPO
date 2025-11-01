@@ -176,6 +176,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     config.train.reward_fn_kwargs = {
         'model': 'ConsistencyReward-7B-CoT-09',
         'port': 8000,
+        "prompt_template_version": 1,
     }
     if auto_log_tame:
         agg_fn = get_log_tamed_aggregate_fn(delta=0.2, epsilon=1e-4)
@@ -191,6 +192,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
         # 'model': 'InternVL'
         'model': 'ConsistencyReward-7B-CoT-09',
         'port': 8000,
+        "prompt_template_version": 1,
     }
     config.train.aggregate_fn_code = config.train.aggregate_fn_code
     config.test.aggregate_fn = config.train.aggregate_fn

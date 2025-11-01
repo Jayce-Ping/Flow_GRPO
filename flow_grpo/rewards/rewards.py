@@ -157,7 +157,7 @@ def grid_layout_score():
 
     return _fn
 
-def consistency_score(model='Qwen2.5-VL-7B-Instruct', port=8000):
+def consistency_score(model='Qwen2.5-VL-7B-Instruct', port=8000, prompt_template_version=1):
     import asyncio
     from flow_grpo.rewards.consistency_scorer import ConsistencyScorer
 
@@ -172,6 +172,7 @@ def consistency_score(model='Qwen2.5-VL-7B-Instruct', port=8000):
             client=client,
             model=model,
             max_concurrent=120, # Adjust based on the system's capabilities (especially when using vllm as local model server)
+            prompt_template_version=prompt_template_version
         )
         scores = scorer(images, prompts, metadatas)
         return scores, {}

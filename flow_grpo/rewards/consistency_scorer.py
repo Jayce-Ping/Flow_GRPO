@@ -34,6 +34,7 @@ class ConsistencyScorer:
             max_retries=10,
             timeout=60,
             max_cache_size=1024,
+            prompt_template_version: int = 1,
         ):
         self.client = client
         self.model = model
@@ -43,6 +44,7 @@ class ConsistencyScorer:
         self.global_semaphore = asyncio.Semaphore(self.max_concurrent)
         self.max_cache_size = max_cache_size if max_cache_size is not None else math.inf
         self.cache : dict[tuple[str, str, str], float] = {} # (img1_hash, img2_hash, criteria_text) -> score
+        self.prompt_template_version = prompt_template_version
 
     def add_to_cache(self, key: tuple[str, str, str], value: float):
         if len(self.cache) >= self.max_cache_size:
@@ -105,7 +107,18 @@ class ConsistencyScorer:
         """
         Async version of compute_image_consistency with concurrency control.
         """
-
+        if self.prompt_template_version == 0:
+            text_prompt = f"Do images meet the following criteria? {criteria_text} Please answer Yes or No first, then provide detailed reasons."
+        elif self.prompt_template_version == 1:
+            sub_prompts = divide_prompt(prompt)
+            main_prompt = sub_prompts[0]  # Use the main prompt for context if needed
+            text_prompt = (
+                f"Given two subfigures generated based on the main theme: \"{main_prompt}\", "
+                f"do the two images maintain consistency in terms of style, logic and identity? "
+                f"Answer \"Yes\" and \"No\" first, and then provide detailed reasons."
+            )
+        else:
+            text_prompt = f"Do images meet the following criteria? {criteria_text} Please answer Yes or No first, then provide detailed reasons."
         async def process_image_pair(image1, image2) -> float:
             cache_key = (hash_pil_image(image1), hash_pil_image(image2), criteria_text)
             if cache_key in self.cache:
@@ -117,7 +130,7 @@ class ConsistencyScorer:
                     [
                         {"type": "image_url", "image_url": {"url": pil_image_to_base64(image1)}},
                         {"type": "image_url", "image_url": {"url": pil_image_to_base64(image2)}},
-                        {"type": "text", "text": f"Do images meet the following criteria? {criteria_text} Please answer Yes or No."},
+                        {"type": "text", "text": text_prompt},
                     ]
                 }
             ]
