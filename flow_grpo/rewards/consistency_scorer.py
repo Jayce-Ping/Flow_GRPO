@@ -16,8 +16,7 @@ import numpy as np
 import openai
 from openai import OpenAI, AsyncOpenAI
 from PIL import Image
-from flow_grpo.utils import pil_image_to_base64, divide_image, extract_grid_info, hash_pil_image
-from flow_grpo.utils import get_yes_cond_prob_from_completion
+from flow_grpo.utils import pil_image_to_base64, divide_image, extract_grid_info, hash_pil_image, get_yes_cond_prob_from_completion, divide_prompt
 
 # VLLM log filter
 logging.getLogger("vllm").setLevel(logging.ERROR)
@@ -113,7 +112,7 @@ class ConsistencyScorer:
             sub_prompts = divide_prompt(prompt)
             main_prompt = sub_prompts[0]  # Use the main prompt for context if needed
             text_prompt = (
-                f"Given two subfigures generated based on the main theme: \"{main_prompt}\", "
+                f"Given two subfigures generated based on the theme: \"{main_prompt}\", "
                 f"do the two images maintain consistency in terms of style, logic and identity? "
                 f"Answer \"Yes\" and \"No\" first, and then provide detailed reasons."
             )
