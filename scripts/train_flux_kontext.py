@@ -1062,7 +1062,7 @@ def main(_):
                 f"{prompt}_{img_hash}"
                 for prompt, img_hash in zip(prompts, gathered_ref_images)
             ]
-            advantages = stat_tracker.update(prompts, gathered_rewards['avg'], type='grpo')
+            advantages = stat_tracker.compute_advantages(prompts, gathered_rewards['avg'], type='grpo')
             if accelerator.is_local_main_process:
                 print("len(prompts)", len(prompts))
                 print("len unique prompts", len(set(prompts)))

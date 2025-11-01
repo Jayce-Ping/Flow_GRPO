@@ -943,7 +943,7 @@ These two numbers should be equal
         # per-prompt mean/std tracking
         if config.per_prompt_stat_tracking:
             # gather the prompts across processes
-            advantages = stat_tracker.update(gathered_prompts, gathered_rewards['avg'])
+            advantages = stat_tracker.compute_advantages(gathered_prompts, gathered_rewards['avg'])
             if accelerator.is_local_main_process:
                 print("len(prompts)", len(gathered_prompts))
                 print("len unique prompts", len(set(gathered_prompts)))

@@ -924,7 +924,7 @@ These two numbers should be equal
             prompt_ids = torch.cat([s["prompt_ids"] for s in samples], dim=0)
             prompt_ids = accelerator.gather(prompt_ids).cpu().numpy()
             prompts = tokenizers[1].batch_decode(prompt_ids, skip_special_tokens=True)
-            advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
+            advantages = stat_tracker.compute_advantages(prompts, gathered_rewards['avg'])
             if accelerator.is_local_main_process:
                 print("len(prompts)", len(prompts))
                 print("len unique prompts", len(set(prompts)))

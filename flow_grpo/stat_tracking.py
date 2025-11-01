@@ -13,7 +13,7 @@ class PerPromptStatTracker:
         self.stats = {}
         self.history_prompts = set()
 
-    def multi_reward_update(
+    def multi_reward_aggregate(
             self,
             prompts : List[str],
             rewards : dict[str, np.ndarray | torch.Tensor],
@@ -57,10 +57,9 @@ class PerPromptStatTracker:
         # Store the aggregated rewards under 'avg' key
         rewards['avg'] = aggregated_rewards
 
-        # Now use the aggregated rewards to update stats and compute advantages
-        return self.update(prompts, aggregated_rewards, type=type)
+        return aggregated_rewards
 
-    def update(self, prompts : List[str], rewards : np.ndarray | torch.Tensor, type : str = 'grpo') -> np.ndarray:
+    def compute_advantages(self, prompts : List[str], rewards : np.ndarray | torch.Tensor, type : str = 'grpo') -> np.ndarray:
         """
             Add `prompts` and corresponding `rewards` to the tracker and return advantages.
 
@@ -171,14 +170,14 @@ def main():
 
     prompts = ['a', 'b', 'a', 'c', 'b', 'a']
     rewards = [1, 2, -1, 4, 2, 1]
-    advantages = tracker.update(prompts, rewards)
+    advantages = tracker.compute_advantages(prompts, rewards)
     print("Advantages:", advantages)
     avg_group_size, history_prompts = tracker.get_stats()
     print("Average Group Size:", avg_group_size)
     print("History Prompts:", history_prompts)
     prompts = ['a', 'b', 'a', 'c', 'b', 'a']
     rewards = [1, 2, 3, 4, 5, 6]
-    advantages = tracker.update(prompts, rewards)
+    advantages = tracker.compute_advantages(prompts, rewards)
     print("Advantages:", advantages)
     avg_group_size, history_prompts = tracker.get_stats()
     print("Average Group Size:", avg_group_size)
