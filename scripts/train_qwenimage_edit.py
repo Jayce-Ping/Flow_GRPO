@@ -1046,9 +1046,10 @@ def main(_):
                 prompts,
                 gathered_rewards,
                 reward_weights=config.train.reward_fn,
-                type='grpo',
                 aggregate_fn=config.train.aggregate_fn,
+                store_result=True,
             )
+            # It should not happen since `multi_reward_aggregate` stores `avg` already
             if 'avg' not in gathered_rewards:
                 gathered_rewards['avg'] = aggregated_rewards
             # compute advantages

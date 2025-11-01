@@ -18,14 +18,34 @@ class PerPromptStatTracker:
             prompts : List[str],
             rewards : dict[str, np.ndarray | torch.Tensor],
             reward_weights : Optional[dict[str, float]] = {},
-            type : str = 'grpo',
             aggregate_fn: Optional[Callable[[Dict[str, np.ndarray]], np.ndarray]] = None,
+            store_result: bool = True,
         ) -> np.ndarray:
         """
-            Add `prompts` and corresponding multi-dimensional `rewards` to the tracker and return advantages.
-
-            rewards is a dictionary of reward_name to reward_array, where reward_array can be a tensor with extract timestep dimension for each prompt, of shape (prompt_num, timestep_num). Or just a one-dimensional array
-            The return `advantage` keeps the same dimension as `rewards`.
+            Aggregate multi-dimensional rewards for each prompt group and optionally store the result.
+            
+            This function groups rewards by prompt and applies weighted aggregation within each group.
+            It's typically used before `compute_advantages()` to combine multiple reward signals into
+            a single reward value for advantage computation in RLHF training.
+            
+            Args:
+                prompts: List of prompt strings. Samples with the same prompt are grouped together.
+                rewards: Dictionary mapping reward names to reward arrays. Each array has shape 
+                        (num_samples,) or (num_samples, num_timesteps) for temporal rewards.
+                reward_weights: Optional dictionary of weights for each reward type. Defaults to 1.0
+                                for all rewards if not specified.
+                aggregate_fn: Optional aggregation function taking reward dict as kwargs and returning
+                            aggregated array. Defaults to weighted sum across reward types.
+                store_result: If True, adds aggregated result to rewards dict under 'avg' key.
+            
+            Returns:
+                Aggregated reward array with same shape as input reward arrays.
+            
+            Example:
+                >>> rewards = {'quality': np.array([0.8, 0.6]), 'safety': np.array([0.9, 0.7])}
+                >>> weights = {'quality': 0.7, 'safety': 0.3}
+                >>> agg_rewards = multi_reward_aggregate(['p1', 'p1'], rewards, weights)
+                # Result: weighted sum per prompt group, then used in compute_advantages()
         """
         if aggregate_fn is None:
             # If not given, use np.sum directly
@@ -55,7 +75,8 @@ class PerPromptStatTracker:
             aggregated_rewards[prompts == prompt] = aggregated
         
         # Store the aggregated rewards under 'avg' key
-        rewards['avg'] = aggregated_rewards
+        if store_result:
+            rewards['avg'] = aggregated_rewards
 
         return aggregated_rewards
 
