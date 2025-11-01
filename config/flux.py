@@ -171,7 +171,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
         "subfig_clipT" : 1
     }
     config.train.reward_fn_kwargs = {
-        'model': 'ConsistencyReward-7B-Mix',
+        'model': 'ConsistencyReward-7B-CoT-09',
         'port': 8000,
     }
     if auto_log_tame:
@@ -186,7 +186,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     config.test.reward_fn = config.train.reward_fn
     config.test.reward_fn_kwargs = {
         # 'model': 'InternVL'
-        'model': 'ConsistencyReward-7B-Mix',
+        'model': 'ConsistencyReward-7B-CoT-09',
         'port': 8000,
     }
     config.train.aggregate_fn_code = config.train.aggregate_fn_code
@@ -262,81 +262,117 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
 
 
 def consistencyReward_clip_ori():
-    run_name = 'H200, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], original_size, groupstd,'
-    save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-original'
+    run_name = 'H200, PPO, 1s+log(1+0.2cot), 10sde, noise=0.7 at [1], original_size, groupstd,'
+    save_dir_suffix = f'10s-log-1cot_ppo_10sde_train1_groupstd_train-original'
     resolution = 1024
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
-        resolution=resolution
+        resolution=resolution,
+    )
+    return config
+
+def consistencyReward_clip_ori_auto_tame():
+    run_name = 'H200, PPO, auto-tame, 1s+log(1+0.2cot), 10sde, noise=0.7 at [1], original_size, groupstd,'
+    save_dir_suffix = f'10s-log-1cot_ppo_10sde_train1_groupstd_train-original-auto_tame'
+    resolution = 1024
+    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
+        run_name=run_name,
+        save_dir_suffix=save_dir_suffix,
+        resolution=resolution,
+        auto_log_tame=True,
     )
     return config
 
 def consistencyReward_clip_medium():
-    run_name = 'H200, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], medium, groupstd,'
-    save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-medium'
+    run_name = 'H200, PPO, 1s+log(1+0.2cot), 10sde, noise=0.7 at [1], medium, groupstd,'
+    save_dir_suffix = f'10s-log-1cot_ppo_10sde_train1_groupstd_train-medium'
     resolution = 720
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
-        resolution=resolution
+        resolution=resolution,
     )
     return config
 
 def consistencyReward_clip_medium_auto_tame():
-    run_name = 'H200, PPO, 1s+log(1+0.2crm), 10sde, noise=0.7 at [1], medium, groupstd,'
-    save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-medium-auto_tame'
+    run_name = 'H200, PPO, auto-tame, 1s+log(1+0.2cot), 10sde, noise=0.7 at [1], medium, groupstd,'
+    save_dir_suffix = f'10s-log-1cot_ppo_10sde_train1_groupstd_train-medium-auto_tame'
     resolution = 720
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution,
-        auto_log_tame=True
+        auto_log_tame=True,
     )
     return config
 
 def consistencyReward_clip_small():
-    run_name = 'H200, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], small, groupstd,'
-    save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-small'
-    resolution = 512
-    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
-        run_name=run_name,
-        save_dir_suffix=save_dir_suffix,
-        resolution=resolution
-    )
-    return config
-
-def consistencyReward_clip_small_auto_tame():
-    run_name = 'H200, PPO, auto-tame, 1s+log(1+0.2crm), 10sde, noise=0.7 at [1], small, groupstd,'
-    save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-small-auto_tame'
+    run_name = 'H200, PPO, 1s+log(1+0.2cot), 10sde, noise=0.7 at [1], small, groupstd,'
+    save_dir_suffix = f'10s-log-1cot_ppo_10sde_train1_groupstd_train-small'
     resolution = 512
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution,
-        auto_log_tame=True
+    )
+    return config
+
+def consistencyReward_clip_small_auto_tame():
+    run_name = 'H200, PPO, auto-tame, 1s+log(1+0.2cot), 10sde, noise=0.7 at [1], small, groupstd,'
+    save_dir_suffix = f'10s-log-1cot_ppo_10sde_train1_groupstd_train-small-auto_tame'
+    resolution = 512
+    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
+        run_name=run_name,
+        save_dir_suffix=save_dir_suffix,
+        resolution=resolution,
+        auto_log_tame=True,
     )
     return config
 
 def consistencyReward_clip_mini():
-    run_name = 'H200, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], mini, groupstd,'
-    save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-mini'
+    run_name = 'H200, PPO, 1s+log(1+0.2cot), 10sde, noise=0.7 at [1], mini, groupstd,'
+    save_dir_suffix = f'10s-log-1cot_ppo_10sde_train1_groupstd_train-mini'
     resolution = 384
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
-        resolution=resolution
+        resolution=resolution,
+    )
+    return config
+
+def consistencyReward_clip_mini_auto_tame():
+    run_name = 'H200, PPO, auto_tame 1s+log(1+0.2cot), 10sde, noise=0.7 at [1], mini, groupstd,'
+    save_dir_suffix = f'10s-log-1cot_ppo_10sde_train1_groupstd_train-mini-auto_tame'
+    resolution = 384
+    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
+        run_name=run_name,
+        save_dir_suffix=save_dir_suffix,
+        resolution=resolution,
+        auto_log_tame=True,
     )
     return config
 
 def consistencyReward_clip_micro():
-    run_name = 'H200, PPO, 1s+log(1+0.1crm), 10sde, noise=0.7 at [1], micro, groupstd,'
-    save_dir_suffix = f'10s-log-1crm_ppo_10sde_train1_groupstd_train-micro'
+    run_name = 'H200, PPO, 1s+log(1+0.2cot), 10sde, noise=0.7 at [1], micro, groupstd,'
+    save_dir_suffix = f'10s-log-1cot_ppo_10sde_train1_groupstd_train-micro'
     resolution = 256
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
-        resolution=resolution
+        resolution=resolution,
+    )
+    return config
+
+def consistencyReward_clip_micro_auto_tame():
+    run_name = 'H200, PPO, auto_tame, 1s+log(1+0.2cot), 10sde, noise=0.7 at [1], micro, groupstd,'
+    save_dir_suffix = f'10s-log-1cot_ppo_10sde_train1_groupstd_train-micro-auto_tame'
+    resolution = 256
+    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
+        run_name=run_name,
+        save_dir_suffix=save_dir_suffix,
+        resolution=resolution,
+        auto_log_tame=True,
     )
     return config
 
