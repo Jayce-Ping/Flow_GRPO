@@ -350,8 +350,8 @@ def consistencyreward_for_editing_qwenimage():
 
     config.sample.cps = False
     config.sample.num_steps = 10
-    config.sample.noise_steps = [1,2,3]
-    config.sample.noise_level = 1.5
+    config.sample.noise_steps = [1,2,3,4]
+    config.sample.noise_level = 1.0
 
     ## batches
     config.enable_gradient_checkpointing = False
