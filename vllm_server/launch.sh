@@ -55,15 +55,43 @@ echo "📦 Models: $NUM_MODELS"
 # Calculate GPU allocation
 #=============================================================================
 
-MODELS_PER_GPU=$(awk "BEGIN {print int(1.0 / $GPU_MEMORY_UTILIZATION)}")
-echo "💡 Models per GPU: $MODELS_PER_GPU (based on ${GPU_MEMORY_UTILIZATION} utilization)"
-
-GPU_ASSIGNMENT=()
-for i in "${!MODEL_PATHS[@]}"; do
-    GPU_INDEX=$((i / MODELS_PER_GPU % NUM_GPUS))
-    GPU_ID="${AVAILABLE_GPUS[$GPU_INDEX]}"
-    GPU_ASSIGNMENT+=($GPU_ID)
-done
+if [ $NUM_MODELS -eq 1 ]; then
+    # 单模型：使用所有GPU
+    GPUS_PER_MODEL=$NUM_GPUS
+    echo "💡 Single model mode: using all $NUM_GPUS GPUs with tensor parallelism"
+else
+    # 多模型：平均分配GPU
+    GPUS_PER_MODEL=$((NUM_GPUS / NUM_MODELS))
+    
+    if [ $GPUS_PER_MODEL -eq 0 ]; then
+        echo "❌ Error: Not enough GPUs ($NUM_GPUS) for $NUM_MODELS models"
+        echo "   Each model needs at least 1 GPU"
+        exit 1
+    fi
+    
+    echo "💡 Multi-model mode: $GPUS_PER_MODEL GPU(s) per model"
+    
+    # 为每个模型分配GPU
+    GPU_ASSIGNMENT=()
+    TP_SIZES=()
+    
+    for i in "${!MODEL_PATHS[@]}"; do
+        START_GPU=$((i * GPUS_PER_MODEL))
+        MODEL_GPUS=()
+        
+        for ((j=0; j<GPUS_PER_MODEL; j++)); do
+            GPU_INDEX=$((START_GPU + j))
+            if [ $GPU_INDEX -lt $NUM_GPUS ]; then
+                MODEL_GPUS+=("${AVAILABLE_GPUS[$GPU_INDEX]}")
+            fi
+        done
+        
+        # 将GPU列表转为逗号分隔的字符串
+        GPU_STR=$(IFS=,; echo "${MODEL_GPUS[*]}")
+        GPU_ASSIGNMENT+=("$GPU_STR")
+        TP_SIZES+=(${#MODEL_GPUS[@]})
+    done
+fi
 
 #=============================================================================
 # Cleanup
@@ -93,24 +121,23 @@ echo "🚀 Starting vLLM servers..."
 PIDS=()
 PORTS=()
 
-# 单模型模式：直接使用 VLLM_PORT
+# 单模型模式：使用所有GPU
 if [ $NUM_MODELS -eq 1 ]; then
     MODEL_PATH="${MODEL_PATHS[0]}"
     MODEL_NAME="${MODEL_NAMES[0]}"
-    GPU_ID="${GPU_ASSIGNMENT[0]}"
-    PORT=$VLLM_PORT  # Use public port directly
+    PORT=$VLLM_PORT
     LOG_FILE="${VLLM_LABEL}_${MODEL_NAME}.log"
     PID_FILE="${VLLM_LABEL}_${MODEL_NAME}.pid"
     
-    echo "   [Single Model Mode] $MODEL_NAME -> GPU$GPU_ID:$PORT"
+    echo "   [Single Model] $MODEL_NAME -> GPUs [${AVAILABLE_GPUS[*]}] (TP=$NUM_GPUS)"
     
-    CUDA_VISIBLE_DEVICES=$GPU_ID vllm serve "$MODEL_PATH" \
+    CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES vllm serve "$MODEL_PATH" \
         --served-model-name "$MODEL_NAME" \
         --gpu-memory-utilization $GPU_MEMORY_UTILIZATION \
         --max-model-len $MAX_MODEL_LEN \
         --host 0.0.0.0 \
         --port $PORT \
-        --tensor-parallel-size 1 \
+        --tensor-parallel-size $NUM_GPUS \
         --trust-remote-code \
         > "$LOG_FILE" 2>&1 &
     
@@ -119,24 +146,25 @@ if [ $NUM_MODELS -eq 1 ]; then
     PIDS+=($PID)
     PORTS+=($PORT)
 else
-    # 多模型模式：使用内部端口
+    # 多模型模式：每个模型使用分配的GPU
     for i in "${!MODEL_PATHS[@]}"; do
         MODEL_PATH="${MODEL_PATHS[$i]}"
         MODEL_NAME="${MODEL_NAMES[$i]}"
-        GPU_ID="${GPU_ASSIGNMENT[$i]}"
+        GPU_STR="${GPU_ASSIGNMENT[$i]}"
+        TP_SIZE="${TP_SIZES[$i]}"
         PORT=$((BACKEND_BASE_PORT + i))
         LOG_FILE="${VLLM_LABEL}_${MODEL_NAME}.log"
         PID_FILE="${VLLM_LABEL}_${MODEL_NAME}.pid"
         
-        echo "   [$((i+1))/$NUM_MODELS] $MODEL_NAME -> GPU$GPU_ID:$PORT"
+        echo "   [$((i+1))/$NUM_MODELS] $MODEL_NAME -> GPUs [$GPU_STR] (TP=$TP_SIZE) :$PORT"
         
-        CUDA_VISIBLE_DEVICES=$GPU_ID vllm serve "$MODEL_PATH" \
+        CUDA_VISIBLE_DEVICES=$GPU_STR vllm serve "$MODEL_PATH" \
             --served-model-name "$MODEL_NAME" \
             --gpu-memory-utilization $GPU_MEMORY_UTILIZATION \
             --max-model-len $MAX_MODEL_LEN \
             --host 127.0.0.1 \
             --port $PORT \
-            --tensor-parallel-size 1 \
+            --tensor-parallel-size $TP_SIZE \
             --trust-remote-code \
             > "$LOG_FILE" 2>&1 &
         
@@ -197,13 +225,22 @@ for i in "${!MODEL_NAMES[@]}"; do
     PORT_VALUE=$VLLM_PORT
     [ $NUM_MODELS -gt 1 ] && PORT_VALUE=$((BACKEND_BASE_PORT + i))
     
+    if [ $NUM_MODELS -eq 1 ]; then
+        GPU_INFO="${AVAILABLE_GPUS[*]}"
+        TP_VALUE=$NUM_GPUS
+    else
+        GPU_INFO="${GPU_ASSIGNMENT[$i]}"
+        TP_VALUE="${TP_SIZES[$i]}"
+    fi
+    
     cat >> "$INFO_FILE" << EOF
   {
     "model_name": "${MODEL_NAMES[$i]}",
     "model_path": "${MODEL_PATHS[$i]}",
-    "gpu_id": ${GPU_ASSIGNMENT[$i]},
+    "gpu_ids": "$GPU_INFO",
     "port": $PORT_VALUE,
-    "pid": ${PIDS[$i]}
+    "pid": ${PIDS[$i]},
+    "tensor_parallel_size": $TP_VALUE
   }
 EOF
 done
@@ -262,9 +299,11 @@ echo ""
 if [ $NUM_MODELS -eq 1 ]; then
     echo "🔗 Direct vLLM Endpoint: http://localhost:$VLLM_PORT"
     echo "📚 API Docs: http://localhost:$VLLM_PORT/docs"
+    echo "🎯 Tensor Parallel: $NUM_GPUS GPUs"
 else
     echo "🔗 Gateway Endpoint: http://localhost:$VLLM_PORT"
     echo "📚 Gateway Docs: http://localhost:$VLLM_PORT/docs"
+    echo "🎯 GPU Allocation: $GPUS_PER_MODEL GPU(s) per model"
 fi
 
 echo ""
