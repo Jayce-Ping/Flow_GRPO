@@ -114,7 +114,7 @@ def harmonic_mean(**kwargs):
 # -----------------------------------------------------------Flux---------------------------------------------------------------
 
 def editscore_flux():
-    gpu_number = 2
+    gpu_number = get_gpu_count()
     config = compressibility()
 
     config.dataset = "/root/siton-tmp/GEdit-Bench/train_split"
@@ -166,17 +166,24 @@ def editscore_flux():
     config.enable_gradient_checkpointing = True
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 40 # Number of unique prompts used in each epoch all gathered
+    unique_sample_num_range = range(42, 50)
+    # config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = None # Number of unique prompts used in each epoch all gathered
 
+    for num in unique_sample_num_range:
+        total_samples = num * config.sample.num_images_per_prompt
+        if total_samples % (gpu_number * config.sample.batch_size) == 0:
+            config.sample.unique_sample_num_per_epoch = num
+            break
+    assert config.sample.unique_sample_num_per_epoch is not None, f"Cannot find proper unique_sample_num_per_epoch in range {list(unique_sample_num_range)}, please check your configuration!"
+    
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
     ) # Total number of samples on all processes
 
-    # Update number of unique prompt per epoch and check balance
-    unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.num_images_per_prompt
-    assert unique_sample_num_per_epoch % gpu_number == 0, f"""Assure all samples of one prompt are on the same GPU."""
-    config.sample.unique_sample_num_per_epoch = unique_sample_num_per_epoch
+    # Update number of unique prompt per epoch
+    config.sample.unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.max_group_size
 
     # number of batches per epoch per GPU
     config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
@@ -202,7 +209,7 @@ def editscore_flux():
     return config
 
 def consistencyreward_for_editing_flux():
-    gpu_number = 4
+    gpu_number = get_gpu_count()
     config = compressibility()
 
     config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split_en"
@@ -250,17 +257,24 @@ def consistencyreward_for_editing_flux():
     config.enable_gradient_checkpointing = False
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch all gathered
+    unique_sample_num_range = range(42, 50)
+    # config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = None # Number of unique prompts used in each epoch all gathered
 
+    for num in unique_sample_num_range:
+        total_samples = num * config.sample.num_images_per_prompt
+        if total_samples % (gpu_number * config.sample.batch_size) == 0:
+            config.sample.unique_sample_num_per_epoch = num
+            break
+    assert config.sample.unique_sample_num_per_epoch is not None, f"Cannot find proper unique_sample_num_per_epoch in range {list(unique_sample_num_range)}, please check your configuration!"
+    
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
     ) # Total number of samples on all processes
 
-    # Update number of unique prompt per epoch and check balance
-    unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.num_images_per_prompt
-    assert unique_sample_num_per_epoch % gpu_number == 0, f"""Assure all samples of one prompt are on the same GPU."""
-    config.sample.unique_sample_num_per_epoch = unique_sample_num_per_epoch
+    # Update number of unique prompt per epoch
+    config.sample.unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.max_group_size
 
     # number of batches per epoch per GPU
     config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
@@ -287,7 +301,7 @@ def consistencyreward_for_editing_flux():
 
 
 def consistencyreward_for_editing_qwenimage():
-    gpu_number = 8
+    gpu_number = get_gpu_count()
     config = compressibility()
 
     config.dataset = "/home/users/astar/cfar/stuchengyou/jcy/datasets/GEdit-Bench/train_split"
@@ -343,17 +357,24 @@ def consistencyreward_for_editing_qwenimage():
     config.enable_gradient_checkpointing = False
     config.sample.batch_size = 1
     config.sample.num_images_per_prompt = 16
-    config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch all gathered
+    unique_sample_num_range = range(42, 50)
+    # config.sample.unique_sample_num_per_epoch = 48 # Number of unique prompts used in each epoch all gathered
+    config.sample.unique_sample_num_per_epoch = None # Number of unique prompts used in each epoch all gathered
 
+    for num in unique_sample_num_range:
+        total_samples = num * config.sample.num_images_per_prompt
+        if total_samples % (gpu_number * config.sample.batch_size) == 0:
+            config.sample.unique_sample_num_per_epoch = num
+            break
+    assert config.sample.unique_sample_num_per_epoch is not None, f"Cannot find proper unique_sample_num_per_epoch in range {list(unique_sample_num_range)}, please check your configuration!"
+    
     config.sample.sample_num_per_epoch = math.lcm(
         config.sample.num_images_per_prompt * config.sample.unique_sample_num_per_epoch,
         gpu_number * config.sample.batch_size
     ) # Total number of samples on all processes
 
-    # Update number of unique prompt per epoch and check balance
-    unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.num_images_per_prompt
-    assert unique_sample_num_per_epoch % gpu_number == 0, f"""Assure all samples of one prompt are on the same GPU."""
-    config.sample.unique_sample_num_per_epoch = unique_sample_num_per_epoch
+    # Update number of unique prompt per epoch
+    config.sample.unique_sample_num_per_epoch = config.sample.sample_num_per_epoch // config.sample.max_group_size
 
     # number of batches per epoch per GPU
     config.sample.num_batches_per_epoch = int(config.sample.sample_num_per_epoch / (gpu_number * config.sample.batch_size))
