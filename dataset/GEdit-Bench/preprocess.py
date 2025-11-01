@@ -8,12 +8,12 @@ def split_dataset(dataset, test_num=128, seed=42, language=None):
     if isinstance(language, str):
         language = [language]
 
-    if language is not None:
-        dataset = [
-            {'prompt': item['instruction'], 'image': item['input_image'], 'instruction_language': item['instruction_language']}
-            for item in tqdm(dataset, desc="Filtering dataset") if item['instruction_language'] in language
-        ]
-        dataset = Dataset.from_list(dataset)
+    dataset = [
+        {'prompt': item['instruction'], 'image': item['input_image'], 'instruction_language': item['instruction_language']}
+        for item in tqdm(dataset, desc="Filtering dataset")
+        if language is None or item['instruction_language'] in language
+    ]
+    dataset = Dataset.from_list(dataset)
 
     random.seed(seed)
     test_indices = random.sample(range(len(dataset)), test_num)
