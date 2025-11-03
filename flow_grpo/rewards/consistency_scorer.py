@@ -116,6 +116,16 @@ class ConsistencyScorer:
                 f"do the two images maintain consistency in terms of style, logic and identity? "
                 f"Answer \"Yes\" and \"No\" first, and then provide detailed reasons."
             )
+        elif self.prompt_template_version == 2:
+            # Not good
+            sub_prompts = divide_prompt(prompt)
+            main_prompt = sub_prompts[0]  # Use the main prompt for context if needed
+            text_prompt = (
+                    f"Given two subfigures generated based on the theme: \"{main_prompt}\", "
+                    f"do the two images maintain consistency in terms of style, logic, and identity? "
+                    f"If the two images look almost identical or duplicated, answer \"No\". "
+                    f"Otherwise, answer \"Yes\" or \"No\" first, and then provide detailed reasons."
+                )
         else:
             text_prompt = f"Do images meet the following criteria? {criteria_text} Please answer Yes or No first, then provide detailed reasons."
         async def process_image_pair(image1, image2) -> float:
