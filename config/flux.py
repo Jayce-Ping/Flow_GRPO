@@ -64,7 +64,7 @@ def compressibility():
     config.sample.guidance_scale = 3.5
     config.sample.cps = False
     config.sample.noise_level = 0.7
-    config.sample.global_std = True
+    config.sample.global_std = False
     config.sample.subfig_permutation = False
     config.sample.max_from_same_source = None
 
@@ -342,7 +342,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
 
     # Sampling
     ## sliding window scheduler
-    config.sample.global_std = True
+    config.sample.global_std = False
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.guidance_scale = 3.5
@@ -404,7 +404,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
 
 
 
-def consistencyReward_clip_ori_auto_tame():
+def consistencyReward_clip_ori():
     prompt_template_version = 0
     weights = (0.2, 1.0)
     run_name = f'H200, PPO, auto-tame, {weights[1]}s+{weights[0]}cot, 10sde, noise=0.7 at [1], original_size, groupstd, v{prompt_template_version}'
@@ -420,7 +420,7 @@ def consistencyReward_clip_ori_auto_tame():
     )
     return config
 
-def consistencyReward_clip_medium_auto_tame():
+def consistencyReward_clip_medium():
     prompt_template_version = 0
     weights = (0.1, 1.0)
     run_name = f'H200, PPO, auto-tame, {weights[1]}s+{weights[0]}cot, 10sde, noise=0.7 at [1], medium, groupstd, v{prompt_template_version}'
@@ -436,27 +436,11 @@ def consistencyReward_clip_medium_auto_tame():
     )
     return config
 
-def consistencyReward_clip_small_v0():
+def consistencyReward_clip_small():
     prompt_template_version = 0
-    weights = (0.2, 1.0)
-    run_name = f'H200, PPO, auto-tame, {weights[1]}s+{weights[0]}cot, 10sde, noise=0.7 at [1], small, global_std, v{prompt_template_version}'
-    save_dir_suffix = f'10s-log-2cot_ppo_10sde_train1_groupstd_train-small-auto_tame-v{prompt_template_version}'
-    resolution = 512
-    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
-        run_name=run_name,
-        save_dir_suffix=save_dir_suffix,
-        resolution=resolution,
-        auto_log_tame=True,
-        prompt_template_version=prompt_template_version,
-        weights=weights,
-    )
-    return config
-
-def consistencyReward_clip_small_v1():
-    prompt_template_version = 1
-    weights = (0.2, 1.0)
-    run_name = f'H200, PPO, auto-tame, {weights[1]}s+{weights[0]}cot, 10sde, noise=0.7 at [1], small, global_std, v{prompt_template_version}'
-    save_dir_suffix = f'10s-log-2cot_ppo_10sde_train1_groupstd_train-small-auto_tame-v{prompt_template_version}'
+    weights = (0.1, 0.9)
+    run_name = f'H200, PPO, auto-tame, {weights[1]}s+{weights[0]}cot, 10sde, noise=0.7 at [1], small, group_std, v{prompt_template_version}'
+    save_dir_suffix = f'9s-log-1cot_ppo_10sde_train1_groupstd_train-small-auto_tame-v{prompt_template_version}'
     resolution = 512
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
