@@ -101,7 +101,7 @@ def compressibility():
     config.resume_from_id = None
     config.resume_from_step = None
     config.resume_from_epoch = None
-    config.project_name = 'ConsistencyNFT-Flux'
+    config.project_name = 'Paco-GRPO'
     return config
 
 # --------------------------------------------------Some general aggregate functions------------------------------------------------------------
@@ -321,10 +321,11 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
         "prompt_template_version": prompt_template_version
     }
     if auto_log_tame:
-        agg_fn = get_log_tamed_aggregate_fn(delta=0.15, epsilon=1e-4)
+        agg_fn = get_log_tamed_aggregate_fn(delta=0.2, epsilon=1e-4)
     else:
-        def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
-            return np.log(1 + consistency_score) + subfig_clipT
+        # def agg_fn(consistency_score : np.ndarray, subfig_clipT : np.ndarray) -> np.ndarray:
+        #     return consistency_score + subfig_clipT
+        agg_fn = None
 
     config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
     config.train.aggregate_fn = agg_fn
@@ -407,8 +408,8 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
 def consistencyReward_clip_ori():
     prompt_template_version = 0
     weights = (0.2, 1.0)
-    run_name = f'H200, PPO, auto-tame, {weights[1]}s+{weights[0]}cot, 10sde, noise=0.7 at [1], original_size, groupstd, v{prompt_template_version}'
-    save_dir_suffix = f'10s-log-2cot_ppo_10sde_train1_groupstd_train-original-auto_tame-v{prompt_template_version}'
+    run_name = f'Auto-tame, {weights[1]}s+{weights[0]}cot, ori, group_std'
+    save_dir_suffix = f'10s-2cot_ppo_10sde_train1_groupstd_train-ori'
     resolution = 1024
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
@@ -422,9 +423,9 @@ def consistencyReward_clip_ori():
 
 def consistencyReward_clip_medium():
     prompt_template_version = 0
-    weights = (0.1, 1.0)
-    run_name = f'H200, PPO, auto-tame, {weights[1]}s+{weights[0]}cot, 10sde, noise=0.7 at [1], medium, groupstd, v{prompt_template_version}'
-    save_dir_suffix = f'10s-log-2cot_ppo_10sde_train1_groupstd_train-medium-auto_tame-v{prompt_template_version}'
+    weights = (0.2, 1.0)
+    run_name = f'Auto-tame, {weights[1]}s+{weights[0]}cot, medium, group_std'
+    save_dir_suffix = f'10s-2cot_ppo_10sde_train1_groupstd_train-medium'
     resolution = 720
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
@@ -438,15 +439,31 @@ def consistencyReward_clip_medium():
 
 def consistencyReward_clip_small():
     prompt_template_version = 0
-    weights = (0.1, 0.9)
-    run_name = f'H200, PPO, auto-tame, {weights[1]}s+{weights[0]}cot, 10sde, noise=0.7 at [1], small, group_std, v{prompt_template_version}'
-    save_dir_suffix = f'9s-log-1cot_ppo_10sde_train1_groupstd_train-small-auto_tame-v{prompt_template_version}'
+    weights = (0.2, 1.0)
+    run_name = f'Auto-tame, {weights[1]}s+{weights[0]}cot, small, group_std'
+    save_dir_suffix = f'10s-2cot_ppo_10sde_train1_groupstd_train-small'
     resolution = 512
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution,
         auto_log_tame=True,
+        prompt_template_version=prompt_template_version,
+        weights=weights,
+    )
+    return config
+
+def consistencyReward_clip_small_notame():
+    prompt_template_version = 0
+    weights = (0.2, 1.0)
+    run_name = f'H200, PPO, no-tame, {weights[1]}s+{weights[0]}cot, 10sde, noise=0.7 at [1], small, group_std, v{prompt_template_version}'
+    save_dir_suffix = f'10s-1cot_ppo_10sde_train1_groupstd_train-small'
+    resolution = 512
+    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
+        run_name=run_name,
+        save_dir_suffix=save_dir_suffix,
+        resolution=resolution,
+        auto_log_tame=False,
         prompt_template_version=prompt_template_version,
         weights=weights,
     )

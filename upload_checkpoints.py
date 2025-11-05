@@ -18,7 +18,7 @@ def upload_checkpoint_dir(folder_path, path_in_repo, repo_id, commit_message="Up
         commit_message=commit_message,
         token=token,
         repo_type='model',
-        ignore_patterns=["*.tmp", "*.DS_Store", "*.log", "*.ipynb", 'eval_images'],
+        ignore_patterns=["*.tmp", "*.DS_Store", "*.log", "*.ipynb", '**/eval_images/**', "*.png", "*.jpg"],
     )
     print(f"Folder '{folder_path}' successfully uploaded to '{repo_id}'.")
 
@@ -45,9 +45,10 @@ if __name__ == "__main__":
     label = "Qwen-GEdit-Split-CoT"
     # SAVE_DIR = '/home/users/astar/ares/cp3jia/scratch/Flow_NFT/logs'
     # SAVE_DIR = '/home/users/astar/ares/cp3jia/scratch/Flow_Kontext/logs'
-    SAVE_DIR = '/home/users/astar/cfar/stuchengyou/jcy/Flux_Kontext/logs'
+    # SAVE_DIR = '/home/users/astar/cfar/stuchengyou/jcy/Flux_Kontext/logs'
+    SAVE_DIR = '/home/users/astar/cfar/stuchengyou/jcy/Flux_GRPO/logs'
     # folder_name = 'consistencyReward-subclip/8s-log-2cr_ppo_10sde_train1_groupstd_train-mini'
-    folder_name = "consistency_for_editing/Qwen-GEdit-Split-CoT"
+    folder_name = "consistencyReward-subclip/10s-2cot_10sde_train1_globalstd_train-small-auto_tame-v2-20251103-150047"
     folder_path = os.path.join(SAVE_DIR, folder_name)
     path_in_repo = folder_name
     repo_id = "Jayce-Ping/Flux-NFT"
