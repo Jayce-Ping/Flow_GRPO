@@ -38,7 +38,8 @@ FLUX_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 # SAVE_DIR = '/scratch/users/astar/ares/cp3jia/Flux_GRPO/logs'
 # SAVE_DIR = '/root/siton-tmp/Flux_GRPO/logs'
 # SAVE_DIR = '/home/hangwei/storage/jcy/Flux_GRPO/logs'
-SAVE_DIR = '/home/users/astar/cfar/stuchengyou/jcy/Flux_GRPO/logs'
+# SAVE_DIR = '/home/users/astar/cfar/stuchengyou/jcy/Flux_GRPO/logs'
+SAVE_DIR = '/home/users/astar/cfar/stuchengyou/jcy/Paco-GRPO/logs'
 # --------------------------------------------------base------------------------------------------------------------
 def compressibility():
     config = base.get_config()
