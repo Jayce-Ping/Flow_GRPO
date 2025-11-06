@@ -1130,6 +1130,7 @@ def main(_):
             del sample["rewards"]
             del sample["prompt_ids"]
             del sample['metadata']
+            del sample['image']
 
 
         #################### TRAINING ####################
