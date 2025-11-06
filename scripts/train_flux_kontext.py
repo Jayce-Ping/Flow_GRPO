@@ -1064,7 +1064,22 @@ def main(_):
                 f"{prompt}_{img_hash}"
                 for prompt, img_hash in zip(prompts, gathered_ref_images)
             ]
-            advantages = stat_tracker.compute_advantages(prompts, gathered_rewards['avg'], type='grpo')
+            aggregated_rewards = stat_tracker.multi_reward_aggregate(
+                prompts,
+                gathered_rewards,
+                reward_weights=config.train.reward_fn,
+                aggregate_fn=config.train.aggregate_fn,
+                store_result=True,
+            )
+            # It should not happen since `multi_reward_aggregate` stores `avg` already
+            if 'avg' not in gathered_rewards:
+                gathered_rewards['avg'] = aggregated_rewards
+            # compute advantages
+            advantages = stat_tracker.compute_advantages(
+                prompts,
+                gathered_rewards['avg'],
+                type='grpo',
+            )
             if accelerator.is_local_main_process:
                 print("len(prompts)", len(prompts))
                 print("len unique prompts", len(set(prompts)))
