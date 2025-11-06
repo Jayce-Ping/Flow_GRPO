@@ -215,7 +215,7 @@ def consistencyreward_for_editing_flux():
     gpu_number = get_gpu_count()
     config = compressibility()
 
-    config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split_en"
+    config.dataset = "/home/users/astar/cfar/stuchengyou/jcy/datasets/GEdit-Bench/train_split_en"
     config.prompt_fn = 'arrow_editing'
     config.resolution = 512
     config.train.resolution = 384
