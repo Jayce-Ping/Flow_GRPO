@@ -215,17 +215,22 @@ def consistencyreward_for_editing_flux():
     config.dataset = "/home/users/astar/ares/cp3jia/scratch/datasets/GEdit-Bench/train_split_en"
     config.prompt_fn = 'arrow_editing'
     config.resolution = 512
+    config.train.resolution = 384
+    config.test.resolution = 512
     config.pretrained.model = FLUX_MODEL_PATH
     config.enable_flexible_size = False
     config.enable_mem_log = False
     # config.logging_platform = "swanlab"
 
-    config.run_name = 'Flux-Kontext, ConsistencyReward-7B-Mix-epoch1, new prompt'
-    config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'Flux-GEdit-Split-mix-new-prompt')
+    config.run_name = 'Flux-Kontext, PaCo-Reward-7B-01'
+    config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'Flux-Kontext-PaCo-01-GEdit-Split-EN')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
     config.train.reward_fn = {
         "consistencyreward_for_editing": 1.0,
+    }
+    config.train.reward_fn_kwargs = {
+        'model': 'PaCo-Reward-7B-01',
     }
     agg_fn = None
     config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
@@ -233,6 +238,7 @@ def consistencyreward_for_editing_flux():
     config.test.reward_fn = {
         "consistencyreward_for_editing": 1.0,
     }
+    config.test.reward_fn_kwargs = config.train.reward_fn_kwargs
     config.test.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
     config.test.aggregate_fn = agg_fn
 
