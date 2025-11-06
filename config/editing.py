@@ -7,6 +7,9 @@ import inspect
 import numpy as np
 from scipy.stats import gmean, hmean
 import torch
+from datetime import datetime
+
+time_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
 spec = spec_from_file_location('base', os.path.join(os.path.dirname(__file__), "base.py"))
 base = module_from_spec(spec)
@@ -222,15 +225,15 @@ def consistencyreward_for_editing_flux():
     config.enable_mem_log = False
     # config.logging_platform = "swanlab"
 
-    config.run_name = 'Flux-Kontext, PaCo-Reward-7B-01'
-    config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', 'Flux-Kontext-PaCo-01-GEdit-Split-EN')
+    config.run_name = 'Flux-Kontext, ConsistencyReward-7B-CoT-01'
+    config.save_dir = os.path.join(SAVE_DIR, f'consistency_for_editing', f'Flux-Kontext-GEdit-Split-EN-{time_stamp}')
     config.save_freq = 10 # epoch
     config.eval_freq = 10 # 0 for no eval applied
     config.train.reward_fn = {
         "consistencyreward_for_editing": 1.0,
     }
     config.train.reward_fn_kwargs = {
-        'model': 'PaCo-Reward-7B-01',
+        'model': 'ConsistencyReward-7B-CoT-01',
     }
     agg_fn = None
     config.train.aggregate_fn_code = inspect.getsource(agg_fn) if agg_fn is not None else None
