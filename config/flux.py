@@ -462,6 +462,24 @@ def consistencyReward_clip_small():
     )
     return config
 
+def consistencyReward_clip_small_reproduce():
+    prompt_template_version = 0
+    weights = (0.1, 1.0)
+    delta = 0.2
+    run_name = f'To Reproduce, Auto-tame ({delta}), {weights[1]}s+{weights[0]}cot, small, group_std'
+    save_dir_suffix = f'10s-1cot_ppo_10sde_train1_groupstd_train-small'
+    resolution = 512
+    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
+        run_name=run_name,
+        save_dir_suffix=save_dir_suffix,
+        resolution=resolution,
+        auto_log_tame=True,
+        prompt_template_version=prompt_template_version,
+        weights=weights,
+        delta=delta
+    )
+    return config
+
 def consistencyReward_clip_mini():
     prompt_template_version = 0
     weights = (0.1, 1.0)
@@ -498,12 +516,12 @@ def consistencyReward_clip_micro():
     )
     return config
 
-def consistencyReward_clip_small_notame():
+def consistencyReward_clip_small_no_tame():
     prompt_template_version = 0
     weights = (0.1, 1.0)
     delta = 0.15
     run_name = f'No-tame, {weights[1]}s+{weights[0]}cot, small, group_std'
-    save_dir_suffix = f'10s-1cot_ppo_10sde_train1_groupstd_train-small'
+    save_dir_suffix = f'10s-1cot_ppo_10sde_train1_groupstd_train-small-notame'
     resolution = 512
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
