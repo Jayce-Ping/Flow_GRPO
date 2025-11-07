@@ -160,14 +160,14 @@ def standardize_aggregate_test():
     auto_log_tame: bool = False
     prompt_template_version: int = 0
     weights: tuple[float, float] = (1.0, 1.0)
-    assert resolution in [256, 384, 512, 720, 1024], f"Unsupported resolution: {resolution}"
+    assert resolution in [256, 384, 512, 768, 1024], f"Unsupported resolution: {resolution}"
     gpu_number = get_gpu_count()
     config = compressibility()
     dataset_map = {
         256: "dataset/T2IS/half_2by2_micro_train",
         384: "dataset/T2IS/half_2by2_mini_train",
         512: "dataset/T2IS/half_2by2_small_train",
-        720: "dataset/T2IS/half_2by2_medium_train",
+        768: "dataset/T2IS/half_2by2_medium_train",
         1024: "dataset/T2IS/half_2by2"
     }
     config.dataset = os.path.join(os.getcwd(), dataset_map[resolution])
@@ -286,14 +286,14 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     weights: tuple[float, float] = (0.1, 1.0),
     delta: float = 0.15
 ):
-    assert resolution in [256, 384, 512, 720, 1024], f"Unsupported resolution: {resolution}"
+    assert resolution in [256, 384, 512, 768, 1024], f"Unsupported resolution: {resolution}"
     gpu_number = get_gpu_count()
     config = compressibility()
     dataset_map = {
         256: "dataset/T2IS/half_2by2_micro_train",
         384: "dataset/T2IS/half_2by2_mini_train",
         512: "dataset/T2IS/half_2by2_small_train",
-        720: "dataset/T2IS/half_2by2_medium_train",
+        768: "dataset/T2IS/half_2by2_medium_train",
         1024: "dataset/T2IS/half_2by2"
     }
     config.dataset = os.path.join(os.getcwd(), dataset_map[resolution])
@@ -432,7 +432,7 @@ def consistencyReward_clip_medium():
     delta = 0.15
     run_name = f'Auto-tame ({delta}), {weights[1]}s+{weights[0]}cot, medium, group_std'
     save_dir_suffix = f'10s-1cot_ppo_10sde_train1_groupstd_train-medium'
-    resolution = 720
+    resolution = 768
     config = generate_ConsistencyReward_clip_config_for_resolution_exp(
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
