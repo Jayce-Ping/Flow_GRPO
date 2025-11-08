@@ -284,7 +284,8 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     auto_log_tame: bool = False,
     prompt_template_version: int = 0,
     weights: tuple[float, float] = (0.1, 1.0),
-    delta: float = 0.15
+    delta: float = 0.15,
+    global_std: bool = False
 ):
     assert resolution in [256, 384, 512, 768, 1024], f"Unsupported resolution: {resolution}"
     gpu_number = get_gpu_count()
@@ -346,7 +347,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
 
     # Sampling
     ## sliding window scheduler
-    config.sample.global_std = False
+    config.sample.global_std = global_std
     config.sample.use_history = False
     config.sample.same_latent = False
     config.sample.guidance_scale = 3.5
@@ -464,8 +465,8 @@ def consistencyReward_clip_small():
 
 def consistencyReward_clip_small_reproduce():
     prompt_template_version = 0
-    weights = (0.2, 0.8)
-    delta = 0.2
+    weights = (0.1, 1.0)
+    delta = 0.15
     run_name = f'Auto-tame ({delta}), {weights[1]}s+{weights[0]}cot, small, group_std'
     save_dir_suffix = f'{weights[1]}s-{weights[0]}cot_ppo_10sde_train1_groupstd_train-small'
     resolution = 512
@@ -478,6 +479,29 @@ def consistencyReward_clip_small_reproduce():
         weights=weights,
         delta=delta
     )
+    config.train.clip_range = 1e-5
+    return config
+
+def consistencyReward_clip_setting_2():
+    prompt_template_version = 1
+    weights = (0.2, 0.8)
+    delta = 0.2
+    global_std = True
+    run_name = f'Auto-tame ({delta}), {weights[1]}s+{weights[0]}cot, small'
+    run_name += ', global_std' if global_std else ', group_std'
+    save_dir_suffix = f'{weights[1]}s-{weights[0]}cot_ppo_10sde_train1_groupstd_train-small'
+    resolution = 512
+    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
+        run_name=run_name,
+        save_dir_suffix=save_dir_suffix,
+        resolution=resolution,
+        auto_log_tame=True,
+        prompt_template_version=prompt_template_version,
+        weights=weights,
+        delta=delta,
+        global_std=global_std
+    )
+    # config.train.clip_range = 1e-4
     return config
 
 def consistencyReward_clip_mini():
