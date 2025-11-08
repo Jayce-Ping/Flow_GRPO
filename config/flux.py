@@ -333,7 +333,7 @@ def consistencyReward_clip_small():
     )
     return config
 
-def consistencyReward_clip_small_reproduce():
+def small_reproduce():
     prompt_template_version = 0
     weights = (0.1, 0.9)
     delta = 0.2
