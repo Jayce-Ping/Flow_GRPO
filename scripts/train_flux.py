@@ -1534,6 +1534,7 @@ def main(_):
                 reward_weights=config.train.reward_fn,
                 aggregate_fn=config.train.aggregate_fn,
                 store_result=True,
+                log_tame_delta=config.train.log_tame_delta,
             )
             # It should not happen since `multi_reward_aggregate` stores `avg` already
             if 'avg' not in gathered_rewards:

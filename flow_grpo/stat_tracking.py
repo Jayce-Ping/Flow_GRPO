@@ -20,6 +20,7 @@ class PerPromptStatTracker:
             reward_weights : Optional[dict[str, float]] = {},
             aggregate_fn: Optional[Callable[[Dict[str, np.ndarray]], np.ndarray]] = None,
             store_result: bool = True,
+            log_tame_delta: Optional[float] = None,
         ) -> np.ndarray:
         """
             Aggregate multi-dimensional rewards for each prompt group and optionally store the result.
@@ -60,6 +61,14 @@ class PerPromptStatTracker:
             # Drop 'avg' key if exists to avoid confusion and log a warning
             logger.warning("'avg' key found in rewards dictionary. It will be ignored in multi_reward_update.")
             rewards = {k: v for k, v in rewards.items() if k != 'avg'}
+
+        # Apply log-tame transformation if specified
+        if log_tame_delta is not None:
+            for k, v in rewards.items():
+                h = np.std(v) / (np.mean(v) + 1e-6)  # Avoid division by zero
+                # Apply log transformation to values those rewards with high h values
+                if h > log_tame_delta:
+                    rewards[k] = np.log(1 + v)
         
         # Aggregate rewards within each prompt (group)
         prompts = np.array(prompts)
