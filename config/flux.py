@@ -158,7 +158,6 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     run_name: str,
     save_dir_suffix: str,
     resolution: int,
-    auto_log_tame: bool = False,
     prompt_template_version: int = 0,
     weights: tuple[float, float] = (0.2, 0.8),
     delta: float = 0.2,
@@ -291,7 +290,6 @@ def consistencyReward_clip_ori():
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution,
-        auto_log_tame=True,
         prompt_template_version=prompt_template_version,
         weights=weights,
         delta=delta
@@ -309,7 +307,6 @@ def consistencyReward_clip_medium():
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution,
-        auto_log_tame=True,
         prompt_template_version=prompt_template_version,
         weights=weights,
         delta=delta
@@ -327,7 +324,6 @@ def consistencyReward_clip_small_guard():
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution,
-        auto_log_tame=True,
         prompt_template_version=prompt_template_version,
         weights=weights,
         delta=delta,
@@ -346,7 +342,6 @@ def consistencyReward_clip_small():
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution,
-        auto_log_tame=True,
         prompt_template_version=prompt_template_version,
         weights=weights,
         delta=delta
@@ -364,7 +359,6 @@ def small_reproduce():
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution,
-        auto_log_tame=True,
         prompt_template_version=prompt_template_version,
         weights=weights,
         delta=delta
@@ -383,7 +377,6 @@ def consistencyReward_clip_mini():
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution,
-        auto_log_tame=True,
         prompt_template_version=prompt_template_version,
         weights=weights,
         delta=delta
@@ -401,7 +394,6 @@ def consistencyReward_clip_micro():
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution,
-        auto_log_tame=True,
         prompt_template_version=prompt_template_version,
         weights=weights,
         delta=delta
@@ -419,7 +411,6 @@ def consistencyReward_clip_small_no_tame():
         run_name=run_name,
         save_dir_suffix=save_dir_suffix,
         resolution=resolution,
-        auto_log_tame=False,
         prompt_template_version=prompt_template_version,
         weights=weights,
         delta=delta
