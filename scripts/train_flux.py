@@ -335,6 +335,110 @@ def augment_and_reward_compute(
 
     return augmented_samples
 
+def compute_guard_grpo_loss(
+    config : Namespace,
+    accelerator : Accelerator,
+    pipeline: FluxPipeline,
+    transformer: FluxTransformer2DModel,
+    sample : dict,
+    timestep_index : int,
+    autocast,
+):
+    info = {}
+    batch_size = sample['all_latents'].shape[0]
+    with autocast():
+        transformer.module.set_adapter("default")
+        prev_sample, log_prob, prev_sample_mean, std_dev_t = compute_log_prob(
+            transformer=transformer,
+            pipeline=pipeline,
+            sample=sample,
+            timestep_index=timestep_index,
+            config=config,
+        )
+        with torch.no_grad():
+            transformer.module.set_adapter("old")
+            _, old_log_prob, old_prev_sample_mean, _ = compute_log_prob(
+                transformer=transformer,
+                pipeline=pipeline,
+                sample=sample,
+                timestep_index=timestep_index,
+                config=config,
+            )
+            with transformer.module.disable_adapter():
+                _, ref_log_prob, ref_prev_sample_mean, _ = compute_log_prob(
+                    transformer=transformer,
+                    pipeline=pipeline,
+                    sample=sample,
+                    timestep_index=timestep_index,
+                    config=config,
+                )
+
+    transformer.module.set_adapter("default")
+
+
+    # Get dt
+    timestep = sample['timesteps'][:, timestep_index].to(accelerator.device)
+    timestep_next = sample["timesteps"][:, timestep_index + 1] if timestep_index + 1 < sample["timesteps"].shape[1] else torch.zeros_like(timestep) # (B,)
+    dt = (timestep_next - timestep).view(-1, *([1] * (prev_sample.ndim -1))) # (B, 1, 1, 1)
+    dt = dt / 1000.0 # scale to [0, 1] for flux
+    sqrt_dt = torch.sqrt(-dt)
+
+    # Guard-GRPO logic
+    advantages = torch.clamp(
+        sample["advantages"],
+        -config.train.adv_clip_max,
+        config.train.adv_clip_max,
+    )
+
+    sigma_t = std_dev_t.mean()
+    ratio_mean_bias = (prev_sample_mean - old_prev_sample_mean).pow(2).mean(dim=tuple(range(1, log_prob.ndim)))
+    ratio_mean_bias = ratio_mean_bias / (2 * (sqrt_dt.mean() * sigma_t) ** 2)
+    ratio = torch.exp((log_prob - old_log_prob + ratio_mean_bias) * (sqrt_dt.mean() * sigma_t))
+
+    # print("ratio", ratio)
+    unclipped_loss = -advantages * ratio
+    clipped_loss = -advantages * torch.clamp(
+        ratio,
+        1.0 - config.train.clip_range,
+        1.0 + config.train.clip_range,
+    )
+    policy_loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
+
+    # Guard-GRPO normalization
+    policy_loss = policy_loss / (sqrt_dt.mean()**2)
+
+    kl_loss = ((prev_sample_mean - ref_prev_sample_mean) ** 2).mean(dim=tuple(range(1, prev_sample_mean.ndim)), keepdim=True) / (2 * std_dev_t ** 2 + 1e-7)
+    kl_loss = torch.mean(kl_loss)
+    
+    loss = policy_loss + config.train.beta * kl_loss
+    info["policy_loss"] = policy_loss.detach()
+    info["unclipped_loss"] = unclipped_loss.mean().detach()
+    info["clipped_loss"] = clipped_loss.mean().detach()
+    info["kl_loss"] = kl_loss.mean().detach()
+    info['loss'] = loss.detach()
+    info['ratio'] = ratio.abs().mean()
+    info["clipfrac"] = torch.mean(
+        (
+            torch.abs(ratio - 1.0) > config.train.clip_range
+        ).float()
+    )
+    info["clipfrac_gt_one"] = torch.mean(
+        (
+            ratio - 1.0 > config.train.clip_range
+        ).float()
+    )
+    info["clipfrac_lt_one"] = torch.mean(
+        (
+            1.0 - ratio > config.train.clip_range
+        ).float()
+    )
+    info["clipfrac_lt_one"] = torch.mean(
+        (
+            1.0 - ratio > config.train.clip_range
+        ).float()
+    )
+
+    return loss, info
 
 def compute_ppo_loss(
     config : Namespace,
@@ -425,146 +529,6 @@ def compute_ppo_loss(
 
     return loss, info
 
-def compute_nft_step_loss(
-    config : Namespace,
-    accelerator : Accelerator,
-    pipeline: FluxPipeline,
-    transformer: FluxTransformer2DModel,
-    sample : dict,
-    timestep_index : int,
-    autocast
-):
-    """
-    NFT loss that directly predict x_{t-1} from x_t
-    """
-    info = {}
-    height = sample['height'][0]
-    width = sample['width'][0]
-    x0 = sample["all_latents"][:, -1].to(accelerator.device) # Clear latents
-    batch_size = x0.shape[0]
-    guidance = torch.full([1], config.sample.guidance_scale, device=accelerator.device, dtype=torch.float32)
-
-    t = sample['timesteps'][:, timestep_index].to(accelerator.device, dtype=x0.dtype) # shape (batch_size,)
-    t_next = sample['timesteps'][:, timestep_index + 1].to(accelerator.device, dtype=x0.dtype) # shape (batch_size,)
-    t = t / 1000.0 # scale to [0, 1]
-    t_next = t_next / 1000.0
-
-    t_expanded = t.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
-    t_next_expanded = t_next.view(-1, *([1] * (x0.ndim - 1))) # shape (batch_size, 1, 1)
-    dt = t_next_expanded - t_expanded
-
-    xt = sample['all_latents'][:, timestep_index].to(accelerator.device) # Noisy latents at step t
-    xt_next = sample['all_latents'][:, timestep_index + 1].to(accelerator.device) # Noisy latents at step t_next
-
-    xt, latent_image_ids = pipeline.prepare_latents(
-        batch_size=batch_size,
-        num_channels_latents=xt.shape[2] // 4,
-        height=height,
-        width=width,
-        device=accelerator.device,
-        dtype=x0.dtype,
-        generator=None,
-        latents=xt
-    )
-    text_ids = torch.zeros(sample['prompt_embeds'].shape[1], 3).to(device=accelerator.device, dtype=x0.dtype)
-
-    with autocast():
-        transformer.module.set_adapter("default")
-        new_v_pred = transformer(
-            hidden_states=xt,
-            timestep=t,
-            guidance=guidance.expand(xt.shape[0]),
-            encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-            pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-            img_ids=latent_image_ids,
-            txt_ids=text_ids,
-            return_dict=False,
-        )[0]
-
-        with torch.no_grad():
-            transformer.module.set_adapter("old")
-            old_v_pred = transformer(
-                hidden_states=xt,
-                timestep=t,
-                guidance=guidance.expand(xt.shape[0]),
-                encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-                pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-                img_ids=latent_image_ids,
-                txt_ids=text_ids,
-                return_dict=False,
-            )[0].detach()
-            with transformer.module.disable_adapter():
-                v_ref = transformer(
-                    hidden_states=xt,
-                    timestep=t,
-                    guidance=guidance.expand(xt.shape[0]),
-                    encoder_hidden_states=sample["prompt_embeds"].to(accelerator.device),
-                    pooled_projections=sample["pooled_prompt_embeds"].to(accelerator.device),
-                    img_ids=latent_image_ids,
-                    txt_ids=text_ids,
-                    return_dict=False,
-                )[0]
-
-    transformer.module.set_adapter("default")
-    # NFT logic
-    advantages = torch.clamp(
-        sample["advantages"],
-        -config.train.adv_clip_max,
-        config.train.adv_clip_max,
-    )
-    normalized_advantages_clip = (advantages / config.train.adv_clip_max) / 2.0 + 0.5
-    r = torch.clamp(normalized_advantages_clip, 0, 1)
-    info["old_deviate"] = torch.mean((new_v_pred - old_v_pred) ** 2).detach()
-    info["old_deviate_max"] = torch.max((new_v_pred - old_v_pred) ** 2).detach()
-    positive_prediction = config.train.nft_beta * new_v_pred + (1 - config.train.nft_beta) * old_v_pred.detach()
-
-    implicit_negative_prediction = (1.0 + config.train.nft_beta) * old_v_pred.detach() - config.train.nft_beta * new_v_pred
-    
-    # adaptive weighting
-    xt_next_pred = xt + dt * positive_prediction
-    with torch.no_grad():
-        weight_factor = (
-            torch.abs(xt_next_pred.double() - xt_next.double())
-            .mean(dim=tuple(range(1, xt.ndim)), keepdim=True)
-            .clip(min=0.00001)
-        )
-
-    positive_loss = ((xt_next_pred - xt_next) ** 2 / weight_factor).mean(dim=tuple(range(1, xt_next.ndim)))
-
-    negative_xt_next_pred = xt + dt * implicit_negative_prediction
-    with torch.no_grad():
-        negative_weight_factor = (
-            torch.abs(negative_xt_next_pred.double() - xt_next.double())
-            .mean(dim=tuple(range(1, xt_next.ndim)), keepdim=True)
-            .clip(min=0.00001)
-        )
-    negative_loss = ((negative_xt_next_pred - xt_next) ** 2 / negative_weight_factor).mean(
-        dim=tuple(range(1, xt_next.ndim))
-    )
-
-    ori_policy_loss = (r * positive_loss  + (1.0 - r) * negative_loss) / config.train.nft_beta
-    policy_loss = (ori_policy_loss * config.train.adv_clip_max).mean()
-
-    loss = policy_loss
-
-    info["policy_loss"] = policy_loss.detach()
-    info["unweighted_policy_loss"] = ori_policy_loss.mean().detach()
-
-    kl_div_loss = ((new_v_pred - v_ref) ** 2).mean(
-        dim=tuple(range(1, x0.ndim))
-    )
-    kl_div_loss = torch.mean(kl_div_loss)
-
-    loss += config.train.beta * kl_div_loss
-
-    info["kl_div"] = kl_div_loss.detach()
-    info["old_kl_div"] = torch.mean(
-        ((old_v_pred - v_ref) ** 2).mean(dim=tuple(range(1, x0.ndim)))
-    ).detach()
-
-    info["loss"] = loss.detach()
-
-    return loss, info
 
 def compute_nft_loss(
     config : Namespace,
@@ -1667,38 +1631,26 @@ def main(_):
                         # Use DiffusionNFT loss computation logic
                         loss_type = config.train.loss_type.lower()
 
+                        # For PPO and Guard-GRPO, the forward pass will be computed again, which is less efficient than original code.
+                        # To be compatible with different loss types, we keep it this way for simplicity.
                         if loss_type == 'ppo':
-                            loss, loss_info = compute_ppo_loss(
-                                config=config,
-                                accelerator=accelerator,
-                                pipeline=pipeline,
-                                transformer=transformer,
-                                sample=sample,
-                                timestep_index=j,
-                                autocast=autocast,
-                            )
+                            loss_fn = compute_ppo_loss
                         elif loss_type == 'nft':
-                            loss, loss_info = compute_nft_loss(
-                                config=config,
-                                accelerator=accelerator,
-                                pipeline=pipeline,
-                                transformer=transformer,
-                                sample=sample,
-                                timestep_index=j,
-                                autocast=autocast,
-                            )
-                        elif loss_type == 'nft_step':
-                            loss, loss_info = compute_nft_step_loss(
-                                config=config,
-                                accelerator=accelerator,
-                                pipeline=pipeline,
-                                transformer=transformer,
-                                sample=sample,
-                                timestep_index=j,
-                                autocast=autocast,
-                            )
+                            loss_fn = compute_nft_loss
+                        elif loss_type == 'guard_grpo':
+                            loss_fn = compute_guard_grpo_loss
                         else:
-                            raise ValueError(f"Unknown loss type: {config.train.loss_type}. Supported types are ['ppo', 'nft', 'nft_step']")
+                            raise ValueError(f"Unknown loss type: {config.train.loss_type}. Supported types are ['ppo', 'nft', 'guard_grpo']")
+
+                        loss, loss_info = loss_fn(
+                            config=config,
+                            accelerator=accelerator,
+                            pipeline=pipeline,
+                            transformer=transformer,
+                            sample=sample,
+                            timestep_index=j,
+                            autocast=autocast,
+                        )
 
                         for k, v in loss_info.items():
                             info[k].append(v.detach())
