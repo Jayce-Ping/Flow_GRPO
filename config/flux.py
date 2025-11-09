@@ -162,7 +162,8 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
     prompt_template_version: int = 0,
     weights: tuple[float, float] = (0.2, 0.8),
     delta: float = 0.2,
-    global_std: bool = False
+    global_std: bool = False,
+    loss_type: str = 'ppo',
 ):
     assert resolution in [256, 384, 512, 768, 1024], f"Unsupported resolution: {resolution}"
     gpu_number = get_gpu_count()
@@ -261,7 +262,7 @@ def generate_ConsistencyReward_clip_config_for_resolution_exp(
 
     # Training
     config.train.param_noise_std = 0
-    config.train.loss_type = 'ppo'
+    config.train.loss_type = loss_type
     config.train.batch_size = config.sample.batch_size
     config.train.learning_rate = 3e-4
     config.train.gradient_step_per_epoch = 1 if 'nft' in config.train.loss_type else 2
