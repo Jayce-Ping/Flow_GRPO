@@ -48,7 +48,7 @@ if __name__ == "__main__":
     # SAVE_DIR = '/home/users/astar/cfar/stuchengyou/jcy/Flux_Kontext/logs'
     SAVE_DIR = '/home/users/astar/cfar/stuchengyou/jcy/Paco-GRPO/logs'
     # folder_name = 'consistency_for_editing/Flux-Kontext-GEdit-Split-EN-20251107-000031'
-    folder_name = "consistencyReward-subclip/10s-1cot_ppo_10sde_train1_groupstd_train-small-20251106-232135"
+    folder_name = "consistencyReward-subclip/1.0s-0.2cot_ppo_10sde_train1_groupstd_train-small-20251109-112854"
     folder_path = os.path.join(SAVE_DIR, folder_name)
     path_in_repo = folder_name
     repo_id = "Jayce-Ping/Flux-NFT"
