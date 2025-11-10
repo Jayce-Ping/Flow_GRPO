@@ -578,46 +578,10 @@ def consistencyReward_clip_small_guard():
     )
     return config
 
-def consistencyReward_clip_small_guard_2():
-    prompt_template_version = 0
-    weights = (0.2, 0.8)
-    delta = 0.2
-    run_name = f'Guard-GRPO, Auto-tame ({delta}), {weights[1]}s+{weights[0]}cot, small, group_std'
-    save_dir_suffix = f'{weights[1]}s-{weights[0]}cot_guard_10sde_train1_groupstd_train-small'
-    resolution = 512
-    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
-        run_name=run_name,
-        save_dir_suffix=save_dir_suffix,
-        resolution=resolution,
-        prompt_template_version=prompt_template_version,
-        weights=weights,
-        delta=delta,
-        loss_type='guard_grpo'
-    )
-    return config
-
-def consistencyReward_clip_small_guard_3():
-    prompt_template_version = 0
-    weights = (0.2, 0.8)
-    delta = 0.15
-    run_name = f'Guard-GRPO, Auto-tame ({delta}), {weights[1]}s+{weights[0]}cot, small, group_std'
-    save_dir_suffix = f'{weights[1]}s-{weights[0]}cot_guard_10sde_train1_groupstd_train-small'
-    resolution = 512
-    config = generate_ConsistencyReward_clip_config_for_resolution_exp(
-        run_name=run_name,
-        save_dir_suffix=save_dir_suffix,
-        resolution=resolution,
-        prompt_template_version=prompt_template_version,
-        weights=weights,
-        delta=delta,
-        loss_type='guard_grpo'
-    )
-    return config
-
 def consistencyReward_clip_small():
     prompt_template_version = 0
     weights = (0.2, 0.8)
-    delta = 0.2
+    delta = 0.5
     run_name = f'Auto-tame ({delta}), {weights[1]}s+{weights[0]}cot, small, group_std'
     save_dir_suffix = f'{weights[1]}s-{weights[0]}cot_ppo_10sde_train1_groupstd_train-small'
     resolution = 512
