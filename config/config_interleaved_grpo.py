@@ -39,7 +39,7 @@ def _base():
     config.lora_alpha = 128
 
     # ── Dataset ──
-    config.dataset = os.path.join(os.getcwd(), "dataset/interleaved")
+    config.dataset = os.path.join(os.getcwd(), "dataset/umm/")
     config.prompt_fn = "interleaved"
 
     # ── Reward (dict format, same as flow_grpo) ──
@@ -170,6 +170,7 @@ def interleaved_grpo_lora():
 
     config.run_name = "[interleaved-grpo-lora]-8gpu"
     config.pretrained.model = "ByteDance-Seed/BAGEL-7B-MoT"
+    config.dataset = 'dataset/multi-turn-example/'
     config.use_lora = True
     config.lora_rank = 64
     config.lora_alpha = 128
