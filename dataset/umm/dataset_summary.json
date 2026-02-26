@@ -1,0 +1,13 @@
+{
+  "stage2_dir": "apdcephfs_zwfy2/share_303944931/shawncschen/umm_search_agent/stage2_recaption_final_v2/",
+  "stage3_dir": "stage3_generation/final_search_gemini3_v2",
+  "total_trajectories": 2517,
+  "valid_samples": 2415,
+  "train_count": 2295,
+  "test_count": 120,
+  "stats": {
+    "total": 2517,
+    "valid": 2415,
+    "skip_no_recaption": 102
+  }
+}

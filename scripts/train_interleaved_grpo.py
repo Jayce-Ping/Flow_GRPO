@@ -817,14 +817,26 @@ def main(_):
 
     # ── LoRA or full fine-tuning ──
     if config.get("use_lora", False):
-        lora_config = LoraConfig(
-            r=config.lora_rank,
-            lora_alpha=config.lora_alpha,
-            target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
-            lora_dropout=0.05,
+        # Set correct lora layers
+        target_modules = [
+            "self_attn.q_proj_moe_gen",
+            "self_attn.k_proj_moe_gen",
+            "self_attn.v_proj_moe_gen",
+            "self_attn.o_proj_moe_gen",
+            "mlp_moe_gen.gate_proj",
+            "mlp_moe_gen.up_proj",
+            "mlp_moe_gen.down_proj",
+        ]
+        transformer_lora_config = LoraConfig(
+            r=64,
+            lora_alpha=128,
+            init_lora_weights="gaussian",
+            target_modules=target_modules,
         )
-        model.language_model = get_peft_model(model.language_model, lora_config)
-        model.language_model.print_trainable_parameters()
+        model.language_model = get_peft_model(model.language_model, transformer_lora_config)
+        for name, param in model.language_model.named_parameters():
+            if 'lora' in name:
+                param.data = param.data.to(dtype=inference_dtype)
     else:
         for name, param in model.language_model.named_parameters():
             if "moe_gen" in name:
@@ -1011,10 +1023,19 @@ def main(_):
                 )
 
         # ══════════════════════ TRAINING ══════════════════════
+        # Set False to use `forward_inference`
         transformer.train()
-        # Keep certain modules in eval mode for batch-norm etc.
         transformer.module.training = False
         transformer.module.model.training = False
+        if config.use_lora:
+            transformer.module.model.model.training = False
+            for layer in transformer.module.model.model.layers:
+                layer.module.training = False
+                layer.module.self_attn.training = False
+        else:
+            for layer in transformer.module.model.layers:
+                layer.module.training = False
+                layer.module.self_attn.training = False
 
         for inner_epoch in range(config.train.num_inner_epochs):
             info = defaultdict(list)
