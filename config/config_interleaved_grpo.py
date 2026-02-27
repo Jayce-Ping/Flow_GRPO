@@ -180,7 +180,7 @@ def interleaved_grpo_lora():
     config.sample.eval_num_steps = 50
     config.sample.cfg_text_scale = 1.0
     config.sample.cfg_img_scale = 1.0
-    config.sample.noise_level = 1.3
+    config.sample.noise_level = 0.7
     config.sample.same_latent = False
     config.sample.global_std = False
 

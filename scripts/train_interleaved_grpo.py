@@ -866,8 +866,8 @@ def main(_):
     if config.get("use_lora", False):
         # Set correct lora layers
         transformer_lora_config = LoraConfig(
-            r=64,
-            lora_alpha=128,
+            r=config.lora_rank,
+            lora_alpha=config.lora_alpha,
             init_lora_weights="gaussian",
             target_modules=target_modules,
         )
