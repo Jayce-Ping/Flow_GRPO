@@ -713,7 +713,7 @@ class Bagel(PreTrainedModel):
         all_log_probs = []
         all_timesteps = []
 
-        for i, t in tqdm(enumerate(timesteps), total=len(timesteps)):
+        for i, t in enumerate(timesteps):
             if i < sde_timestep_begin:
                 cur_noise_level = 0
             elif i == sde_timestep_begin:
@@ -850,38 +850,38 @@ class Bagel(PreTrainedModel):
             else:
                 cfg_text_scale_ = 1.0
                 cfg_img_scale_ = 1.0
-            with accelerator.accumulate(transformer):
-                v_t = self._forward_flow(
-                    x_t=latents[:, i],
-                    timestep=timestep, 
-                    packed_vae_token_indexes=packed_vae_token_indexes,
-                    packed_vae_position_ids=packed_vae_position_ids,
-                    packed_text_ids=packed_text_ids,
-                    packed_text_indexes=packed_text_indexes,
-                    packed_position_ids=packed_position_ids,
-                    packed_indexes=packed_indexes,
-                    packed_seqlens=packed_seqlens,
-                    key_values_lens=key_values_lens,
-                    past_key_values=past_key_values,
-                    packed_key_value_indexes=packed_key_value_indexes,
-                    cfg_renorm_min=cfg_renorm_min,
-                    cfg_renorm_type=cfg_renorm_type,
-                    # cfg_text
-                    cfg_text_scale=cfg_text_scale_,
-                    cfg_text_packed_position_ids=cfg_text_packed_position_ids,
-                    cfg_text_packed_query_indexes=cfg_text_packed_query_indexes,
-                    cfg_text_key_values_lens=cfg_text_key_values_lens,
-                    cfg_text_past_key_values=cfg_text_past_key_values,
-                    cfg_text_packed_key_value_indexes=cfg_text_packed_key_value_indexes,
-                    # cfg_img
-                    cfg_img_scale=cfg_img_scale_,
-                    cfg_img_packed_position_ids=cfg_img_packed_position_ids,
-                    cfg_img_packed_query_indexes=cfg_img_packed_query_indexes,
-                    cfg_img_key_values_lens=cfg_img_key_values_lens,
-                    cfg_img_past_key_values=cfg_img_past_key_values,
-                    cfg_img_packed_key_value_indexes=cfg_img_packed_key_value_indexes,
-                    cfg_type=cfg_type,
-                )
+
+            v_t = self._forward_flow(
+                x_t=latents[:, i],
+                timestep=timestep, 
+                packed_vae_token_indexes=packed_vae_token_indexes,
+                packed_vae_position_ids=packed_vae_position_ids,
+                packed_text_ids=packed_text_ids,
+                packed_text_indexes=packed_text_indexes,
+                packed_position_ids=packed_position_ids,
+                packed_indexes=packed_indexes,
+                packed_seqlens=packed_seqlens,
+                key_values_lens=key_values_lens,
+                past_key_values=past_key_values,
+                packed_key_value_indexes=packed_key_value_indexes,
+                cfg_renorm_min=cfg_renorm_min,
+                cfg_renorm_type=cfg_renorm_type,
+                # cfg_text
+                cfg_text_scale=cfg_text_scale_,
+                cfg_text_packed_position_ids=cfg_text_packed_position_ids,
+                cfg_text_packed_query_indexes=cfg_text_packed_query_indexes,
+                cfg_text_key_values_lens=cfg_text_key_values_lens,
+                cfg_text_past_key_values=cfg_text_past_key_values,
+                cfg_text_packed_key_value_indexes=cfg_text_packed_key_value_indexes,
+                # cfg_img
+                cfg_img_scale=cfg_img_scale_,
+                cfg_img_packed_position_ids=cfg_img_packed_position_ids,
+                cfg_img_packed_query_indexes=cfg_img_packed_query_indexes,
+                cfg_img_key_values_lens=cfg_img_key_values_lens,
+                cfg_img_past_key_values=cfg_img_past_key_values,
+                cfg_img_packed_key_value_indexes=cfg_img_packed_key_value_indexes,
+                cfg_type=cfg_type,
+            )
             t_index = (original_timesteps == timesteps[i]).nonzero(as_tuple=True)[0]
             _, log_prob, prev_sample_mean, std_dev_t = self._sde_step_with_logprob(
                 v_t, 
@@ -978,19 +978,18 @@ class Bagel(PreTrainedModel):
             if grpo_config.train.beta > 0:
                 kl_loss_list.append(kl_loss)
             loss_list.append(loss)
-            accelerator.backward(loss)
-            optimizer.step()
-            optimizer.zero_grad()
-        policy_loss = torch.cat([t.unsqueeze(0) for t in policy_loss_list]).mean().detach()
-        loss = torch.cat([t.unsqueeze(0) for t in loss_list]).mean().detach()
-        clipfrac = torch.cat([t.unsqueeze(0) for t in clipfrac]).mean().detach()
-        clipfrac_gt_one = torch.cat([t.unsqueeze(0) for t in clipfrac_gt_one]).mean().detach()
-        clipfrac_lt_one = torch.cat([t.unsqueeze(0) for t in clipfrac_lt_one]).mean().detach()
+
+        policy_loss_mean = torch.stack(policy_loss_list).mean()
+        loss_mean = torch.stack(loss_list).mean()
+        clipfrac = torch.stack(clipfrac).mean().detach()
+        clipfrac_gt_one = torch.stack(clipfrac_gt_one).mean().detach()
+        clipfrac_lt_one = torch.stack(clipfrac_lt_one).mean().detach()
 
         if grpo_config.train.beta > 0:
             kl_loss = torch.cat([t.unsqueeze(0) for t in kl_loss_list]).mean().detach()
         else:
             kl_loss = policy_loss*0-1
+
         return clipfrac, clipfrac_gt_one, clipfrac_lt_one, policy_loss, kl_loss, loss
 
     def _sde_step_with_logprob(

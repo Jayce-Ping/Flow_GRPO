@@ -387,11 +387,19 @@ def compute_text_grpo_loss(
 
     loss = policy_loss + beta * kl_loss
 
+    # Clip fraction metrics
+    clip_frac_high = (ratio - 1.0 > clip_range).float().mean().detach()
+    clip_frac_low = (1.0 - ratio > clip_range).float().mean().detach()
+    clip_frac = ((ratio - 1.0).abs() > clip_range).float().mean().detach()
+
     info = {
-        "text_policy_loss": policy_loss.detach(),
-        "text_kl_loss": kl_loss.detach(),
-        "text_loss": loss.detach(),
-        "text_ratio_mean": ratio.mean().detach(),
+        "text/loss": loss.detach(),
+        "text/policy_loss": policy_loss.detach(),
+        "text/kl_loss": kl_loss.detach(),
+        "text/ratio": ratio.mean().detach(),
+        "text/clip_frac": clip_frac,
+        "text/clip_frac_low": clip_frac_low,
+        "text/clip_frac_high": clip_frac_high,
     }
     return loss, info
 
@@ -562,6 +570,7 @@ def train_interleaved_step(
     optimizer,
     transformer,
     inference_hyper: dict,
+    trainable_parameters,
 ) -> dict:
     """
     Compute combined GRPO loss for a single trajectory.
@@ -598,10 +607,12 @@ def train_interleaved_step(
         for k, v in t_info.items():
             info.setdefault(k, []).append(v)
 
-    if text_losses:
+    if len(text_losses) > 0:
         avg_text_loss = torch.stack(text_losses).mean()
         total_loss = total_loss + text_loss_weight * avg_text_loss
-        info["avg_text_loss"] = avg_text_loss.detach()
+        for k in list(info.keys()):
+            if isinstance(info[k], list):
+                info[k] = torch.stack(info[k]).mean().detach()
 
     # ── Image Flow-GRPO loss ──
     image_data = trajectory["image_data"]
@@ -666,21 +677,19 @@ def train_interleaved_step(
                 transformer=transformer,
             )
 
-        if isinstance(img_output, dict):
-            img_loss = img_output.get("loss", torch.tensor(0.0, device=accelerator.device))
-            total_loss = total_loss + image_loss_weight * img_loss
-            info["img_policy_loss"] = img_output.get("policy_loss", torch.tensor(0.0)).detach()
-            info["img_kl_loss"] = img_output.get("kl_loss", torch.tensor(0.0)).detach()
-            info["img_loss"] = img_loss.detach()
-            info["img_clipfrac"] = img_output.get("clipfrac", torch.tensor(0.0)).detach()
+
+        img_loss = img_output.get("loss", torch.tensor(0.0, device=accelerator.device))
+        total_loss = total_loss + image_loss_weight * img_loss
+        info["image/loss"] = img_loss.detach()
+        info["image/policy_loss"] = img_output.get("policy_loss", torch.tensor(0.0)).detach()
+        info["image/kl_loss"] = img_output.get("kl_loss", torch.tensor(0.0)).detach()
+        info["image/clip_frac"] = img_output.get("clipfrac", torch.tensor(0.0)).detach()
+        info["image/clip_frac_high"] = img_output.get("clipfrac_gt_one", torch.tensor(0.0)).detach()
+        info["image/clip_frac_low"] = img_output.get("clipfrac_lt_one", torch.tensor(0.0)).detach()
 
     info["total_loss"] = total_loss.detach()
 
-    # Backward (if not already done inside generate_image_learn)
-    # Note: flow_grpo's generate_image_learn does backward internally per timestep.
-    # We only need backward for the text loss portion.
-    if text_losses:
-        accelerator.backward(text_loss_weight * avg_text_loss)
+    accelerator.backward(total_loss)
 
     return info
 
@@ -767,6 +776,7 @@ def main(_):
         else model_path
     )
     # --- ViT ----
+    logger.info(f"Loading ViT...")
     vit_config = SiglipVisionConfig.from_json_file(
         os.path.join(model_local_dir, "vit_config.json")
     )
@@ -777,12 +787,14 @@ def main(_):
     vit_model.vision_model.embeddings.convert_conv2d_to_linear(vit_config)
 
     # --- LLM ---
+    logger.info(f"Loading LLM...")
     llm_config = Qwen2Config.from_json_file(os.path.join(model_local_dir, "llm_config.json"))
     llm_config.qk_norm = True
     llm_config.tie_word_embeddings = False
     llm_config.layer_module = "Qwen2MoTDecoderLayer"
     
     # --- VAE ---
+    logger.info(f"Loading VAE...")
     vae_model, vae_config = load_ae(local_path=os.path.join(model_local_dir, "ae.safetensors"))
     vae_model = vae_model.to(dtype=inference_dtype, device=accelerator.device)
 
@@ -799,6 +811,7 @@ def main(_):
         max_latent_size=64,
     )
 
+    logger.info(f"Loading Bagel...")
     language_model = Qwen2ForCausalLM(llm_config)
     model = Bagel(language_model, vit_model, bagel_config)
 
@@ -808,6 +821,7 @@ def main(_):
     model = model.to(dtype=inference_dtype)
     model = model.eval()
 
+    logger.info(f"Loading Tokenizer...")
     tokenizer = Qwen2Tokenizer.from_pretrained(model_local_dir)
     tokenizer, new_token_ids, _ = add_special_tokens(tokenizer)
 
@@ -815,6 +829,7 @@ def main(_):
     vit_transform = ImageTransform(490, 112, 7)
 
     # Reference model for KL penalty
+    logger.info(f"Loading Ref Model...")
     ref_model = None
     if config.train.get("beta", 0) > 0 or config.train.get("text_beta", 0) > 0:
         ref_model = Qwen2ForCausalLM(llm_config)
@@ -828,6 +843,7 @@ def main(_):
     model.vit_model.requires_grad_(False)
 
     # ── LoRA or full fine-tuning ──
+    logger.info(f"Preparing trainable parameters...")
     target_modules = [
         # Und
         "self_attn.q_proj",
@@ -865,7 +881,7 @@ def main(_):
 
     transformer = model.language_model
     transformer.config.use_cache = False
-    trainable_params = list(filter(lambda p: p.requires_grad, transformer.parameters()))
+    trainable_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
     # Move unprepared components to device
     if model.config.visual_gen:
         model.time_embedder = model.time_embedder.to(accelerator.device)
@@ -881,8 +897,9 @@ def main(_):
     if config.get("allow_tf32", True):
         torch.backends.cuda.matmul.allow_tf32 = True
 
+    logger.info(f"Loading Optimizer...")
     optimizer = torch.optim.AdamW(
-        trainable_params,
+        trainable_parameters,
         lr=config.train.learning_rate,
         betas=(config.train.adam_beta1, config.train.adam_beta2),
         weight_decay=config.train.adam_weight_decay,
@@ -946,8 +963,10 @@ def main(_):
     stat_tracker = PerPromptStatTracker() if config.get("per_prompt_stat_tracking", True) else None
 
     # ── FSDP Wrap ──
+    logger.info(f"Accelerator preparing...")
     transformer = accelerator.prepare(transformer)
     optimizer = accelerator.prepare(optimizer)
+    test_dataloader = accelerator.prepare(test_dataloader)
 
     autocast = partial(torch.autocast, device_type="cuda", enabled=True, dtype=inference_dtype)
 
@@ -960,6 +979,7 @@ def main(_):
         accelerator.load_state(config.resume_from)
         first_epoch = int(config.resume_from.split("_")[-1]) + 1
 
+    logger.info(f"Start Training...")
     for epoch in range(first_epoch, config.num_epochs):
 
         # ── Checkpoint & Eval ──
@@ -1073,8 +1093,10 @@ def main(_):
                 disable=not accelerator.is_local_main_process,
             ):
                 adv = local_advantages[i].item()
-                adv = max(min(adv, config.train.get("adv_clip_max", 5.0)),
-                          -config.train.get("adv_clip_max", 5.0))
+                adv = max(
+                    min(adv, config.train.get("adv_clip_max", 5.0)),
+                    -config.train.get("adv_clip_max", 5.0)
+                )
 
                 with accelerator.accumulate(transformer):
                     step_info = train_interleaved_step(
@@ -1087,16 +1109,14 @@ def main(_):
                         optimizer=optimizer,
                         transformer=transformer,
                         inference_hyper=inference_hyper,
+                        trainable_parameters=trainable_parameters,
                     )
 
                     for k, v in step_info.items():
-                        if isinstance(v, (list, torch.Tensor)):
-                            info[k].append(v)
-                        elif isinstance(v, (int, float)):
-                            info[k].append(torch.tensor(v))
+                        info[k].append(v)
 
                     if accelerator.sync_gradients:
-                        torch.nn.utils.clip_grad_norm_(trainable_params, config.train.get("max_grad_norm", 1.0))
+                        torch.nn.utils.clip_grad_norm_(trainable_parameters, config.train.get("max_grad_norm", 1.0))
                         optimizer.step()
                         optimizer.zero_grad()
 

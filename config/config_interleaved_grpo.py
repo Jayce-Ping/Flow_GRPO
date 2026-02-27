@@ -185,14 +185,14 @@ def interleaved_grpo_lora():
     config.sample.global_std = False
 
     config.resolution = 512
-    config.sample.train_batch_size = 6
+    config.sample.train_batch_size = 1
     config.sample.num_image_per_prompt = 16
     config.sample.num_batches_per_epoch = int(
-        8 / (gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt)
+        48 / (gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt)
     )  # =4 for 8 gpus
     config.sample.test_batch_size = 1
 
-    config.sample.sde_window_size = 2
+    config.sample.sde_window_size = 1
     config.sample.sde_window_range = (0, config.sample.num_steps // 2)
 
     # Training — match pickscore_bagel_lora exactly
