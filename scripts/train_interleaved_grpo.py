@@ -681,6 +681,7 @@ def train_interleaved_step(
         img_loss = img_output.get("loss", torch.tensor(0.0, device=accelerator.device))
         total_loss = total_loss + image_loss_weight * img_loss
         info["image/loss"] = img_loss.detach()
+        info["image/ratio"] = img_output.get("ratio", torch.tensor(0.0, device=accelerator.device))
         info["image/policy_loss"] = img_output.get("policy_loss", torch.tensor(0.0)).detach()
         info["image/kl_loss"] = img_output.get("kl_loss", torch.tensor(0.0)).detach()
         info["image/clip_frac"] = img_output.get("clipfrac", torch.tensor(0.0)).detach()

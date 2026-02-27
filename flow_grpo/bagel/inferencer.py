@@ -153,7 +153,7 @@ class InterleaveInferencer:
             image_sizes=[image_shape], 
         )
         if learn:
-            clipfrac, clipfrac_gt_one, clipfrac_lt_one, policy_loss, kl_loss, loss = self.model.generate_image_learn(
+            output = self.model.generate_image_learn(
                 sample=sample,
                 grpo_config=grpo_config,
                 accelerator=accelerator,
@@ -180,14 +180,7 @@ class InterleaveInferencer:
                 cfg_img_packed_key_value_indexes=generation_input_cfg_img['cfg_packed_key_value_indexes'],
                 noise_level=noise_level,
             )
-            return {
-                "clipfrac": clipfrac, 
-                "clipfrac_gt_one": clipfrac_gt_one,
-                "clipfrac_lt_one": clipfrac_lt_one,
-                "policy_loss": policy_loss, 
-                "kl_loss": kl_loss,
-                "loss": loss,
-            }
+            return output
         else:
             unpacked_latent, all_latents, all_log_probs, timesteps = self.model.generate_image(
                 past_key_values=past_key_values,

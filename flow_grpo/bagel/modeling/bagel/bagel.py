@@ -835,6 +835,7 @@ class Bagel(PreTrainedModel):
             -grpo_config.train.adv_clip_max,
             grpo_config.train.adv_clip_max,
         )
+        ratio_list=[]
         clipfrac=[]
         clipfrac_gt_one=[]
         clipfrac_lt_one=[]
@@ -953,6 +954,7 @@ class Bagel(PreTrainedModel):
                 loss = policy_loss + grpo_config.train.beta * kl_loss
             else:
                 loss = policy_loss
+            ratio_list.append(ratio.detach())
             clipfrac.append(
                 torch.mean(
                     (
@@ -979,8 +981,7 @@ class Bagel(PreTrainedModel):
                 kl_loss_list.append(kl_loss)
             loss_list.append(loss)
 
-        policy_loss_mean = torch.stack(policy_loss_list).mean()
-        loss_mean = torch.stack(loss_list).mean()
+        ratio = torch.stack(ratio_list).mean().detach()
         clipfrac = torch.stack(clipfrac).mean().detach()
         clipfrac_gt_one = torch.stack(clipfrac_gt_one).mean().detach()
         clipfrac_lt_one = torch.stack(clipfrac_lt_one).mean().detach()
@@ -990,7 +991,15 @@ class Bagel(PreTrainedModel):
         else:
             kl_loss = policy_loss*0-1
 
-        return clipfrac, clipfrac_gt_one, clipfrac_lt_one, policy_loss, kl_loss, loss
+        return {
+            "ratio": ratio,
+            "clipfrac": clipfrac, 
+            "clipfrac_gt_one": clipfrac_gt_one,
+            "clipfrac_lt_one": clipfrac_lt_one,
+            "policy_loss": policy_loss, 
+            "kl_loss": kl_loss,
+            "loss": loss,
+        }
 
     def _sde_step_with_logprob(
         self,
