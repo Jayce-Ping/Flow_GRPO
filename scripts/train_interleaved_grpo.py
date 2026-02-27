@@ -247,7 +247,7 @@ def sample_text_with_logprobs(
         curr_tokens = next_token
 
         step += 1
-        if next_token.item() == eos_id:
+        if eos_id is not None and next_token == eos_id:
             break
 
     token_ids = torch.cat(generated_ids, dim=0)
