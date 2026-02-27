@@ -987,9 +987,9 @@ class Bagel(PreTrainedModel):
         clipfrac_lt_one = torch.stack(clipfrac_lt_one).mean().detach()
 
         if grpo_config.train.beta > 0:
-            kl_loss = torch.cat([t.unsqueeze(0) for t in kl_loss_list]).mean().detach()
+            kl_loss = torch.stack(kl_loss_list).mean().detach()
         else:
-            kl_loss = policy_loss*0-1
+            kl_loss = torch.zeros_like(loss)
 
         return {
             "ratio": ratio,

@@ -152,6 +152,17 @@ class DistributedKRepeatSampler(Sampler):
 
 # ────────────────────── Text-Generation GRPO Helpers ─────────────────────
 
+
+def mask_undefined_token(
+    logits,
+    tokenizer
+):
+    TOKENIZER_VOCAB_SIZE = len(tokenizer)
+    if logits.shape[-1] > TOKENIZER_VOCAB_SIZE:
+        logits[..., TOKENIZER_VOCAB_SIZE:] = float('-inf')
+    
+    return logits
+
 @torch.no_grad()
 def sample_text_with_logprobs(
     inferencer: InterleaveInferencer,
@@ -225,6 +236,8 @@ def sample_text_with_logprobs(
         past_key_values = output.past_key_values
 
         logits = model.language_model.lm_head(output.packed_query_sequence)  # (B, vocab)
+        logits = mask_undefined_token(logits, tokenizer)
+
         log_probs_all = F.log_softmax(logits / max(temperature, 1e-8), dim=-1) # (B, vocab)
 
         if do_sample and temperature > 0:
@@ -252,8 +265,11 @@ def sample_text_with_logprobs(
 
     token_ids = torch.cat(generated_ids, dim=0)
     log_probs_tensor = torch.cat(token_log_probs, dim=0)
-
-    text = tokenizer.decode(token_ids.cpu().tolist())
+    try:
+        text = tokenizer.decode(token_ids.cpu().tolist())
+    except:
+        print(f"Error when {token_ids}")
+        raise
     text = text.split("<|im_end|>")[0]
     if "<|im_start|>" in text:
         text = text.split("<|im_start|>")[1]
@@ -269,6 +285,7 @@ def sample_text_with_logprobs(
 def compute_text_grpo_loss(
     model,
     ref_model,
+    tokenizer,
     token_ids: torch.Tensor,
     old_log_probs: torch.Tensor,
     advantages: float,
@@ -299,6 +316,7 @@ def compute_text_grpo_loss(
         info: Dict with diagnostic values.
     """
     device = next(model.parameters()).device
+    TOKENIZER_VOCAB_SIZE = len(tokenizer)  # 151665
     T = token_ids.shape[0]
     if T == 0:
         return torch.tensor(0.0, device=device, requires_grad=True), {}
@@ -349,6 +367,7 @@ def compute_text_grpo_loss(
     )
 
     logits = model.language_model.lm_head(output.packed_query_sequence)  # (T, vocab)
+    logits = mask_undefined_token(logits, tokenizer)
     new_log_probs = F.log_softmax(logits, dim=-1)
     new_lp = new_log_probs.gather(-1, token_ids.unsqueeze(-1)).squeeze(-1)  # (T,)
 
@@ -370,6 +389,7 @@ def compute_text_grpo_loss(
                 **extra_inputs,
             )
             ref_logits = ref_model.lm_head(ref_output.packed_query_sequence)
+            ref_logits = mask_undefined_token(ref_logits, tokenizer)
             ref_log_probs = F.log_softmax(ref_logits, dim=-1)
             ref_lp = ref_log_probs.gather(-1, token_ids.unsqueeze(-1)).squeeze(-1)
 
@@ -569,6 +589,7 @@ def train_interleaved_step(
     accelerator,
     optimizer,
     transformer,
+    tokenizer,
     inference_hyper: dict,
     trainable_parameters,
 ) -> dict:
@@ -595,6 +616,7 @@ def train_interleaved_step(
         t_loss, t_info = compute_text_grpo_loss(
             model=model,
             ref_model=ref_model,
+            tokenizer=tokenizer,
             token_ids=turn_data["token_ids"].to(accelerator.device),
             old_log_probs=turn_data["log_probs"].to(accelerator.device),
             advantages=advantage,
@@ -824,7 +846,16 @@ def main(_):
 
     logger.info(f"Loading Tokenizer...")
     tokenizer = Qwen2Tokenizer.from_pretrained(model_local_dir)
-    tokenizer, new_token_ids, _ = add_special_tokens(tokenizer)
+    tokenizer, new_token_ids, num_new_tokens = add_special_tokens(tokenizer)
+    TOKENIZER_VOCAB_SIZE = len(tokenizer)  # 151665
+    if num_new_tokens > 0:
+        model.language_model.resize_token_embeddings(len(tokenizer))
+        model.config.llm_config.vocab_size = len(tokenizer)
+        model.language_model.config.vocab_size = len(tokenizer)
+
+    print(f"Tokenizer vocab size: {len(tokenizer)}")
+    print(f"LM head output dim: {model.language_model.lm_head.out_features}")
+    print(f"New token IDs: {new_token_ids}")
 
     vae_transform = ImageTransform(512, 256, 8)
     vit_transform = ImageTransform(490, 112, 7)
@@ -1109,6 +1140,7 @@ def main(_):
                         accelerator=accelerator,
                         optimizer=optimizer,
                         transformer=transformer,
+                        tokenizer=tokenizer,
                         inference_hyper=inference_hyper,
                         trainable_parameters=trainable_parameters,
                     )

@@ -206,6 +206,11 @@ def interleaved_grpo_lora():
     config.mixed_precision = "bf16"
 
     # Text GRPO
+    # Sampling
+    config.sample.max_text_length = 256
+    config.sample.text_temperature = 1.3
+    config.sample.text_do_sample = True
+    # Optimization
     config.train.text_clip_range = 0.2
     config.train.text_beta = 0
     config.train.text_loss_weight = 1.0
