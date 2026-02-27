@@ -241,7 +241,10 @@ class PackedAttention(Qwen2Attention):
             self.k_norm = nn.Identity()
 
     def forward(self, *args, **kwargs):
-        if self.training:
+        forward_mode = kwargs.pop("forward_mode", "inference")
+        if forward_mode == "get_embeddings":
+            return self.get_input_embeddings(kwargs['input_ids'])
+        elif forward_mode == 'train':
             return self.forward_train(*args, **kwargs)
         else:
             return self.forward_inference(*args, **kwargs)
@@ -395,7 +398,10 @@ class PackedAttentionMoT(Qwen2Attention):
         self.o_proj_moe_gen = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
 
     def forward(self, *args, **kwargs):
-        if self.training:
+        forward_mode = kwargs.pop("forward_mode", "inference")
+        if forward_mode == "get_embeddings":
+            return self.get_input_embeddings(kwargs['input_ids'])
+        elif forward_mode == 'train':
             return self.forward_train(*args, **kwargs)
         else:
             return self.forward_inference(*args, **kwargs)
@@ -614,7 +620,10 @@ class Qwen2DecoderLayer(nn.Module):
         self.post_attention_layernorm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(self, *args, **kwargs):
-        if self.training:
+        forward_mode = kwargs.pop("forward_mode", "inference")
+        if forward_mode == "get_embeddings":
+            return self.get_input_embeddings(kwargs['input_ids'])
+        elif forward_mode == 'train':
             return self.forward_train(*args, **kwargs)
         else:
             return self.forward_inference(*args, **kwargs)
@@ -636,6 +645,7 @@ class Qwen2DecoderLayer(nn.Module):
             sample_lens=sample_lens,
             attention_mask=attention_mask,
             packed_position_embeddings=packed_position_embeddings,
+            forward_mode='train',
         )
         packed_sequence = residual + packed_sequence
 
@@ -674,6 +684,7 @@ class Qwen2DecoderLayer(nn.Module):
             packed_key_value_indexes=packed_key_value_indexes,
             update_past_key_values=update_past_key_values,
             is_causal=is_causal,
+            forward_mode='inference',
         )
         packed_query_sequence = residual + packed_query_sequence
 
@@ -707,7 +718,10 @@ class Qwen2MoTDecoderLayer(nn.Module):
         self.post_attention_layernorm_moe_gen = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(self, *args, **kwargs):
-        if self.training:
+        forward_mode = kwargs.pop("forward_mode", "inference")
+        if forward_mode == "get_embeddings":
+            return self.get_input_embeddings(kwargs['input_ids'])
+        elif forward_mode == 'train':
             return self.forward_train(*args, **kwargs)
         else:
             return self.forward_inference(*args, **kwargs)
@@ -735,6 +749,7 @@ class Qwen2MoTDecoderLayer(nn.Module):
             packed_position_embeddings=packed_position_embeddings,
             packed_und_token_indexes=packed_und_token_indexes,
             packed_gen_token_indexes=packed_gen_token_indexes,
+            forward_mode='train'
         )
         if self.freeze_und:
             packed_sequence_[packed_und_token_indexes] = packed_sequence_[packed_und_token_indexes].detach()
@@ -795,6 +810,7 @@ class Qwen2MoTDecoderLayer(nn.Module):
             mode=mode,
             packed_vae_token_indexes=packed_vae_token_indexes,
             packed_text_indexes=packed_text_indexes,
+            forward_mode='inference'
         )
         packed_query_sequence = residual + packed_query_sequence
 
@@ -831,7 +847,10 @@ class Qwen2MoEDecoderLayer(nn.Module):
         self.post_attention_layernorm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(self, *args, **kwargs):
-        if self.training:
+        forward_mode = kwargs.pop("forward_mode", "inference")
+        if forward_mode == "get_embeddings":
+            return self.get_input_embeddings(kwargs['input_ids'])
+        elif forward_mode == 'train':
             return self.forward_train(*args, **kwargs)
         else:
             return self.forward_inference(*args, **kwargs)
@@ -949,7 +968,10 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.post_init()
 
     def forward(self, *args, **kwargs):
-        if self.training:
+        forward_mode = kwargs.pop("forward_mode", "inference")
+        if forward_mode == "get_embeddings":
+            return self.get_input_embeddings(kwargs['input_ids'])
+        elif forward_mode == 'train':
             return self.forward_train(*args, **kwargs)
         else:
             return self.forward_inference(*args, **kwargs)
@@ -973,7 +995,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         sin = sin.squeeze(0)
         packed_position_embeddings = (cos, sin)
 
-        extra_inputs = {}
+        extra_inputs = {'forward_mode': 'train'}
         if self.use_moe:
             assert packed_und_token_indexes is not None
             if packed_gen_token_indexes is None:
@@ -1024,7 +1046,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         sin = sin.squeeze(0)
         packed_query_position_embeddings = (cos, sin)
 
-        extra_inputs = {}
+        extra_inputs = {'forward_mode': 'inference'}
         if self.use_moe:
             extra_inputs.update(mode=mode)
             if mode == 'gen':
@@ -1084,9 +1106,6 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
                 original_name = name.replace("_moe_gen", "")
                 param.data.copy_(self.state_dict()[original_name].data)
 
-    def get_input_embeddings(self):
-        return self.model.embed_tokens
-
     def set_input_embeddings(self, value):
         self.model.embed_tokens = value
 
@@ -1103,9 +1122,10 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         return self.model
 
     def forward(self, *args, **kwargs):
-        if kwargs.get("mode") == "get_embeddings":
+        forward_mode = kwargs.pop("forward_mode", "inference")
+        if forward_mode == "get_embeddings":
             return self.get_input_embeddings(kwargs['input_ids'])
-        if self.training:
+        elif forward_mode == 'train':
             return self.forward_train(*args, **kwargs)
         else:
             return self.forward_inference(*args, **kwargs)
@@ -1127,6 +1147,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             attention_mask=attention_mask,
             packed_und_token_indexes=packed_und_token_indexes,
             packed_gen_token_indexes=packed_gen_token_indexes,
+            forward_mode='train'
         )
         return outputs
 
@@ -1159,6 +1180,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             mode=mode,
             packed_vae_token_indexes=packed_vae_token_indexes,
             packed_text_indexes=packed_text_indexes,
+            forward_mode='inference'
         )
 
         return outputs

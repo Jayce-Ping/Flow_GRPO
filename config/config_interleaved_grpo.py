@@ -170,16 +170,16 @@ def interleaved_grpo_lora():
 
     config.run_name = "[interleaved-grpo-lora]-8gpu"
     config.pretrained.model = "ByteDance-Seed/BAGEL-7B-MoT"
-    config.dataset = 'dataset/multi-turn-example/'
+    config.dataset = 'dataset/umm/'
     config.use_lora = True
     config.lora_rank = 64
     config.lora_alpha = 128
 
     # Sampling
-    config.sample.num_steps = 15
+    config.sample.num_steps = 10
     config.sample.eval_num_steps = 50
-    config.sample.guidance_scale = 4.0
-    config.sample.eval_guidance_scale = 4.0
+    config.sample.cfg_text_scale = 1.0
+    config.sample.cfg_img_scale = 1.0
     config.sample.noise_level = 1.3
     config.sample.same_latent = False
     config.sample.global_std = False
@@ -188,7 +188,7 @@ def interleaved_grpo_lora():
     config.sample.train_batch_size = 6
     config.sample.num_image_per_prompt = 16
     config.sample.num_batches_per_epoch = int(
-        48 / (gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt)
+        8 / (gpu_number * config.sample.train_batch_size / config.sample.num_image_per_prompt)
     )  # =4 for 8 gpus
     config.sample.test_batch_size = 1
 
@@ -207,7 +207,7 @@ def interleaved_grpo_lora():
 
     # Text GRPO
     config.train.text_clip_range = 0.2
-    config.train.text_beta = 0.01
+    config.train.text_beta = 0
     config.train.text_loss_weight = 1.0
     config.train.image_loss_weight = 1.0
 

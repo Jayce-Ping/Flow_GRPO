@@ -6,7 +6,7 @@
 # Reference: https://intellij-support.jetbrains.com/hc/en-us/articles/206544839
 
 # User-specific stuff
-dataset/umm/apdcephfs_zwfy2/*
+dataset/umm/apdcephfs_zwfy2/
 dataset/umm/*.zip
 dataset/umm/images/
 dataset/umm/stage3_generation/

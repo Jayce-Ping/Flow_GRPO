@@ -50,7 +50,6 @@ class InterleaveInferencer:
             tokenizer=self.tokenizer, 
             new_token_ids=self.new_token_ids,
         )
-
         past_key_values = self.model.forward_cache_update_text(past_key_values, **generation_input)        
         gen_context['kv_lens'] = kv_lens
         gen_context['ropes'] = ropes
@@ -213,10 +212,10 @@ class InterleaveInferencer:
                 noise_level=noise_level,
                 sample_sde_window_size=grpo_config.sample.sde_window_size,
                 sample_sde_window_range=grpo_config.sample.sde_window_range,
-                process_index=getattr(accelerator, 'process_index', 0),
-                device=getattr(accelerator, 'device', 'cuda'),
+                process_index=accelerator.process_index,
+                device=accelerator.device,
             )
-            image = self.decode_image(unpacked_latent[0].float(), image_shape)
+            image = self.decode_image(unpacked_latent[0], image_shape)
             return {
                 "image": image,
                 "all_latents": all_latents,

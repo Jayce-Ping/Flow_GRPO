@@ -9,7 +9,7 @@ setup(
         "torch==2.6.0",
         "torchvision==0.21.0",
         "torchaudio",
-        "transformers==4.40.0",
+        "transformers==4.49.0",
         "accelerate==1.4.0",
         "diffusers==0.33.1", 
         
@@ -40,7 +40,7 @@ setup(
         
         "huggingface-hub==0.29.1",  
         "datasets==3.3.2",
-        "tokenizers==0.19.1",
+        "tokenizers==0.21.4",
         
         "einops==0.8.1",
         "nvidia-ml-py==12.570.86",
