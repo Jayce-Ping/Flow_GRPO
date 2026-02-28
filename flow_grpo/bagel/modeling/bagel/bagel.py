@@ -985,6 +985,7 @@ class Bagel(PreTrainedModel):
         clipfrac = torch.stack(clipfrac).mean().detach()
         clipfrac_gt_one = torch.stack(clipfrac_gt_one).mean().detach()
         clipfrac_lt_one = torch.stack(clipfrac_lt_one).mean().detach()
+        loss = torch.stack(loss_list).mean().detach()
 
         if grpo_config.train.beta > 0:
             kl_loss = torch.stack(kl_loss_list).mean().detach()
